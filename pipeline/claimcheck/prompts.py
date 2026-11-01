@@ -70,79 +70,54 @@ For every statement:
   private individuals or minors, merits of live court cases, attacks/disasters in the first 48 hours, satire;
   "stricter" for political, health, nutrition, science, legal and social-statistics claims; otherwise "normal".
 
+After the statements, write summary: 2-3 plain sentences saying what the video covers, who speaks and the main
+arguments or numbers discussed. Neutral tone, no verdicts, nothing that is not in the statements or the video.
+
 Skip ads, sponsor reads, intros, greetings, small talk and jokes. Return at most 150 statements in the
 order they were said, favouring substantive ones.
 
 {UNTRUSTED_RULE}
 """
 
-PRIORITISE = f"""Rank claims by how much they need fact-checking (check-worthiness), the way professional
-fact-checkers prioritise.
-
-Claims (JSON, index = position):
-{{claims_for_ranking}}
-
-For each claim return:
-- label: checkworthy_factual (specific, verifiable, matters to the public), unimportant_factual
-  (true-or-false but trivial), or not_factual (opinion, prediction, rhetoric).
-- score 0-1: public importance + specificity + potential harm if wrong + likely spread.
-
-Return one entry per index.
-
-{UNTRUSTED_RULE}
-"""
-
-NORMALIZE = f"""Turn this claim into search queries that will find primary-source evidence.
+PLAN = f"""Plan exactly three web searches to fact-check one claim. Do not judge it.
 
 Claim: {{claim_text}}
 Said in: {{video_title}}, around {{start_ts}}, PESTLE area: {{pestle_area}}
 
-query: one self-contained query naming the entity, metric, time period and geography (default India).
-keywords: 2-4 short keyword queries, including the official dataset or ministry name if obvious
-(e.g. "PLFS unemployment rate 2025", "PMAY-G houses completed").
+Return three searches, one for each purpose:
+1. official (scope "tier1"): the primary source, e.g. the ministry, regulator or statistics body. Name the dataset
+   (e.g. "PLFS unemployment rate 2025", "PMAY-G houses completed").
+2. corroborate (scope "open"): an independent source (research body, reputable media) for the same fact.
+3. counter (scope "open"): look for evidence AGAINST the claim: a revision, a different figure, a correction.
+
+Each query is self-contained: entity, metric, time period and geography (default India).
 
 {UNTRUSTED_RULE}
 """
 
-EVIDENCE = f"""You gather evidence for one claim. You do not judge it.
-
-Claim: {{claim_text}}
-Suggested query: {{normalized_query}}
-Previous judge feedback (empty on the first round): {{judge_feedback}}
-
-Steps:
-1. Call search_and_extract with scope "tier1" and the suggested query.
-2. If fewer than 2 relevant sources came back, call search_and_extract with scope "open",
-   using a rephrased query (try the official dataset name).
-3. Stop when you have 2-3 relevant sources or the tool says the limit is reached.
-Then reply with one line: DONE and how many relevant sources you found.
-
-{UNTRUSTED_RULE}
-"""
-
-JUDGE = f"""You are a careful, neutral fact-checker. Decide whether the sources support the claim.
+JUDGE = f"""You are a careful, neutral fact-checker. Please fact-check the claim below using ONLY the sources provided.
+Maintain objectivity and neutrality. If you cannot verify the claim, say so clearly.
 
 Claim: {{claim_text}}
 Said by {{speaker}} in "{{video_title}}" at {{start_ts}}. Verbatim: "{{context_quote}}"
 
-The sources are given below in UNTRUSTED blocks. Use ONLY them; do not use your own memory of facts.
+The sources are given below in UNTRUSTED blocks. Do not use your own memory of facts.
 
-Verdicts:
-- supported: a source states the same fact (normal rounding is fine).
-- misleading: close, but the period, base, scope or framing is wrong or cherry-picked.
-- false: the best source clearly contradicts the claim.
-- outdated: true when said or at some point, but the figure or rule has since changed.
-- disputed: credible sources (e.g. official vs independent) give materially different figures.
-- unverifiable: the sources don't address the claim.
+Return one final tag:
+- TRUE: a source states the same fact (normal rounding is fine). Cite it.
+- FALSE: the best source clearly contradicts the claim. Cite it, explain exactly what is wrong in
+  `explanation`, and give the correct fact in `correction`.
+- UNVERIFIABLE: the sources don't address the claim, conflict with each other, or only partly match
+  (wrong period, base or scope). State the reason in `explanation`.
 
 Rules:
 - citations[].quote must be one sentence copied character-for-character from the source text.
-  If you cannot copy an exact sentence, return unverifiable.
-- reasoning: 2-3 neutral sentences about what the sources state. Never comment on the speaker's
+  If you cannot copy an exact sentence, return UNVERIFIABLE.
+- explanation: 2-3 neutral sentences about what the sources state. Never comment on the speaker's
   intent, honesty or character.
 - Prefer official statistics and peer-reviewed studies over press reports.
 - For health claims, set evidence_grade (rct_or_review, observational, animal_or_lab, expert_opinion).
-- If unsure, lower your confidence; do not guess.
+- If unsure, lower your confidence or return UNVERIFIABLE; do not guess.
 
 {UNTRUSTED_RULE}
 """

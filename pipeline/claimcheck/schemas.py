@@ -69,25 +69,38 @@ class ExtractedClaim(BaseModel):
         return self.statement_type == "factual_claim"
 
 
+class ExtractedStatement(BaseModel):
+    """What the extractor model returns. statement_type is required and the legacy claim_type is absent,
+    so the model can't skip the tag (an optional field was being left out and defaulted to factual_claim)."""
+
+    start_ts: str = Field(description="HH:MM:SS or MM:SS where the statement starts")
+    speaker: str
+    claim: str = Field(description="The statement, self-contained, speaker's numbers kept exactly")
+    context_quote: str = Field(description="The words actually spoken, verbatim, up to ~40 words")
+    statement_type: StatementType = Field(
+        description="Required tag: factual_claim, opinion, forecast, analogy, loaded_language, hearsay or other")
+    tag_note: str = Field(default="", description="Up to 15 words on why it has this tag; empty for plain factual claims")
+    pestle_area: PestleArea
+    topic: str = Field(description="snake_case topic, e.g. gdp, welfare_schemes, nutrition")
+    policy_tier: PolicyTier
+    refers_to_visual: bool = False
+
+
 class ExtractionResult(BaseModel):
-    claims: list[ExtractedClaim]
-
-
-# --- Prioritisation ---------------------------------------------------------------
-class ClaimPriority(BaseModel):
-    index: int
-    label: Literal["checkworthy_factual", "unimportant_factual", "not_factual"]
-    score: float = Field(ge=0, le=1)
-
-
-class PriorityResult(BaseModel):
-    priorities: list[ClaimPriority]
+    claims: list[ExtractedStatement]
+    summary: str = Field(default="", description="2-3 plain sentences on what the video covers, written after the statements")
 
 
 # --- Verification -----------------------------------------------------------------
-class NormalizedQuery(BaseModel):
+class PlannedSearch(BaseModel):
     query: str = Field(description="Self-contained search query: entity, metric, period, geography")
-    keywords: list[str] = Field(description="2-4 short keyword queries")
+    scope: Literal["tier1", "open"] = Field(description="tier1 = official sources for this topic only; open = the wider web")
+    purpose: Literal["official", "corroborate", "counter"] = Field(
+        description="official = primary source; corroborate = independent confirmation; counter = look for evidence against the claim")
+
+
+class SearchPlan(BaseModel):
+    searches: list[PlannedSearch] = Field(description="Exactly 3 searches, one per purpose")
 
 
 class JudgeCitation(BaseModel):
@@ -96,10 +109,31 @@ class JudgeCitation(BaseModel):
     quote: str = Field(description="Exact sentence copied character-for-character from the source text")
 
 
+FinalTag = Literal["TRUE", "FALSE", "UNVERIFIABLE"]
+_TAG_TO_VERDICT: dict[str, str] = {"TRUE": "supported", "FALSE": "false", "UNVERIFIABLE": "unverifiable"}
+
+
+class JudgeOutput(BaseModel):
+    """What the judge model returns: one of three final tags, an explanation and the sources."""
+
+    tag: FinalTag = Field(description="TRUE, FALSE or UNVERIFIABLE")
+    confidence: float = Field(ge=0, le=1)
+    explanation: str = Field(description="2-3 neutral sentences. For FALSE: what exactly is wrong. For UNVERIFIABLE: why it can't be verified")
+    correction: str = Field(default="", description="FALSE only: the correct fact according to the sources, in one sentence. Otherwise empty")
+    evidence_grade: Optional[Literal["rct_or_review", "observational", "animal_or_lab", "expert_opinion", "not_applicable"]] = "not_applicable"
+    citations: list["JudgeCitation"] = Field(default_factory=list)
+
+    def to_result(self) -> "JudgeResult":
+        return JudgeResult(verdict=_TAG_TO_VERDICT[self.tag], confidence=self.confidence, reasoning=self.explanation,  # type: ignore[arg-type]
+                           correction=self.correction if self.tag == "FALSE" else "", evidence_grade=self.evidence_grade,
+                           citations=self.citations)
+
+
 class JudgeResult(BaseModel):
     verdict: Verdict
     confidence: float = Field(ge=0, le=1)
     reasoning: str = Field(description="2-3 neutral sentences describing what the sources state")
+    correction: str = ""
     evidence_grade: Optional[Literal["rct_or_review", "observational", "animal_or_lab", "expert_opinion", "not_applicable"]] = "not_applicable"
     citations: list[JudgeCitation] = Field(default_factory=list)
 
@@ -117,6 +151,8 @@ class FinalVerdict(BaseModel):
     verdict: Verdict
     confidence: float
     reasoning: str
+    correction: str = ""
+    score: Optional[int] = None  # 0-100 truthfulness; None when unverifiable
     evidence_grade: str = "not_applicable"
     citations: list[Citation] = Field(default_factory=list)
     escalated: bool = False
@@ -133,7 +169,6 @@ class ClaimRecord(BaseModel):
     checkworthiness: Optional[float] = None
     not_checked_reason: Optional[str] = None
     verdict: Optional[FinalVerdict] = None
-    auto_verified: bool = False  # picked by the Selector to verify during the run
 
 
 def verification_status(rec: ClaimRecord) -> str:

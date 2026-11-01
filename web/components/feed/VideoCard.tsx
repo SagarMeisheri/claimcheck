@@ -9,7 +9,7 @@ import { YouTubePlayer, type PlayerHandle } from "@/components/watch/YouTubePlay
 import type { Episode, PreviewClaim } from "@/lib/types";
 import { totalStatements } from "@/lib/statements";
 import { clock, timeAgo } from "@/lib/verdicts";
-import { ClaimCarousel } from "./ClaimCarousel";
+import { StatementCarousel } from "./StatementCarousel";
 
 // Only one card plays at a time: starting a video closes whichever card was playing before.
 let closeOther: (() => void) | null = null;
@@ -72,10 +72,13 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
           <Link href={base} className="vcard-title">{ep.title}</Link>
           <div className="vcard-channel">
             <Avatar src={ep.channel_avatar} name={ep.channel_name} size={20} />
-            {ep.channel_id ? <Link href={`/c/${ep.channel_id}`}>{ep.channel_name}</Link> : <span>{ep.channel_name}</span>}
+            {ep.channel_id ? <Link href={`/c/${ep.channel_id}`} className="vcard-channel-name">{ep.channel_name}</Link> : <span>{ep.channel_name}</span>}
           </div>
           {ep.guest && <div className="vcard-guest">with {ep.guest}</div>}
           <div className="vcard-when">{ep.published_at ? timeAgo(ep.published_at) : ""}</div>
+          {checking
+            ? <p className="vcard-blurb"><span className="spinner" aria-hidden="true" /> Reading the video and tagging statements. The title, summary and statements appear as soon as they are ready.</p>
+            : ep.summary && <p className="vcard-blurb">{ep.summary}</p>}
         </div>
       </div>
       {checking ? <CheckProgress videoId={ep.youtube_video_id} compact /> : <VerdictStrip tally={ep.tally} checking={false} />}
@@ -89,10 +92,10 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
               : "No checked claims yet."}
         {!!ep.pending_count && <span className="meta">. {ep.pending_count} with a reviewer</span>}
       </p>
-      {!checking && (
-        <ClaimCarousel videoId={ep.youtube_video_id} claims={ep.preview_claims ?? []} verifiedCount={checked} counts={ep.statement_counts ?? {}}
-                       reviewing={ep.pending_count ?? 0} videoPending={ep.video_pending}
-                       activeId={activeId} onPlay={(c: PreviewClaim) => play(c.start_s, c.id)} />
+      {(!checking || (ep.preview_claims?.length ?? 0) > 0) && (
+        <StatementCarousel videoId={ep.youtube_video_id} statements={ep.preview_claims ?? []} verifiedCount={checked}
+                           counts={ep.statement_counts ?? {}} videoPending={ep.video_pending}
+                           activeId={activeId} onPlay={(c: PreviewClaim) => play(c.start_s, c.id)} />
       )}
     </article>
   );

@@ -16,8 +16,8 @@ export default function Method() {
       <h2>The steps</h2>
       <ol>
         <li>We decide whether a video is worth analysing: how much substantive public-interest content it has, and who is speaking.</li>
-        <li>The AI breaks the video into statements, each with the moment it was said, and tags each one: factual claim, opinion, forecast, hearsay, analogy or loaded language. Only factual claims can be checked against sources; the other tags help you see how an argument is built.</li>
-        <li>The few most important factual claims (about four a video) are verified straight away. Any other factual claim can be verified by pressing Verify. A verified claim is saved and shown to everyone, so it&apos;s only checked once.</li>
+        <li>The AI breaks the video into statements, each with the moment it was said, and tags each one: claim, opinion, forecast, hearsay, analogy or loaded language. Only claims can be checked against sources; the other tags help you see how an argument is built.</li>
+        <li>Nothing is verified automatically. Press Verify on any claim to check it against sources. A verified claim is saved and shown to everyone, so it&apos;s only checked once.</li>
         <li>Verification searches official sources first: RBI, MoSPI, PIB, the Election Commission, PubMed and others. A second AI model compares the claim with the sources and must quote the exact sentence it relied on.</li>
         <li>Code then checks the work: the quote must really appear in the source, the numbers must match, and a False verdict needs a strong source, high confidence and a second independent check.</li>
         <li>A person reviews every False verdict, and every Misleading or Disputed verdict on a political claim, before it appears, including ones that viewers asked for.</li>

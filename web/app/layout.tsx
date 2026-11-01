@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "ClaimCheck", template: "%s | ClaimCheck" },
-  description: "Every factual claim in India's big political and money videos, checked against official sources, with the timestamp.",
+  description: "Every claim in India's big political and money videos, checked against official sources, with the timestamp.",
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
 };
 

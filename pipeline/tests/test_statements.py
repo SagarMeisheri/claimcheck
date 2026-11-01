@@ -1,4 +1,4 @@
-"""Statement tagging, auto-verify selection and on-demand verification (no keys or network needed)."""
+"""Statement tagging and on-demand verification (no keys or network needed)."""
 
 import asyncio
 
@@ -6,7 +6,7 @@ import pytest
 
 from claimcheck.agents import on_demand
 from claimcheck.agents.on_demand import precheck, record_from_row, run_claim_verification
-from claimcheck.agents.stages import classify_statement, pick_auto_verify
+from claimcheck.agents.stages import classify_statement
 from claimcheck.config import Settings
 from claimcheck.context import BudgetExceeded, get_context
 from claimcheck.policy import load_policy
@@ -46,34 +46,11 @@ def test_never_topics_are_redacted_for_every_type():
     assert classify_statement(stmt(stype="opinion", tier="never"), POLICY)[1] == "outside_policy"
 
 
-# --- Auto-verify selection -------------------------------------------------------------------
 def _records(n):
     return [ClaimRecord(index=i, start_s=i * 60, claim=stmt(f"claim {i}"), effective_tier="normal") for i in range(n)]
 
 
-def test_auto_verify_picks_only_the_top_few():
-    recs = _records(10)
-    recs[9].not_checked_reason = "opinion"
-    pri = [{"index": i, "label": "checkworthy_factual", "score": 0.4 + i * 0.05} for i in range(10)]
-    pri[8]["label"] = "unimportant_factual"
-    selected = pick_auto_verify(recs, pri, 0.35, 4)
-    assert selected == [7, 6, 5, 4]  # 9 is an opinion, 8 isn't check-worthy
-    assert [r.auto_verified for r in recs].count(True) == 4
-    # Factual claims that weren't picked stay verifiable on request.
-    assert all(r.not_checked_reason is None for r in recs[:9])
-    assert verification_status(recs[0]) == "not_requested"
-    assert verification_status(recs[9]) == "not_eligible"
-
-
-def test_auto_verify_respects_min_score_and_zero_limit():
-    recs = _records(3)
-    pri = [{"index": i, "label": "checkworthy_factual", "score": 0.2} for i in range(3)]
-    assert pick_auto_verify(recs, pri, 0.35, 4) == []
-    assert pick_auto_verify(_records(3), [{"index": 0, "label": "checkworthy_factual", "score": 0.9}], 0.35, 0) == []
-
-
-def test_policy_auto_verify_is_small():
-    assert 3 <= POLICY["claims"]["auto_verify"] <= 5
+def test_policy_only_verifies_factual_claims():
     assert POLICY["on_demand"]["statement_types"] == ["factual_claim"]
 
 
@@ -91,7 +68,7 @@ def test_verification_status_mapping():
 
 
 # --- On-demand precheck ----------------------------------------------------------------------
-SETTINGS = Settings()
+SETTINGS = Settings(max_cost_usd_per_episode=3.0)  # pinned: a local .env must not change the tests
 
 
 def row(**kw):
@@ -113,7 +90,7 @@ def test_precheck_allows_queued_factual_claim():
 
 
 @pytest.mark.parametrize("kw, words", [
-    ({"statement_type": "opinion"}, "Only factual claims"),
+    ({"statement_type": "opinion"}, "Only claims"),
     ({"policy_tier": "never"}, "content policy"),
     ({"verification_status": "verified"}, "Already verified"),
     ({"verification_status": "awaiting_review"}, "reviewer"),
@@ -248,3 +225,82 @@ def test_runs_for_one_video_are_serialised(monkeypatch):
                              run_claim_verification("c2", settings=SETTINGS, store=store))
     asyncio.run(both())
     assert active["max"] == 1
+
+
+def test_extractor_schema_requires_statement_type():
+    from claimcheck.schemas import ExtractionResult
+    item = ExtractionResult.model_json_schema()["$defs"]["ExtractedStatement"]
+    assert "statement_type" in item["required"] and "claim_type" not in item["properties"]
+
+
+# --- Streaming ------------------------------------------------------------------------------
+def _stmt_json(text, stype="factual_claim", ts="01:00"):
+    import json
+    return json.dumps({"start_ts": ts, "speaker": "Host", "claim": text, "context_quote": text, "statement_type": stype,
+                       "tag_note": "", "pestle_area": "economic", "topic": "gdp", "policy_tier": "normal", "refers_to_visual": False})
+
+
+def test_object_stream_finds_statements_in_any_chunking():
+    from claimcheck.agents.streaming import ObjectStream
+    doc = '{"claims": [' + ", ".join(_stmt_json(f'a "quoted" {{brace}} [x] \\ claim {i}') for i in range(3)) + '], "summary": "it [is] {fine}"}'
+    for size in (1, 7, 50, len(doc)):
+        s = ObjectStream()
+        got = []
+        for k in range(0, len(doc), size):
+            got += s.feed(doc[k:k + size])
+        assert [g["claim"] for g in got] == [f'a "quoted" {{brace}} [x] \\ claim {i}' for i in range(3)], size
+
+
+def test_object_stream_waits_for_the_closing_brace():
+    from claimcheck.agents.streaming import ObjectStream
+    s = ObjectStream()
+    assert s.feed('{"claims": [' + _stmt_json("one") + ", " + _stmt_json("two")[:40]) == [__import__("json").loads(_stmt_json("one"))]
+
+
+def test_streamer_saves_each_statement_once_and_tags_it():
+    from types import SimpleNamespace as NS
+    from claimcheck.agents.streaming import StatementStreamer
+
+    saved, updates = [], []
+
+    class Store:
+        async def save_statement(self, episode_id, rec): saved.append(rec)
+        async def update_episode(self, episode_id, fields): updates.append(fields)
+
+    ec = NS(episode_id="e1", policy=POLICY, store=Store(), duration_s=600, log=lambda *a, **k: None)
+
+    def ev(text, partial=True, author="extractor"):
+        return NS(author=author, partial=partial, content=NS(parts=[NS(text=text, thought=False)]))
+
+    doc = '{"claims": [' + _stmt_json("GDP grew 7%") + ", " + _stmt_json("this is ridiculous", "opinion", "05:00") + "]}"
+
+    async def go():
+        st = StatementStreamer(ec)
+        for k in range(0, len(doc), 25):
+            await st.on_event(ev(doc[k:k + 25]))
+        await st.on_event(ev(doc, partial=False))        # the accumulated final reply is ignored
+        await st.on_event(ev('{"claims": [' + _stmt_json("x") + "]}", author="triage"))  # other agents too
+        await st.finish()
+    asyncio.run(go())
+    assert [r.claim.statement_type for r in saved] == ["factual_claim", "opinion"]
+    assert [r.index for r in saved] == [0, 1] and saved[1].not_checked_reason == "opinion"
+    assert [u for u in updates if "statement_counts" in u][-1]["statement_counts"] == {"factual_claim": 1, "opinion": 1}
+
+
+def test_budget_counts_streamed_usage_once():
+    from types import SimpleNamespace as NS
+    from claimcheck.context import Budget
+    from claimcheck.guardrails import budget as b
+    from claimcheck.guardrails.budget import BudgetPlugin
+
+    ec = NS(budget=Budget(cap_usd=10), settings=NS(prices={"x": (1.0, 1.0)}), log=lambda *a, **k: None)
+    b.get_context = lambda: ec  # type: ignore[assignment]
+    resp = lambda partial, out: NS(partial=partial, model_version="x", usage_metadata=NS(prompt_token_count=1000, candidates_token_count=out, thoughts_token_count=0))
+    plugin, cb = BudgetPlugin(), NS(invocation_id="i", agent_name="a")
+
+    async def go():
+        for out in (10, 20, 30):  # running totals from three partial pieces
+            await plugin.after_model_callback(callback_context=cb, llm_response=resp(True, out))
+        await plugin.after_model_callback(callback_context=cb, llm_response=resp(False, 30))
+    asyncio.run(go())
+    assert (ec.budget.tokens_in, ec.budget.tokens_out) == (1000, 30)

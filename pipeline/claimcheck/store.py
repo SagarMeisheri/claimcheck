@@ -25,9 +25,12 @@ def ts_to_seconds(ts: str) -> int:
 
 class Store(Protocol):
     async def get_channel(self, youtube_channel_id: str) -> Optional[dict[str, Any]]: ...
+    async def add_channel(self, row: dict[str, Any]) -> Optional[dict[str, Any]]: ...
     async def create_episode(self, row: dict[str, Any]) -> str: ...
     async def update_episode(self, episode_id: str, fields: dict[str, Any]) -> None: ...
     async def match_verdict(self, embedding: list[float], threshold: float, max_age_days: int) -> Optional[tuple[str, FinalVerdict]]: ...
+    async def save_statement(self, episode_id: str, rec: ClaimRecord) -> None: ...
+    async def clear_unverified_statements(self, episode_id: str) -> None: ...
     async def save_results(self, episode_id: str, claims: list[ClaimRecord], embeddings: dict[int, list[float]], cached_ids: dict[int, str], fast_model: str, judge_model: str) -> None: ...
     async def save_guardrail_events(self, episode_id: str, events: list[GuardrailEvent]) -> None: ...
     # On-demand verification of one claim
@@ -50,6 +53,11 @@ class SupabaseStore:
     async def get_channel(self, youtube_channel_id: str) -> Optional[dict[str, Any]]:
         r = self.db.table("channels").select("*").eq("youtube_channel_id", youtube_channel_id).limit(1).execute()
         return r.data[0] if r.data else None
+
+    async def add_channel(self, row: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Creates a channel row (a no-op if it already exists) and returns it."""
+        self.db.table("channels").upsert(row, on_conflict="youtube_channel_id", ignore_duplicates=True).execute()
+        return await self.get_channel(row["youtube_channel_id"])
 
     async def create_episode(self, row: dict[str, Any]) -> str:
         r = self.db.table("episodes").upsert(row, on_conflict="youtube_video_id").execute()
@@ -76,6 +84,7 @@ class SupabaseStore:
         now = dt.datetime.now(dt.timezone.utc)
         vrow = {"verdict": v.verdict, "confidence": v.confidence, "reasoning": v.reasoning,
                 "evidence_grade": v.evidence_grade, "model": judge_model, "escalated": v.escalated,
+                "score": v.score, "correction": v.correction or None,
                 "review_status": v.review_status, "downgrades": v.downgrades,
                 "recheck_after": (now + dt.timedelta(days=90)).isoformat()}
         verdict_id = self.db.table("verdicts").insert(vrow).execute().data[0]["id"]
@@ -88,20 +97,32 @@ class SupabaseStore:
             verdict_id = cached_ids.get(rec.index)
             if rec.verdict is not None and verdict_id is None:
                 verdict_id = self._insert_verdict(rec.verdict, judge_model)
-            c = rec.claim
-            # Never-check claims (e.g. generalisations about a community) are not republished, even as text.
-            hidden = rec.not_checked_reason == "outside_policy"
-            self.db.table("claims").insert({
-                "episode_id": episode_id, "idx": rec.index, "start_s": rec.start_s, "speaker": c.speaker,
-                "claim_text": "[Not shown: outside the content policy]" if hidden else c.claim,
-                "context_quote": None if hidden else c.context_quote, "pestle_area": c.pestle_area,
-                "topic": c.topic, "claim_type": c.claim_type, "policy_tier": rec.effective_tier,
-                "checkworthiness": rec.checkworthiness, "not_checked_reason": rec.not_checked_reason,
-                "refers_to_visual": c.refers_to_visual, "embedding": embeddings.get(rec.index),
-                "verdict_id": verdict_id, "statement_type": c.statement_type,
-                "tag_note": None if hidden else (c.tag_note or None), "verification_status": verification_status(rec),
-                "verify_error": "Couldn't be verified during the first pass. Try again." if verification_status(rec) == "failed" else None,
-            }).execute()
+            self._upsert_claim(episode_id, rec, verdict_id, embeddings.get(rec.index))
+
+    def _upsert_claim(self, episode_id: str, rec: ClaimRecord, verdict_id: Optional[str], embedding: Optional[list[float]]) -> None:
+        """Inserts a claim row unless the (episode, idx) row already exists (it may have been streamed earlier)."""
+        c = rec.claim
+        # Never-check claims (e.g. generalisations about a community) are not republished, even as text.
+        hidden = rec.not_checked_reason == "outside_policy"
+        self.db.table("claims").upsert({
+            "episode_id": episode_id, "idx": rec.index, "start_s": rec.start_s, "speaker": c.speaker,
+            "claim_text": "[Not shown: outside the content policy]" if hidden else c.claim,
+            "context_quote": None if hidden else c.context_quote, "pestle_area": c.pestle_area,
+            "topic": c.topic, "claim_type": c.claim_type, "policy_tier": rec.effective_tier,
+            "checkworthiness": rec.checkworthiness, "not_checked_reason": rec.not_checked_reason,
+            "refers_to_visual": c.refers_to_visual, "embedding": embedding,
+            "verdict_id": verdict_id, "statement_type": c.statement_type,
+            "tag_note": None if hidden else (c.tag_note or None), "verification_status": verification_status(rec),
+            "verify_error": "Couldn't be verified during the first pass. Try again." if verification_status(rec) == "failed" else None,
+        }, on_conflict="episode_id,idx", ignore_duplicates=True).execute()
+
+    async def save_statement(self, episode_id, rec):
+        """Saves one statement while the extractor is still running (no verdict yet)."""
+        self._upsert_claim(episode_id, rec, None, None)
+
+    async def clear_unverified_statements(self, episode_id):
+        """Before a (re)run: drops statements left by an earlier attempt, keeping any that have a verdict."""
+        self.db.table("claims").delete().eq("episode_id", episode_id).is_("verdict_id", "null").execute()
 
     # --- On-demand verification ------------------------------------------------------------------
 

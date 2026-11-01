@@ -27,7 +27,7 @@ export async function previewVideo(url: string): Promise<Preview | null> {
   return { videoId, title, channel, alreadyChecked };
 }
 
-const DAILY_LIMIT = 5;
+const DAILY_LIMIT = Number(process.env.SUBMIT_PER_PERSON_PER_DAY ?? 5);
 
 async function submitterHash(): Promise<string> {
   const h = await headers();
@@ -55,8 +55,11 @@ export async function submitVideo(_prev: ActionResult | null, form: FormData): P
     return { ok: false, message: `You've reached today's limit of ${DAILY_LIMIT} videos. Try again tomorrow.` };
   }
   await db.from("submissions").insert({ submitter: who, youtube_video_id: videoId });
-  const ep = await db.from("episodes").upsert({ youtube_video_id: videoId, status: "queued", submitted_by: who },
-    { onConflict: "youtube_video_id" }).select("id").single();
+  // Best-effort title from YouTube's oEmbed, so the home page shows the video straight away; the pipeline
+  // fills in the rest (length, channel, publish date) as soon as its metadata call returns.
+  const known = await previewVideo(url).catch(() => null);
+  const ep = await db.from("episodes").upsert({ youtube_video_id: videoId, status: "queued", submitted_by: who,
+    ...(known?.title ? { title: known.title } : {}) }, { onConflict: "youtube_video_id" }).select("id").single();
   if (ep.error) return { ok: false, message: "Couldn't queue the video. Try again in a minute." };
 
   const res = await fetch(`${process.env.PIPELINE_URL}/episodes`, {
@@ -64,6 +67,7 @@ export async function submitVideo(_prev: ActionResult | null, form: FormData): P
     headers: { "content-type": "application/json", "x-pipeline-secret": process.env.PIPELINE_SHARED_SECRET ?? "" },
     body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoId}`, episode_id: ep.data.id, submitted_by: who }),
   }).catch(() => null);
+  revalidatePath("/");
   if (!res || !res.ok) {
     return { ok: false, message: "The checking service didn't respond. The video is saved and will be retried." };
   }
@@ -108,7 +112,7 @@ export async function requestVerification(claimId: string): Promise<VerifyResult
   if ((status === "queued" || status === "verifying") && !stale) return { ok: true, status, message: "Already being verified." };
   if (c.statement_type !== "factual_claim" || c.policy_tier === "never" || c.not_checked_reason === "outside_policy"
       || status === "not_eligible") {
-    return { ok: false, status, message: "Only factual claims can be verified. Opinions, forecasts and rhetoric are tagged instead." };
+    return { ok: false, status, message: "Only claims can be verified. Opinions, forecasts and rhetoric are tagged instead." };
   }
   if (!["done", "in_review"].includes((c as any).episodes?.status)) {
     return { ok: false, status, message: "This video is still being analysed. Try again when it's finished." };

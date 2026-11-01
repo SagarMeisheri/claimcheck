@@ -64,6 +64,7 @@ class EpisodeContext:
     cached_ids: dict[int, str] = field(default_factory=dict)
     # Returns the plugin list for each ADK runner (budget, Model Armor, ...)
     plugins_factory: Callable[[], list] = field(default=lambda: [])
+    duration_s: int = 0  # video length, used to turn a statement's timestamp into progress
 
     def log(self, stage: str, rule: str, action: str, detail: str = "", claim_index: Optional[int] = None) -> None:
         self.events.append(GuardrailEvent(stage=stage, rule=rule, action=action, detail=detail[:500], claim_index=claim_index))

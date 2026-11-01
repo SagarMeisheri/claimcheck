@@ -1,6 +1,7 @@
-"""Evidence tool used by the EvidenceAgent, plus escalation via Parallel's Task API.
+"""One web search for one claim, via Parallel. The verifier workflow runs up to three of these at once.
 
-Guardrails inside the tool (in addition to tool_limits.before_evidence_tool):
+The model only proposes a query and a scope ("tier1" or "open"); the number of searches, domains, limits and
+blocklists are decided in code. Guardrails in here:
 - domains come from policy.yaml (tier-1 list per PESTLE area, or open web minus blocklist)
 - blocklisted results are dropped even if returned
 - fetched text is screened for prompt injection and wrapped as untrusted data
@@ -12,9 +13,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from google.adk.tools.tool_context import ToolContext
-from pydantic import BaseModel
-
 from ..context import get_context
 from ..guardrails.injection import screen_text
 from ..policy import blocklist, source_tier, tier1_domains_for
@@ -23,44 +21,38 @@ MAX_DOC_CHARS = 15000
 TOP_EXTRACT = 3
 
 
-class _EscalationSources(BaseModel):
-    urls: list[str]
-
-
 def _client(settings):
     from parallel import Parallel
 
     return Parallel(api_key=settings.parallel_api_key)
 
 
-async def search_and_extract(query: str, scope: str, tool_context: ToolContext) -> dict[str, Any]:
-    """Searches the web for evidence about the current claim and fetches the top sources.
+async def run_search(item: dict[str, Any]) -> dict[str, Any]:
+    """Searches the web for evidence about one claim and fetches the top sources into ctx.evidence.
 
-    Args:
-      query: A self-contained search query (entity, metric, period, place).
-      scope: "tier1" to search only official sources for this topic first; "open" to search the wider web.
-
-    Returns:
-      A short list of sources found (url, title, tier, publish_date, excerpt). Full text is passed to the judge separately.
+    item: {claim_key, claim_index, claim_text, pestle_area, query, scope, purpose}.
+    Never raises: a failed search comes back as {"error": ...} so the other searches still count.
     """
     ctx = get_context()
-    st = tool_context.state
-    claim_key = st["claim_key"]
-    area = st.get("pestle_area", "economic")
-    claim_index = st.get("claim_index")
+    claim_key, claim_index = item["claim_key"], item.get("claim_index")
+    scope, query = item["scope"], item["query"]
     if scope == "tier1":
-        source_policy = {"include_domains": tier1_domains_for(area, ctx.policy)}
+        source_policy = {"include_domains": tier1_domains_for(item.get("pestle_area", "economic"), ctx.policy)}
     else:
         source_policy = {"exclude_domains": blocklist(ctx.policy)}
 
     already = ctx.evidence.setdefault(claim_key, {})
-    docs = await asyncio.wait_for(
-        _search_extract_live(query, st.get("claim_text", ""), source_policy, set(already)),
-        timeout=ctx.settings.tool_timeout_s,
-    )
+    try:
+        docs = await asyncio.wait_for(
+            _search_extract_live(query, item.get("claim_text", ""), source_policy, set(already)),
+            timeout=ctx.settings.tool_timeout_s,
+        )
+    except Exception as e:  # timeout, API error: record it and let the other searches carry on
+        ctx.log("evidence", "search_failed", "skipped", f"{type(e).__name__}: {e}"[:200], claim_index)
+        return {"scope": scope, "purpose": item.get("purpose"), "sources_found": 0, "error": type(e).__name__}
     ctx.budget.add(ctx.settings.search_cost_usd + ctx.settings.extract_cost_usd * len(docs))
 
-    found = []
+    found = 0
     for d in docs:
         tier = source_tier(d["url"], ctx.policy)
         if tier == 9:
@@ -69,11 +61,10 @@ async def search_and_extract(query: str, scope: str, tool_context: ToolContext) 
         text, hits = screen_text(d.get("text", ""))
         if hits:
             ctx.log("evidence", "prompt_injection_in_source", "flagged", f"{d['url']}: {hits[0]}", claim_index)
-        text = text[:MAX_DOC_CHARS]
-        already[d["url"]] = {"title": d.get("title", ""), "text": text, "tier": tier, "publish_date": d.get("publish_date")}
-        found.append({"url": d["url"], "title": d.get("title", ""), "tier": tier,
-                      "publish_date": d.get("publish_date"), "excerpt": text[:800]})
-    return {"scope": scope, "sources_found": len(found), "sources": found}
+        already[d["url"]] = {"title": d.get("title", ""), "text": text[:MAX_DOC_CHARS], "tier": tier,
+                             "publish_date": d.get("publish_date")}
+        found += 1
+    return {"scope": scope, "purpose": item.get("purpose"), "sources_found": found}
 
 
 async def _search_extract_live(query: str, objective: str, source_policy: dict, skip: set[str]) -> list[dict[str, Any]]:
@@ -98,40 +89,3 @@ async def _search_extract_live(query: str, objective: str, source_policy: dict, 
         return out
 
     return await asyncio.to_thread(_run)
-
-
-async def escalate_sources(claim_key: str, claim_text: str) -> int:
-    """Asks Parallel's Task API (core) for better primary sources, then extracts them into the claim's evidence.
-
-    Returns the number of new documents added.
-    """
-    ctx = get_context()
-    client = _client(ctx.settings)
-
-    def _run() -> list[dict[str, Any]]:
-        run = client.task_run.execute(
-            input=("List up to 3 URLs of primary sources (government statistics, official documents, "
-                   f"peer-reviewed studies) that directly confirm or contradict this claim: {claim_text}"),
-            processor="core",
-            output=_EscalationSources,
-        )
-        urls = [u for u in run.output.parsed.urls if source_tier(u, ctx.policy) != 9][:3]
-        if not urls:
-            return []
-        ext = client.extract(urls=urls, objective=claim_text, advanced_settings={"full_content": True})
-        return [{"url": r.url, "title": r.title or "", "text": r.full_content or "\n".join(r.excerpts),
-                 "publish_date": r.publish_date} for r in ext.results]
-
-    docs = await asyncio.wait_for(asyncio.to_thread(_run), timeout=600)
-    ctx.budget.add(ctx.settings.task_core_cost_usd + ctx.settings.extract_cost_usd * len(docs))
-    bucket = ctx.evidence.setdefault(claim_key, {})
-    added = 0
-    for d in docs:
-        text, hits = screen_text(d["text"])
-        if hits:
-            ctx.log("escalation", "prompt_injection_in_source", "flagged", d["url"])
-        if d["url"] not in bucket:
-            bucket[d["url"]] = {"title": d["title"], "text": text[:MAX_DOC_CHARS],
-                                "tier": source_tier(d["url"], ctx.policy), "publish_date": d["publish_date"]}
-            added += 1
-    return added
