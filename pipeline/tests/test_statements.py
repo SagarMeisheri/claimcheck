@@ -231,3 +231,76 @@ def test_extractor_schema_requires_statement_type():
     from claimcheck.schemas import ExtractionResult
     item = ExtractionResult.model_json_schema()["$defs"]["ExtractedStatement"]
     assert "statement_type" in item["required"] and "claim_type" not in item["properties"]
+
+
+# --- Streaming ------------------------------------------------------------------------------
+def _stmt_json(text, stype="factual_claim", ts="01:00"):
+    import json
+    return json.dumps({"start_ts": ts, "speaker": "Host", "claim": text, "context_quote": text, "statement_type": stype,
+                       "tag_note": "", "pestle_area": "economic", "topic": "gdp", "policy_tier": "normal", "refers_to_visual": False})
+
+
+def test_object_stream_finds_statements_in_any_chunking():
+    from claimcheck.agents.streaming import ObjectStream
+    doc = '{"claims": [' + ", ".join(_stmt_json(f'a "quoted" {{brace}} [x] \\ claim {i}') for i in range(3)) + '], "summary": "it [is] {fine}"}'
+    for size in (1, 7, 50, len(doc)):
+        s = ObjectStream()
+        got = []
+        for k in range(0, len(doc), size):
+            got += s.feed(doc[k:k + size])
+        assert [g["claim"] for g in got] == [f'a "quoted" {{brace}} [x] \\ claim {i}' for i in range(3)], size
+
+
+def test_object_stream_waits_for_the_closing_brace():
+    from claimcheck.agents.streaming import ObjectStream
+    s = ObjectStream()
+    assert s.feed('{"claims": [' + _stmt_json("one") + ", " + _stmt_json("two")[:40]) == [__import__("json").loads(_stmt_json("one"))]
+
+
+def test_streamer_saves_each_statement_once_and_tags_it():
+    from types import SimpleNamespace as NS
+    from claimcheck.agents.streaming import StatementStreamer
+
+    saved, updates = [], []
+
+    class Store:
+        async def save_statement(self, episode_id, rec): saved.append(rec)
+        async def update_episode(self, episode_id, fields): updates.append(fields)
+
+    ec = NS(episode_id="e1", policy=POLICY, store=Store(), duration_s=600, log=lambda *a, **k: None)
+
+    def ev(text, partial=True, author="extractor"):
+        return NS(author=author, partial=partial, content=NS(parts=[NS(text=text, thought=False)]))
+
+    doc = '{"claims": [' + _stmt_json("GDP grew 7%") + ", " + _stmt_json("this is ridiculous", "opinion", "05:00") + "]}"
+
+    async def go():
+        st = StatementStreamer(ec)
+        for k in range(0, len(doc), 25):
+            await st.on_event(ev(doc[k:k + 25]))
+        await st.on_event(ev(doc, partial=False))        # the accumulated final reply is ignored
+        await st.on_event(ev('{"claims": [' + _stmt_json("x") + "]}", author="triage"))  # other agents too
+        await st.finish()
+    asyncio.run(go())
+    assert [r.claim.statement_type for r in saved] == ["factual_claim", "opinion"]
+    assert [r.index for r in saved] == [0, 1] and saved[1].not_checked_reason == "opinion"
+    assert [u for u in updates if "statement_counts" in u][-1]["statement_counts"] == {"factual_claim": 1, "opinion": 1}
+
+
+def test_budget_counts_streamed_usage_once():
+    from types import SimpleNamespace as NS
+    from claimcheck.context import Budget
+    from claimcheck.guardrails import budget as b
+    from claimcheck.guardrails.budget import BudgetPlugin
+
+    ec = NS(budget=Budget(cap_usd=10), settings=NS(prices={"x": (1.0, 1.0)}), log=lambda *a, **k: None)
+    b.get_context = lambda: ec  # type: ignore[assignment]
+    resp = lambda partial, out: NS(partial=partial, model_version="x", usage_metadata=NS(prompt_token_count=1000, candidates_token_count=out, thoughts_token_count=0))
+    plugin, cb = BudgetPlugin(), NS(invocation_id="i", agent_name="a")
+
+    async def go():
+        for out in (10, 20, 30):  # running totals from three partial pieces
+            await plugin.after_model_callback(callback_context=cb, llm_response=resp(True, out))
+        await plugin.after_model_callback(callback_context=cb, llm_response=resp(False, 30))
+    asyncio.run(go())
+    assert (ec.budget.tokens_in, ec.budget.tokens_out) == (1000, 30)

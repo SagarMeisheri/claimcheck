@@ -38,8 +38,9 @@ export function TypeTag({ type }: { type: string }) {
  * A tagged statement without a public verdict: an opinion, forecast, hearsay and so on, or a factual
  * claim nobody has verified yet (with a Verify button).
  */
-export function StatementCard({ claim: c, videoId, active, phase, canWatch, onSeek, onWatch, onKeepWatching }: {
+export function StatementCard({ claim: c, videoId, active, phase, canWatch, canVerify = true, onSeek, onWatch, onKeepWatching }: {
   claim: Claim; videoId: string; active: boolean; phase: CardPhase; canWatch: boolean;
+  canVerify?: boolean; // false while the video is still being analysed
   onSeek(): void; onWatch(): void; onKeepWatching(): void;
 }) {
   const hidden = c.not_checked_reason === "outside_policy"; // text and moment stay unpublished
@@ -57,7 +58,7 @@ export function StatementCard({ claim: c, videoId, active, phase, canWatch, onSe
       </div>
       <p className="cc-claim">{hidden ? "A statement outside our content policy" : `“${c.claim_text}”`}</p>
       {!hidden && c.tag_note && <p className="meta stmt-note">{c.tag_note}</p>}
-      {verifiable && (canRequestVerify(c) || c.verification_status === "queued" || c.verification_status === "verifying"
+      {verifiable && canVerify && (canRequestVerify(c) || c.verification_status === "queued" || c.verification_status === "verifying"
         || c.verification_status === "awaiting_review")
         && <VerifyButton claimId={c.id} status={c.verification_status} error={c.verify_error} />}
       {!hidden && (

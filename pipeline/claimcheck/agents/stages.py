@@ -43,6 +43,29 @@ def classify_statement(claim: ExtractedClaim, policy: dict[str, Any]) -> tuple[s
     return tier, None
 
 
+def build_record(i: int, raw: dict[str, Any], ec: Any, log: bool = True) -> Optional[ClaimRecord]:
+    """One extracted statement -> ClaimRecord, with the content policy applied in code. None if it is malformed.
+
+    Shared by the ClaimFilter stage and the streaming saver, so a statement is treated the same either way.
+    The streamer passes log=False: ClaimFilter logs the guardrail events when it runs over the final list.
+    """
+    try:
+        claim = ExtractedClaim.model_validate(raw)
+    except Exception as e:  # schema guardrail: malformed claims are dropped, not guessed at
+        if log:
+            ec.log("extract", "claim_schema_invalid", "skipped", str(e)[:200], i)
+        return None
+    tier, reason = classify_statement(claim, ec.policy)
+    rec = ClaimRecord(index=i, start_s=ts_to_seconds(claim.start_ts), claim=claim, effective_tier=tier, not_checked_reason=reason)
+    if not log:
+        return rec
+    if reason == "outside_policy":
+        ec.log("policy", "never_check_tier", "skipped", claim.topic, i)
+    if tier != claim.policy_tier and tier != "never":
+        ec.log("policy", "tier_raised_in_code", "flagged", f"{claim.policy_tier} -> {tier} ({claim.topic})", i)
+    return rec
+
+
 class IngestGate(BaseAgent):
     """Stage 1: fetch metadata and reject invalid input before any model call."""
 
@@ -108,19 +131,9 @@ class ClaimFilter(BaseAgent):
             ec.log("extract", "max_extracted", "skipped", f"{len(raw) - cap} claims over cap dropped")
         records: list[dict[str, Any]] = []
         for i, c in enumerate(raw[:cap]):
-            try:
-                claim = ExtractedClaim.model_validate(c)
-            except Exception as e:  # schema guardrail: malformed claims are dropped, not guessed at
-                ec.log("extract", "claim_schema_invalid", "skipped", str(e)[:200], i)
-                continue
-            tier, rec_reason = classify_statement(claim, ec.policy)
-            rec = ClaimRecord(index=i, start_s=ts_to_seconds(claim.start_ts), claim=claim, effective_tier=tier,
-                              not_checked_reason=rec_reason)
-            if rec_reason == "outside_policy":
-                ec.log("policy", "never_check_tier", "skipped", claim.topic, i)
-            if tier != claim.policy_tier and tier != "never":
-                ec.log("policy", "tier_raised_in_code", "flagged", f"{claim.policy_tier} -> {tier} ({claim.topic})", i)
-            records.append(rec.model_dump())
+            rec = build_record(i, c, ec)
+            if rec is not None:
+                records.append(rec.model_dump())
         verifiable = sum(1 for r in records if r["not_checked_reason"] is None)
         yield _event(self, ctx, {"claim_records": records}, f"{verifiable} of {len(records)} statements are verifiable factual claims")
 

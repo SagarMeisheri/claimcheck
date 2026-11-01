@@ -230,7 +230,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
       return (
         <StatementCard key={c.id} claim={c} videoId={ep.youtube_video_id} active={isActive}
           phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"} canWatch={!ep.video_pending}
-          onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
+          canVerify={!checking} onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
           onKeepWatching={() => { setClip(null); setCountdown(null); setAutoAll(false); setFollowing(true); setScrollFollow(true); player.current?.play(); }} />
       );
     }
@@ -345,7 +345,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
           {viewList.length === 0
             ? <p className="meta pad">{view === "verified" ? "No claims verified yet. Pick a factual claim and press Verify."
                 : view !== "all" ? `No ${STATEMENT_TYPES[view].plural} in this video.`
-                : checking ? "Statements will appear here when the first pass is done." : "No statements for this video."}</p>
+                : checking ? "Statements appear here as they are found." : "No statements for this video."}</p>
             : viewList.map(card)}
         </div>
 

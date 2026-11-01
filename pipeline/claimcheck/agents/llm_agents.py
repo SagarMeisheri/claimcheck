@@ -98,9 +98,13 @@ def triage_agent(s: Settings) -> LlmAgent:
 
 
 def extractor_agent(s: Settings) -> LlmAgent:
+    cfg = _cfg(0.1)
+    level = (s.extract_thinking or "default").strip().upper()
+    if level != "DEFAULT":
+        cfg.thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel(level))
     return LlmAgent(name="extractor", model=_model(s.fast_model, s), instruction=prompts.EXTRACT,
                     include_contents="none", output_schema=ExtractionResult, output_key="extraction",
-                    generate_content_config=_cfg(0.1), before_agent_callback=skip_if_gated,
+                    generate_content_config=cfg, before_agent_callback=skip_if_gated,
                     before_model_callback=inject_video)
 
 

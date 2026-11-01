@@ -12,10 +12,12 @@ EpisodePipeline (SequentialAgent)
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from typing import Any, Optional
 
 from google.adk.agents import SequentialAgent
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
@@ -26,6 +28,7 @@ from ..guardrails.input_checks import parse_video_id
 from ..policy import load_policy
 from ..store import make_store
 from .llm_agents import extractor_agent, triage_agent
+from .streaming import StatementStreamer
 from .stages import ClaimFilter, IngestGate, Publisher, TriageGate
 
 log = logging.getLogger("claimcheck")
@@ -101,7 +104,7 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
 
     ec = EpisodeContext(episode_id=episode_id, video_id=video_id, track=track, settings=settings, policy=policy,
                         store=store, budget=Budget(cap_usd=settings.max_cost_usd_per_episode),
-                        plugins_factory=make_plugins_factory(settings))
+                        plugins_factory=make_plugins_factory(settings), duration_s=int(meta.get("duration_s") or 0))
     token = set_context(ec)
     runner = InMemoryRunner(agent=build_pipeline(settings), app_name=APP, plugins=ec.plugins_factory())
     session = await runner.session_service.create_session(app_name=APP, user_id="pipeline", state={
@@ -109,13 +112,22 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
     })
     try:
         await report_progress(ec, STAGE_PROGRESS[0][1], 2)
+        await store.clear_unverified_statements(episode_id)  # leftovers from an earlier attempt would clash with the new rows
+        streamer = StatementStreamer(ec)
         last = -1
-        async for ev in runner.run_async(user_id="pipeline", session_id=session.id,
+        # SSE streaming: the extractor's reply arrives in pieces and each finished statement is saved at once.
+        async for ev in runner.run_async(user_id="pipeline", session_id=session.id, run_config=RunConfig(streaming_mode=StreamingMode.SSE),
                                          new_message=types.Content(role="user", parts=[types.Part(text="Check this episode.")])):
+            if getattr(ev, "partial", False):  # a piece of a reply, not a finished stage
+                await streamer.on_event(ev)
+                continue
             i = _STAGE_INDEX.get(getattr(ev, "author", ""), -1)
+            if i >= 0:
+                log.info("stage %s finished at +%.1fs", ev.author, time.monotonic() - streamer.started)
             if i > last and i + 1 < len(STAGE_PROGRESS):  # a stage produced output: report the next one as running
                 last = i
                 await report_progress(ec, STAGE_PROGRESS[i + 1][1], STAGE_PROGRESS[i][2])
+        await streamer.finish()
         final = await runner.session_service.get_session(app_name=APP, user_id="pipeline", session_id=session.id)
         st = final.state
         gate = st.get("gate", {})

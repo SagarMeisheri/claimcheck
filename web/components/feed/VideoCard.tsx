@@ -92,7 +92,7 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
               : "No checked claims yet."}
         {!!ep.pending_count && <span className="meta">. {ep.pending_count} with a reviewer</span>}
       </p>
-      {!checking && (
+      {(!checking || (ep.preview_claims?.length ?? 0) > 0) && (
         <StatementCarousel videoId={ep.youtube_video_id} statements={ep.preview_claims ?? []} verifiedCount={checked}
                            counts={ep.statement_counts ?? {}} videoPending={ep.video_pending}
                            activeId={activeId} onPlay={(c: PreviewClaim) => play(c.start_s, c.id)} />

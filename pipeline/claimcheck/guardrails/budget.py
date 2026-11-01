@@ -32,6 +32,10 @@ class BudgetPlugin(BasePlugin):
         return None
 
     async def after_model_callback(self, *, callback_context: CallbackContext, llm_response: LlmResponse) -> Optional[LlmResponse]:
+        # With streaming, every partial piece repeats the running token total. Count only the final,
+        # aggregated response, or the same tokens are charged once per piece.
+        if llm_response.partial:
+            return None
         ctx = get_context()
         usage = llm_response.usage_metadata
         if usage is None:

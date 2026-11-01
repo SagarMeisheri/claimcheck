@@ -29,6 +29,9 @@ class Settings:
     embedding_dims: int = int(_env("CLAIMCHECK_EMBEDDING_DIMS", "768"))
     # "agentic" (default): model reads the transcript first and loads frames on demand. "static": fixed low-fps fallback.
     video_processing: str = field(default_factory=lambda: _env("CLAIMCHECK_VIDEO_PROCESSING", "agentic"))
+    # How long the extractor thinks before it starts writing statements: minimal, low, medium, high, or "default"
+    # (the model decides). Lower = the first statement arrives sooner. Extraction is mostly transcription and tagging.
+    extract_thinking: str = field(default_factory=lambda: _env("CLAIMCHECK_EXTRACT_THINKING", "low"))
     static_fps: float = float(_env("CLAIMCHECK_STATIC_FPS", "0.2"))
 
     # Keys
