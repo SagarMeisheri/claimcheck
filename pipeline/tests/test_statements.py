@@ -1,4 +1,4 @@
-"""Statement tagging, auto-verify selection and on-demand verification (no keys or network needed)."""
+"""Statement tagging and on-demand verification (no keys or network needed)."""
 
 import asyncio
 
@@ -6,7 +6,7 @@ import pytest
 
 from claimcheck.agents import on_demand
 from claimcheck.agents.on_demand import precheck, record_from_row, run_claim_verification
-from claimcheck.agents.stages import classify_statement, pick_auto_verify
+from claimcheck.agents.stages import classify_statement
 from claimcheck.config import Settings
 from claimcheck.context import BudgetExceeded, get_context
 from claimcheck.policy import load_policy
@@ -46,34 +46,11 @@ def test_never_topics_are_redacted_for_every_type():
     assert classify_statement(stmt(stype="opinion", tier="never"), POLICY)[1] == "outside_policy"
 
 
-# --- Auto-verify selection -------------------------------------------------------------------
 def _records(n):
     return [ClaimRecord(index=i, start_s=i * 60, claim=stmt(f"claim {i}"), effective_tier="normal") for i in range(n)]
 
 
-def test_auto_verify_picks_only_the_top_few():
-    recs = _records(10)
-    recs[9].not_checked_reason = "opinion"
-    pri = [{"index": i, "label": "checkworthy_factual", "score": 0.4 + i * 0.05} for i in range(10)]
-    pri[8]["label"] = "unimportant_factual"
-    selected = pick_auto_verify(recs, pri, 0.35, 4)
-    assert selected == [7, 6, 5, 4]  # 9 is an opinion, 8 isn't check-worthy
-    assert [r.auto_verified for r in recs].count(True) == 4
-    # Factual claims that weren't picked stay verifiable on request.
-    assert all(r.not_checked_reason is None for r in recs[:9])
-    assert verification_status(recs[0]) == "not_requested"
-    assert verification_status(recs[9]) == "not_eligible"
-
-
-def test_auto_verify_respects_min_score_and_zero_limit():
-    recs = _records(3)
-    pri = [{"index": i, "label": "checkworthy_factual", "score": 0.2} for i in range(3)]
-    assert pick_auto_verify(recs, pri, 0.35, 4) == []
-    assert pick_auto_verify(_records(3), [{"index": 0, "label": "checkworthy_factual", "score": 0.9}], 0.35, 0) == []
-
-
-def test_policy_auto_verify_is_small():
-    assert 3 <= POLICY["claims"]["auto_verify"] <= 5
+def test_policy_only_verifies_factual_claims():
     assert POLICY["on_demand"]["statement_types"] == ["factual_claim"]
 
 

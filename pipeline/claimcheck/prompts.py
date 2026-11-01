@@ -76,22 +76,6 @@ order they were said, favouring substantive ones.
 {UNTRUSTED_RULE}
 """
 
-PRIORITISE = f"""Rank claims by how much they need fact-checking (check-worthiness), the way professional
-fact-checkers prioritise.
-
-Claims (JSON, index = position):
-{{claims_for_ranking}}
-
-For each claim return:
-- label: checkworthy_factual (specific, verifiable, matters to the public), unimportant_factual
-  (true-or-false but trivial), or not_factual (opinion, prediction, rhetoric).
-- score 0-1: public importance + specificity + potential harm if wrong + likely spread.
-
-Return one entry per index.
-
-{UNTRUSTED_RULE}
-"""
-
 NORMALIZE = f"""Turn this claim into search queries that will find primary-source evidence.
 
 Claim: {{claim_text}}

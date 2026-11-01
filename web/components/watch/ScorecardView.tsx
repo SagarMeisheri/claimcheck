@@ -296,7 +296,6 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
 
         {ep.import_note && <p className="notice import-note">{ep.import_note}</p>}
         {checking && <CheckProgress videoId={ep.youtube_video_id} />}
-        {ep.status === "skipped" && <p className="notice">We didn&apos;t check this video. {ep.skip_reason ?? ""} <Link href="/method">How we choose videos</Link></p>}
 
         {ep.claims.length > 0 && (
           <section className="score-summary" aria-label="Summary">
@@ -353,7 +352,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
         <details className="fold">
           <summary>How this video was checked</summary>
           <ul className="nclist">
-            <li>{ep.claims.length} statements found and tagged by type. The top few factual claims were verified automatically; any other factual claim can be verified by pressing Verify, and the result is shown to everyone.</li>
+            <li>{ep.claims.length} statements found and tagged by type. Nothing is verified automatically: press Verify on any factual claim to check it against sources, and the result is shown to everyone.</li>
             <li>{listed.filter((c) => c.verdict?.review_status === "approved" || c.verdict?.review_status === "changed").length} verdicts reviewed by a person; {listed.filter((c) => c.awaiting_review).length} still with a reviewer.</li>
             <li><Link href="/method">How we check</Link></li>
             {!ep.video_pending && <li><a href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}&t=${Math.floor(time)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube from {clock(time)}</a></li>}

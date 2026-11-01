@@ -73,17 +73,6 @@ class ExtractionResult(BaseModel):
     claims: list[ExtractedClaim]
 
 
-# --- Prioritisation ---------------------------------------------------------------
-class ClaimPriority(BaseModel):
-    index: int
-    label: Literal["checkworthy_factual", "unimportant_factual", "not_factual"]
-    score: float = Field(ge=0, le=1)
-
-
-class PriorityResult(BaseModel):
-    priorities: list[ClaimPriority]
-
-
 # --- Verification -----------------------------------------------------------------
 class NormalizedQuery(BaseModel):
     query: str = Field(description="Self-contained search query: entity, metric, period, geography")
@@ -133,7 +122,6 @@ class ClaimRecord(BaseModel):
     checkworthiness: Optional[float] = None
     not_checked_reason: Optional[str] = None
     verdict: Optional[FinalVerdict] = None
-    auto_verified: bool = False  # picked by the Selector to verify during the run
 
 
 def verification_status(rec: ClaimRecord) -> str:

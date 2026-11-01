@@ -1,6 +1,6 @@
 # ClaimCheck MVP
 
-Turns a YouTube video (especially long podcasts, panels and interviews) into a tagged list of its statements: each one is marked as a factual claim, opinion, forecast, hearsay, analogy or loaded language, with a link to the moment it was said. The few most important factual claims are verified automatically; viewers can press **Verify** on any other factual claim. A verdict comes with an exact quote from an official or reliable source and is saved for everyone. Built for Indian political, finance and health videos.
+Turns a YouTube video (especially long podcasts, panels and interviews) into a tagged list of its statements: each one is marked as a factual claim, opinion, forecast, hearsay, analogy or loaded language, with a link to the moment it was said. Nothing is verified automatically; viewers press **Verify** on the factual claims they want checked. A verdict comes with an exact quote from an official or reliable source and is saved for everyone. Built for Indian political, finance and health videos.
 
 ```
 pipeline/   Python service: Google ADK agents + guardrails (Cloud Run)
@@ -57,9 +57,6 @@ EpisodePipeline (ADK SequentialAgent)                       POST /episodes
                            hearsay, other
   ClaimFilter       code   150-statement cap; content policy re-applied in code (never-check topics are
                            redacted for every type); only factual claims are verifiable
-  PrioritiserAgent  LLM    check-worthiness score per factual claim
-  Selector          code   top 4 factual claims (policy.yaml claims.auto_verify) to verify now
-  ClaimFanOut       code   one isolated ADK session per selected claim, 10 at a time
     ClaimVerifier: cache check -> Normalizer -> JudgeLoop(Evidence -> Judge -> ConfidenceGate) x2
     then: Task API escalation if unsure, second judge for any False, verdict checks, review flag
   Publisher         code   the only writer; also stores statement counts by type

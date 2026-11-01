@@ -1,6 +1,6 @@
 # ClaimCheck content policy and source policy.
 # Changing this file changes behaviour without touching prompts.
-# Loaded by claimcheck/policy.py; the triage gate, prioritiser, evidence tool
+# Loaded by claimcheck/policy.py; the triage gate, evidence tool
 # and verdict checks all read it.
 
 version: 1
@@ -11,11 +11,9 @@ triage:
   max_never_share: 0.30        # skip if more than 30% of content is "never check"
   min_duration_s: 300          # 5 minutes
 
-# --- Extraction and prioritisation ------------------------------------------
+# --- Extraction ------------------------------------------
 claims:
   max_extracted: 150           # hard cap on statements kept from extraction (all types)
-  auto_verify: 4               # top-N factual claims verified during the run; the rest are verified on request
-  min_checkworthiness: 0.35    # below this a factual claim is not auto-verified (it can still be verified on request)
 
 # --- On-demand verification -------------------------------------------------------
 # Rate limits are enforced by the web app (web/app/actions.ts); the per-video cost cap

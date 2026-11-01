@@ -4,8 +4,7 @@ Start it with:  cd pipeline && adk web adk_app
 It does the same setup as run_episode() (metadata, channel lookup, episode row, run context),
 then hands over to the normal EpisodePipeline stages. Results are written to the same database.
 
-Limits: failures are not recorded on the episode row the way run_episode() does, and each claim's
-verification runs in its own isolated inner session, so it shows as one ClaimFanOut step here.
+Limit: failures are not recorded on the episode row the way run_episode() does.
 """
 
 from __future__ import annotations

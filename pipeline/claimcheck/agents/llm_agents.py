@@ -17,7 +17,7 @@ from ..config import Settings
 from ..context import get_context
 from ..guardrails.injection import wrap_untrusted
 from ..guardrails.tool_limits import before_evidence_tool
-from ..schemas import ExtractionResult, JudgeResult, NormalizedQuery, PriorityResult, TriageResult
+from ..schemas import ExtractionResult, JudgeResult, NormalizedQuery, TriageResult
 from ..tools.evidence import search_and_extract
 
 
@@ -36,7 +36,6 @@ _EMPTY = {
     "triage": {"worthiness": 0, "factual_density": "low", "speaker_type": "other", "pestle_mix": {},
                "never_share": 0, "reason": "skipped"},
     "extractor": {"claims": []},
-    "prioritiser": {"priorities": []},
 }
 
 
@@ -47,15 +46,6 @@ def _skip(agent_name: str) -> types.Content:
 def skip_if_gated(callback_context: CallbackContext) -> Optional[types.Content]:
     """before_agent_callback: once a gate has decided to skip the episode, later LLM stages do nothing."""
     if callback_context.state.get("gate", {}).get("skip"):
-        return _skip(callback_context.agent_name)
-    return None
-
-
-def skip_if_no_claims(callback_context: CallbackContext) -> Optional[types.Content]:
-    gated = skip_if_gated(callback_context)
-    if gated:
-        return gated
-    if not callback_context.state.get("claims_for_ranking_list"):
         return _skip(callback_context.agent_name)
     return None
 
@@ -114,12 +104,6 @@ def extractor_agent(s: Settings) -> LlmAgent:
                     before_model_callback=inject_video)
 
 
-def prioritiser_agent(s: Settings) -> LlmAgent:
-    return LlmAgent(name="prioritiser", model=_model(s.fast_model, s), instruction=prompts.PRIORITISE,
-                    include_contents="none", output_schema=PriorityResult, output_key="priorities",
-                    generate_content_config=_cfg(0.0), before_agent_callback=skip_if_no_claims)
-
-
 def normalizer_agent(s: Settings) -> LlmAgent:
     return LlmAgent(name="normalizer", model=_model(s.fast_model, s), instruction=prompts.NORMALIZE,
                     include_contents="none", output_schema=NormalizedQuery, output_key="normalized",
@@ -136,8 +120,3 @@ def judge_agent(s: Settings, name: str = "judge") -> LlmAgent:
     return LlmAgent(name=name, model=_model(s.judge_model, s), instruction=prompts.JUDGE,
                     include_contents="none", output_schema=JudgeResult, output_key=name,
                     generate_content_config=_cfg(0.0), before_model_callback=inject_sources)
-
-
-def ranking_payload(claims: list[dict[str, Any]]) -> str:
-    return json.dumps([{"index": c["index"], "claim": c["claim"], "speaker": c["speaker"], "topic": c["topic"]} for c in claims],
-                      ensure_ascii=False)

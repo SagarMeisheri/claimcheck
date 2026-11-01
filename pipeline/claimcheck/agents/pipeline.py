@@ -6,10 +6,7 @@ EpisodePipeline (SequentialAgent)
   TriageGate      code   skip low-value / off-policy videos
   ExtractorAgent  LLM    agentic video -> tagged statements (factual claim, opinion, forecast, ...)
   ClaimFilter     code   cap, content policy in code, which statements are verifiable
-  PrioritiserAgent LLM   check-worthiness score per factual claim
-  Selector        code   top few factual claims to verify now (the rest: on request, see on_demand.py)
-  ClaimFanOut     code   one isolated verifier session per selected claim (see verifier.py)
-  Publisher       code   the only writer
+  Publisher       code   the only writer (claims are verified later, on request: see on_demand.py)
 """
 
 from __future__ import annotations
@@ -28,8 +25,8 @@ from ..guardrails.budget import BudgetPlugin
 from ..guardrails.input_checks import parse_video_id
 from ..policy import load_policy
 from ..store import make_store
-from .llm_agents import extractor_agent, prioritiser_agent, triage_agent
-from .stages import ClaimFanOut, ClaimFilter, IngestGate, Publisher, Selector, TriageGate
+from .llm_agents import extractor_agent, triage_agent
+from .stages import ClaimFilter, IngestGate, Publisher, TriageGate
 
 log = logging.getLogger("claimcheck")
 APP = "claimcheck"
@@ -43,9 +40,6 @@ def build_stages(settings: Settings) -> list:
         TriageGate(name="triage_gate"),
         extractor_agent(settings),
         ClaimFilter(name="claim_filter"),
-        prioritiser_agent(settings),
-        Selector(name="selector"),
-        ClaimFanOut(name="claim_fanout"),
         Publisher(name="publisher"),
     ]
 
@@ -59,11 +53,8 @@ STAGE_PROGRESS = [
     ("ingest_gate", "Checking the video details", 5),
     ("triage", "Judging whether the video is worth checking", 10),
     ("triage_gate", "Applying the checking rules", 12),
-    ("extractor", "Reading the video and tagging statements", 50),
-    ("claim_filter", "Applying the content policy", 52),
-    ("prioritiser", "Ranking claims by importance", 58),
-    ("selector", "Choosing the top claims to verify", 60),
-    ("claim_fanout", "Verifying the top claims", 95),
+    ("extractor", "Reading the video and tagging statements", 85),
+    ("claim_filter", "Applying the content policy", 92),
     ("publisher", "Saving results", 100),
 ]
 _STAGE_INDEX = {name: i for i, (name, _, _) in enumerate(STAGE_PROGRESS)}
@@ -119,8 +110,7 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
             i = _STAGE_INDEX.get(getattr(ev, "author", ""), -1)
             if i > last and i + 1 < len(STAGE_PROGRESS):  # a stage produced output: report the next one as running
                 last = i
-                if STAGE_PROGRESS[i + 1][0] != "claim_fanout":  # the fan-out reports its own per-claim progress
-                    await report_progress(ec, STAGE_PROGRESS[i + 1][1], STAGE_PROGRESS[i][2])
+                await report_progress(ec, STAGE_PROGRESS[i + 1][1], STAGE_PROGRESS[i][2])
         final = await runner.session_service.get_session(app_name=APP, user_id="pipeline", session_id=session.id)
         st = final.state
         gate = st.get("gate", {})
