@@ -27,7 +27,7 @@ export async function previewVideo(url: string): Promise<Preview | null> {
   return { videoId, title, channel, alreadyChecked };
 }
 
-const DAILY_LIMIT = 5;
+const DAILY_LIMIT = Number(process.env.SUBMIT_PER_PERSON_PER_DAY ?? 5);
 
 async function submitterHash(): Promise<string> {
   const h = await headers();
