@@ -112,7 +112,7 @@ export async function requestVerification(claimId: string): Promise<VerifyResult
   if ((status === "queued" || status === "verifying") && !stale) return { ok: true, status, message: "Already being verified." };
   if (c.statement_type !== "factual_claim" || c.policy_tier === "never" || c.not_checked_reason === "outside_policy"
       || status === "not_eligible") {
-    return { ok: false, status, message: "Only factual claims can be verified. Opinions, forecasts and rhetoric are tagged instead." };
+    return { ok: false, status, message: "Only claims can be verified. Opinions, forecasts and rhetoric are tagged instead." };
   }
   if (!["done", "in_review"].includes((c as any).episodes?.status)) {
     return { ok: false, status, message: "This video is still being analysed. Try again when it's finished." };

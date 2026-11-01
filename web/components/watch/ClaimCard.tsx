@@ -28,7 +28,7 @@ export function TimeLink({ videoId, seconds, onSeek, className = "cc-ts" }: {
   );
 }
 
-/** Colour-coded tag for a statement's type (Factual, Opinion, Forecast, ...). */
+/** Colour-coded tag for a statement's type (Claim, Opinion, Forecast, ...). */
 export function TypeTag({ type }: { type: string }) {
   const t = STATEMENT_TYPES[typeOf(type)];
   return <span className="stype" style={{ ["--stype" as string]: t.cssVar }} title={t.meaning}>{t.label}</span>;

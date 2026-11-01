@@ -45,7 +45,7 @@ def precheck(row: Optional[dict[str, Any]], settings: Settings, policy: Optional
         return False, "This video hasn't finished its first pass yet.", 409
     allowed = pol.get("on_demand", {}).get("statement_types", ["factual_claim"])
     if row.get("statement_type") not in allowed:
-        return False, "Only factual claims can be verified. Opinions, forecasts and rhetoric are tagged instead.", 409
+        return False, "Only claims can be verified. Opinions, forecasts and rhetoric are tagged instead.", 409
     if row.get("policy_tier") == "never" or row.get("not_checked_reason") == "outside_policy":
         return False, "This claim is outside our content policy.", 409
     status = row.get("verification_status")

@@ -90,7 +90,7 @@ def test_precheck_allows_queued_factual_claim():
 
 
 @pytest.mark.parametrize("kw, words", [
-    ({"statement_type": "opinion"}, "Only factual claims"),
+    ({"statement_type": "opinion"}, "Only claims"),
     ({"policy_tier": "never"}, "content policy"),
     ({"verification_status": "verified"}, "Already verified"),
     ({"verification_status": "awaiting_review"}, "reviewer"),

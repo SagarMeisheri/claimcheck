@@ -343,7 +343,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
 
         <div className="cards">
           {viewList.length === 0
-            ? <p className="meta pad">{view === "verified" ? "No claims verified yet. Pick a factual claim and press Verify."
+            ? <p className="meta pad">{view === "verified" ? "No claims verified yet. Pick a claim and press Verify."
                 : view !== "all" ? `No ${STATEMENT_TYPES[view].plural} in this video.`
                 : checking ? "Statements appear here as they are found." : "No statements for this video."}</p>
             : viewList.map(card)}
@@ -352,7 +352,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
         <details className="fold">
           <summary>How this video was checked</summary>
           <ul className="nclist">
-            <li>{ep.claims.length} statements found and tagged by type. Nothing is verified automatically: press Verify on any factual claim to check it against sources, and the result is shown to everyone.</li>
+            <li>{ep.claims.length} statements found and tagged by type. Nothing is verified automatically: press Verify on any claim to check it against sources, and the result is shown to everyone.</li>
             <li>{listed.filter((c) => c.verdict?.review_status === "approved" || c.verdict?.review_status === "changed").length} verdicts reviewed by a person; {listed.filter((c) => c.awaiting_review).length} still with a reviewer.</li>
             <li><Link href="/method">How we check</Link></li>
             {!ep.video_pending && <li><a href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}&t=${Math.floor(time)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube from {clock(time)}</a></li>}
