@@ -6,3 +6,12 @@ __pycache__/
 node_modules/
 .next/
 web/next-env.d.ts
+
+# Local / generated files
+.venv/
+.DS_Store
+*.egg-info/
+*.tsbuildinfo
+.adk/
+supabase/.temp/
+supabase/.branches/
