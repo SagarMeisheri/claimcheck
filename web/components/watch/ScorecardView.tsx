@@ -5,14 +5,16 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VerdictStrip } from "@/components/MiniBar";
 import { Avatar, Thumb } from "@/components/Thumb";
-import type { Claim, EpisodeDetail, Pestle, VerdictName } from "@/lib/types";
-import { NOT_CHECKED, PESTLE, VERDICTS, clock, topicLabel } from "@/lib/verdicts";
+import type { Claim, EpisodeDetail, StatementType, VerdictName } from "@/lib/types";
+import { CORE_TYPES, STATEMENT_TYPES, TYPE_ORDER, VERIFYING, breakdownParts, typeOf } from "@/lib/statements";
+import { VERDICTS, clock } from "@/lib/verdicts";
 import { CheckProgress } from "@/components/CheckProgress";
-import { ClaimCard, UncheckedCard, type CardPhase } from "./ClaimCard";
+import { ClaimCard, StatementCard, type CardPhase } from "./ClaimCard";
 import { ClaimTrack } from "./ClaimTrack";
 import { YouTubePlayer, type PlayerHandle } from "./YouTubePlayer";
 
-type View = "flagged" | "checked" | "unchecked" | "all" | "topics";
+/** Filter chips: every statement, one statement type, or verified claims only. */
+export type View = "all" | "verified" | StatementType;
 const FLAGGED: VerdictName[] = ["false", "misleading", "disputed", "outdated"];
 const CLIP_S = 20;
 const LEAD_S = 3;
@@ -24,10 +26,15 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
 }) {
   const router = useRouter();
   const player = useRef<PlayerHandle>(null);
+  // "listed" = verified claims (public verdict or with a reviewer); everything else is a tagged statement.
   const listed = useMemo(() => ep.claims.filter((c) => c.verdict || c.awaiting_review).sort((a, b) => a.start_s - b.start_s), [ep.claims]);
-  const flagged = listed.filter((c) => c.verdict && FLAGGED.includes(c.verdict.verdict));
-  const notChecked = useMemo(() => ep.claims.filter((c) => c.not_checked_reason).sort((a, b) => a.start_s - b.start_s), [ep.claims]);
   const everything = useMemo(() => [...ep.claims].sort((a, b) => a.start_s - b.start_s), [ep.claims]);
+  const typeCounts = useMemo(() => {
+    const t: Partial<Record<StatementType, number>> = {};
+    for (const c of ep.claims) { const k = typeOf(c.statement_type); t[k] = (t[k] ?? 0) + 1; }
+    return t;
+  }, [ep.claims]);
+  const verifyingCount = ep.claims.filter((c) => VERIFYING.includes(c.verification_status)).length;
   const checking = ep.status === "processing" || ep.status === "queued";
 
   const [view, setView] = useState<View>(initialView ?? "all");
@@ -45,7 +52,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
   const [countdown, setCountdown] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  const viewList = view === "flagged" ? flagged : view === "unchecked" ? notChecked : view === "all" || view === "topics" ? everything : listed;
+  const viewList = view === "all" ? everything : view === "verified" ? listed : everything.filter((c) => typeOf(c.statement_type) === view);
   const current = useMemo(() => {
     let cur: Claim | null = null;
     for (const c of listed) if (c.start_s <= time + 0.5) cur = c;
@@ -108,7 +115,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
     const id = window.location.hash.match(/^#claim-(.+)$/)?.[1];
     const target = id ? ep.claims.find((c) => c.id === id) : null;
     if (target) {
-      if (!flagged.some((f) => f.id === target.id)) setView(target.verdict || target.awaiting_review ? "checked" : "unchecked");
+      setView("all");
       setExpanded(new Set([target.id]));
       setCue(Math.max(0, target.start_s - CUE_LEAD_S));
       setTime(target.start_s);
@@ -116,7 +123,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
     }
     const m = momentId ? ep.claims.find((c) => c.id === momentId) : null;
     if (m) {
-      if (!flagged.some((f) => f.id === m.id)) setView(m.verdict || m.awaiting_review ? "checked" : "unchecked");
+      setView("all");
       playMoment(m);
       window.setTimeout(() => scrollToCard(m.id), 60);
     } else if (autoplay && !ep.video_pending) {
@@ -174,11 +181,12 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, following, playing, scrollFollow]);
 
+  // While the first pass runs, or someone's Verify request is in flight, keep the page fresh.
   useEffect(() => {
-    if (!checking) return;
+    if (!checking && !verifyingCount) return;
     const id = window.setInterval(() => router.refresh(), 20000);
     return () => window.clearInterval(id);
-  }, [checking, router]);
+  }, [checking, verifyingCount, router]);
 
   // Keyboard: J / K previous / next claim in the current view.
   useEffect(() => {
@@ -220,7 +228,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
     const n = nextIn(c);
     if (!c.verdict && !c.awaiting_review) {
       return (
-        <UncheckedCard key={c.id} claim={c} videoId={ep.youtube_video_id} active={isActive}
+        <StatementCard key={c.id} claim={c} videoId={ep.youtube_video_id} active={isActive}
           phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"} canWatch={!ep.video_pending}
           onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
           onKeepWatching={() => { setClip(null); setCountdown(null); setAutoAll(false); setFollowing(true); setScrollFollow(true); player.current?.play(); }} />
@@ -240,13 +248,9 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
 
   const supported = ep.tally.supported ?? 0;
   const checkedCount = listed.filter((c) => c.verdict).length;
+  const reviewingCount = listed.filter((c) => c.awaiting_review).length;
   const flagParts = FLAGGED.filter((v) => ep.tally[v]).map((v) => `${ep.tally[v]} ${VERDICTS[v].label.toLowerCase()}`);
-  const areaCounts = (Object.keys(PESTLE) as Pestle[]).map((a) => [a, listed.filter((c) => c.pestle_area === a).length] as const).filter(([, n]) => n);
-  const topics = useMemo(() => {
-    const m = new Map<string, Claim[]>();
-    for (const c of everything) { const k = c.topic ?? c.pestle_area; m.set(k, [...(m.get(k) ?? []), c]); }
-    return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
-  }, [everything]);
+  const chipTypes = TYPE_ORDER.filter((t) => CORE_TYPES.includes(t) || typeCounts[t]);
 
   return (
     <div className="score">
@@ -294,13 +298,21 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
         {checking && <CheckProgress videoId={ep.youtube_video_id} />}
         {ep.status === "skipped" && <p className="notice">We didn&apos;t check this video. {ep.skip_reason ?? ""} <Link href="/method">How we choose videos</Link></p>}
 
-        {checkedCount > 0 && (
+        {ep.claims.length > 0 && (
           <section className="score-summary" aria-label="Summary">
-            <p className="score-big">{supported} of {checkedCount} claims supported</p>
-            <VerdictStrip tally={ep.tally} />
-            {flagParts.length > 0 && <p className="meta">{flagParts.join(", ")}</p>}
-            {notChecked.length > 0 && <p className="meta">{notChecked.length} not checked (opinions, predictions and similar)</p>}
-            {areaCounts.length > 0 && <p className="meta">{areaCounts.map(([a, n]) => `${PESTLE[a]} ${n}`).join(" · ")}</p>}
+            <p className="score-big">{ep.claims.length} statements</p>
+            <p className="type-bar" aria-hidden="true">
+              {TYPE_ORDER.filter((t) => typeCounts[t]).map((t) => (
+                <span key={t} style={{ flexGrow: typeCounts[t], background: STATEMENT_TYPES[t].cssVar }} />
+              ))}
+            </p>
+            <p className="meta">{breakdownParts(typeCounts).join(", ")}</p>
+            <p className="meta">
+              {checkedCount} verified{checkedCount ? `, ${supported} supported` : ""}{flagParts.length ? `, ${flagParts.join(", ")}` : ""}
+              {reviewingCount > 0 && `. ${reviewingCount} with a reviewer`}
+              {verifyingCount > 0 && `. ${verifyingCount} being verified now`}
+            </p>
+            {checkedCount > 0 && <VerdictStrip tally={ep.tally} />}
           </section>
         )}
       </div>
@@ -308,17 +320,21 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
       <div className="score-side">
         {ep.claims.length > 0 && (
           <>
-            <div className="seg" role="tablist" aria-label="How to read the claims">
-              <button role="tab" aria-selected={view === "all"} onClick={() => setView("all")}>All {everything.length}</button>
-              <button role="tab" aria-selected={view === "flagged"} onClick={() => setView("flagged")}>Flagged {flagged.length}</button>
-              <button role="tab" aria-selected={view === "checked"} onClick={() => setView("checked")}>Checked {listed.length}</button>
-              <button role="tab" aria-selected={view === "unchecked"} onClick={() => setView("unchecked")}>Not checked {notChecked.length}</button>
-              <button role="tab" aria-selected={view === "topics"} onClick={() => setView("topics")}>Topics</button>
+            <div className="filters stmt-filters" role="group" aria-label="Show statements by type">
+              <button className="chip" aria-pressed={view === "all"} onClick={() => setView("all")}>All {everything.length}</button>
+              {chipTypes.map((t) => (
+                <button key={t} className="chip chip-type" aria-pressed={view === t} onClick={() => setView(t)}
+                        style={{ ["--stype" as string]: STATEMENT_TYPES[t].cssVar }} title={STATEMENT_TYPES[t].meaning}>
+                  {STATEMENT_TYPES[t].label} {typeCounts[t] ?? 0}
+                </button>
+              ))}
+              <button className="chip" aria-pressed={view === "verified"} onClick={() => setView("verified")}>Verified {listed.length}</button>
             </div>
-            {view !== "topics" && viewList.some((c) => c.verdict) && !ep.video_pending && (
+            {view !== "all" && view !== "verified" && <p className="meta stmt-legend">{STATEMENT_TYPES[view].meaning}{view === "factual_claim" ? " Press Verify on any of them to check it against official sources." : ""}</p>}
+            {viewList.some((c) => c.verdict) && !ep.video_pending && (
               <p className="play-all">
                 <button className="btn secondary small" onClick={() => { const first = viewList.find((c) => c.verdict); if (first) { setAutoAll(true); playMoment(first); scrollToCard(first.id); } }}>
-                  ▶ Play {view === "flagged" ? "flagged claims" : "checked claims"} in order
+                  ▶ Play verified claims in order
                 </button>
                 {autoAll && <button className="btn secondary small" onClick={() => { setAutoAll(false); setCountdown(null); }}>Stop</button>}
               </p>
@@ -326,34 +342,18 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
           </>
         )}
 
-        {view === "topics" ? (
-          <div className="score-topics">
-            {topics.map(([k, list]) => {
-              const t: Partial<Record<VerdictName, number>> = {};
-              for (const c of list) if (c.verdict) t[c.verdict.verdict] = (t[c.verdict.verdict] ?? 0) + 1;
-              return (
-                <section key={k} className="topic">
-                  <header className="topic-head"><h2>{topicLabel(k)}</h2><span className="meta">{list.length} {list.length === 1 ? "claim" : "claims"}</span></header>
-                  <VerdictStrip tally={t} />
-                  <div className="cards">{list.map(card)}</div>
-                </section>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="cards">
-            {viewList.length === 0
-              ? <p className="meta pad">{view === "flagged" ? "Nothing flagged: every checked claim was supported or unverifiable."
-                  : view === "unchecked" ? "Every claim we found was checked."
-                  : checking ? "Claims will appear here as they're checked." : "No claims for this video."}</p>
-              : viewList.map(card)}
-          </div>
-        )}
+        <div className="cards">
+          {viewList.length === 0
+            ? <p className="meta pad">{view === "verified" ? "No claims verified yet. Pick a factual claim and press Verify."
+                : view !== "all" ? `No ${STATEMENT_TYPES[view].plural} in this video.`
+                : checking ? "Statements will appear here when the first pass is done." : "No statements for this video."}</p>
+            : viewList.map(card)}
+        </div>
 
         <details className="fold">
           <summary>How this video was checked</summary>
           <ul className="nclist">
-            <li>{ep.claims.length} claims found; {checkedCount} checked; {notChecked.length} not checked.</li>
+            <li>{ep.claims.length} statements found and tagged by type. The top few factual claims were verified automatically; any other factual claim can be verified by pressing Verify, and the result is shown to everyone.</li>
             <li>{listed.filter((c) => c.verdict?.review_status === "approved" || c.verdict?.review_status === "changed").length} verdicts reviewed by a person; {listed.filter((c) => c.awaiting_review).length} still with a reviewer.</li>
             <li><Link href="/method">How we check</Link></li>
             {!ep.video_pending && <li><a href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}&t=${Math.floor(time)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube from {clock(time)}</a></li>}

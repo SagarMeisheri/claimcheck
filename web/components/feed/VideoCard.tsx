@@ -7,6 +7,7 @@ import { CheckProgress } from "@/components/CheckProgress";
 import { VerdictStrip } from "@/components/MiniBar";
 import { YouTubePlayer, type PlayerHandle } from "@/components/watch/YouTubePlayer";
 import type { Episode, PreviewClaim } from "@/lib/types";
+import { totalStatements } from "@/lib/statements";
 import { clock, timeAgo } from "@/lib/verdicts";
 import { ClaimCarousel } from "./ClaimCarousel";
 
@@ -82,12 +83,15 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
         {checking
           ? <Link href="/review#videos">Stop or remove</Link>
           : checked
-            ? <><strong>{supported} of {checked} supported</strong>{flagged ? `, ${flagged} flagged` : ""}</>
-            : "No checked claims yet."}
+            ? <><strong>{supported} of {checked} verified claims supported</strong>{flagged ? `, ${flagged} flagged` : ""}</>
+            : totalStatements(ep.statement_counts ?? {})
+              ? "No claims verified yet. Open the video to verify one."
+              : "No checked claims yet."}
         {!!ep.pending_count && <span className="meta">. {ep.pending_count} with a reviewer</span>}
       </p>
-      {!checking && ep.tab_claims && ep.tab_counts && (
-        <ClaimCarousel videoId={ep.youtube_video_id} tabs={ep.tab_claims} counts={ep.tab_counts} videoPending={ep.video_pending}
+      {!checking && (
+        <ClaimCarousel videoId={ep.youtube_video_id} claims={ep.preview_claims ?? []} verifiedCount={checked} counts={ep.statement_counts ?? {}}
+                       reviewing={ep.pending_count ?? 0} videoPending={ep.video_pending}
                        activeId={activeId} onPlay={(c: PreviewClaim) => play(c.start_s, c.id)} />
       )}
     </article>

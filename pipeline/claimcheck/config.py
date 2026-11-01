@@ -52,8 +52,11 @@ class Settings:
     cache_max_age_days: int = int(_env("CLAIMCHECK_CACHE_MAX_AGE_DAYS", "90"))
     # Dev flag: ignore the triage worthiness threshold (the never-check share gate still applies).
     skip_worthiness: bool = _env("CLAIMCHECK_SKIP_WORTHINESS", "0") == "1"
-    # Post-extraction gate: skip verification if fewer checkable factual claims survive (0 = off).
-    min_checkable_claims: int = int(_env("CLAIMCHECK_MIN_CHECKABLE_CLAIMS", "3"))
+    # Post-extraction gate: skip the video if fewer statements of any type were found (0 = off).
+    # A video with few factual claims is still published as a tagged statement list.
+    min_statements: int = int(_env("CLAIMCHECK_MIN_STATEMENTS", "5"))
+    # Factual claims verified automatically during a run (overrides policy.yaml claims.auto_verify).
+    auto_verify: int = int(_env("CLAIMCHECK_AUTO_VERIFY", "-1"))
     enable_escalation: bool = _env("CLAIMCHECK_ENABLE_ESCALATION", "1") == "1"
 
     # USD per 1M tokens (input, output). Argon is an ASSUMPTION until Google publishes pricing.

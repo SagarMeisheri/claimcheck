@@ -37,6 +37,10 @@ def _fail_orphaned_runs() -> None:
                                            ).eq("status", "processing").execute()
     except Exception:
         logging.getLogger("claimcheck").exception("could not clean up orphaned runs")
+    try:
+        _store.reset_interrupted_verifications()
+    except Exception:
+        logging.getLogger("claimcheck").exception("could not clean up interrupted verifications")
 
 
 class RunRequest(BaseModel):
@@ -92,3 +96,33 @@ async def cancel(episode_id: str, x_pipeline_secret: Optional[str] = Header(defa
     _store.db.table("episodes").update({"status": "skipped", "skip_reason": "Cancelled."}
                                        ).eq("id", episode_id).in_("status", ["queued", "processing"]).execute()
     return {"cancelled": True, "was_running": was_running}
+
+
+class VerifyRequest(BaseModel):
+    wait: bool = False  # true = verify inline and return the result (local testing)
+
+
+@app.post("/claims/{claim_id}/verify")
+async def verify_one(claim_id: str, req: Optional[VerifyRequest] = None,
+                     x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
+    """Verifies one factual claim on request. The web app has already rate-limited the request.
+
+    Answers 409 with a readable reason when the claim can't be verified (not factual, already verified,
+    video over its cost cap), so the web app can show it straight away.
+    """
+    _auth(x_pipeline_secret)
+    from .agents.on_demand import precheck, run_claim_verification
+
+    row = await _store.get_claim_for_verification(claim_id)
+    ok, reason, code = precheck(row, _settings)
+    if not ok:
+        raise HTTPException(code, reason)
+    if not await _store.start_claim_verification(claim_id):
+        raise HTTPException(409, "Already being verified.")
+    if req and req.wait:
+        return await run_claim_verification(claim_id, settings=_settings, store=_store)
+    task = asyncio.create_task(run_claim_verification(claim_id, settings=_settings, store=_store))
+    key = f"claim:{claim_id}"
+    _running[key] = task
+    task.add_done_callback(lambda t, k=key: _running.pop(k, None) if _running.get(k) is t else None)
+    return {"accepted": True, "claim_id": claim_id, "status": "verifying"}

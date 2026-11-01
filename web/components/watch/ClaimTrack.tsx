@@ -2,17 +2,24 @@
 
 import { useRef, useState } from "react";
 import type { Claim } from "@/lib/types";
+import { STATEMENT_TYPES, typeOf } from "@/lib/statements";
 import { VERDICTS, clock } from "@/lib/verdicts";
 
 function tickClass(c: Claim): string {
   if (c.verdict) return `tick tick-${c.verdict.verdict}`;
   if (c.awaiting_review) return "tick tick-pending";
-  return "tick tick-skipped";
+  if (c.not_checked_reason === "outside_policy") return "tick tick-skipped";
+  return "tick tick-stmt"; // unverified statement: short tick in its type colour
+}
+
+function statusLabel(c: Claim): string {
+  if (c.verdict) return VERDICTS[c.verdict.verdict].label;
+  if (c.awaiting_review) return "with a reviewer";
+  return STATEMENT_TYPES[typeOf(c.statement_type)].label.toLowerCase();
 }
 
 export function tickLabel(c: Claim): string {
-  const status = c.verdict ? VERDICTS[c.verdict.verdict].label : c.awaiting_review ? "with a reviewer" : "not checked";
-  return `${clock(c.start_s)}, ${status}: ${c.claim_text}`;
+  return `${clock(c.start_s)}, ${statusLabel(c)}: ${c.claim_text}`;
 }
 
 /**
@@ -56,7 +63,7 @@ export function ClaimTrack({ claims, duration, time, currentId, onSeekClaim }: {
           <button
             key={c.id}
             className={`${tickClass(c)}${c.id === currentId ? " tick-current" : ""}`}
-            style={{ left: `${(c.start_s / total) * 100}%`, ...(c.verdict ? { ["--tick" as string]: VERDICTS[c.verdict.verdict].cssVar } : {}) }}
+            style={{ left: `${(c.start_s / total) * 100}%`, ["--tick" as string]: c.verdict ? VERDICTS[c.verdict.verdict].cssVar : STATEMENT_TYPES[typeOf(c.statement_type)].cssVar }}
             aria-label={tickLabel(c)}
             title={tickLabel(c)}
             disabled={c.not_checked_reason === "outside_policy"}
@@ -67,7 +74,7 @@ export function ClaimTrack({ claims, duration, time, currentId, onSeekClaim }: {
         {preview && (
           <span className="track-preview" style={{ left: preview.x }}>
             {clock(preview.claim.start_s)}{" "}
-            {preview.claim.verdict ? VERDICTS[preview.claim.verdict.verdict].label : preview.claim.awaiting_review ? "With a reviewer" : "Not checked"}
+            {statusLabel(preview.claim)}
             <span className="track-preview-text">{preview.claim.claim_text}</span>
           </span>
         )}

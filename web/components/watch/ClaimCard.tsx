@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { FeedbackForm } from "@/components/FeedbackForm";
 import type { Citation, Claim } from "@/lib/types";
-import { NOT_CHECKED, TIER_LABEL, VERDICTS, clock, domain, ytLink } from "@/lib/verdicts";
+import { STATEMENT_TYPES, canRequestVerify, typeOf } from "@/lib/statements";
+import { TIER_LABEL, VERDICTS, clock, domain, ytLink } from "@/lib/verdicts";
+import { VerifyButton } from "./VerifyButton";
 
 export type CardPhase = "idle" | "playing" | "ended";
 
@@ -26,28 +28,43 @@ export function TimeLink({ videoId, seconds, onSeek, className = "cc-ts" }: {
   );
 }
 
-/** A claim we found but did not rate (opinion, prediction, lower priority...), with the reason and its moment. */
-export function UncheckedCard({ claim: c, videoId, active, phase, canWatch, onSeek, onWatch, onKeepWatching }: {
+/** Colour-coded tag for a statement's type (Factual, Opinion, Forecast, ...). */
+export function TypeTag({ type }: { type: string }) {
+  const t = STATEMENT_TYPES[typeOf(type)];
+  return <span className="stype" style={{ ["--stype" as string]: t.cssVar }} title={t.meaning}>{t.label}</span>;
+}
+
+/**
+ * A tagged statement without a public verdict: an opinion, forecast, hearsay and so on, or a factual
+ * claim nobody has verified yet (with a Verify button).
+ */
+export function StatementCard({ claim: c, videoId, active, phase, canWatch, onSeek, onWatch, onKeepWatching }: {
   claim: Claim; videoId: string; active: boolean; phase: CardPhase; canWatch: boolean;
   onSeek(): void; onWatch(): void; onKeepWatching(): void;
 }) {
   const hidden = c.not_checked_reason === "outside_policy"; // text and moment stay unpublished
+  const type = typeOf(c.statement_type);
+  const verifiable = c.statement_type === "factual_claim" && !hidden;
   return (
-    <article id={`card-${c.id}`} data-claim={c.id} className={`claim-card claim-card-unchecked${active ? " is-active" : ""}`}>
+    <article id={`card-${c.id}`} data-claim={c.id} data-type={type}
+             className={`claim-card stmt-card${verifiable ? "" : " claim-card-unchecked"}${active ? " is-active" : ""}`}
+             style={{ ["--stype" as string]: STATEMENT_TYPES[type].cssVar }}>
       <div className="cc-head">
+        <TypeTag type={type} />
         {!hidden && <TimeLink videoId={videoId} seconds={c.start_s} onSeek={onSeek} />}
         {c.speaker && !hidden && <span className="meta">{c.speaker}</span>}
         {active && phase === "playing" && <span className="cc-playing">Playing</span>}
       </div>
-      <p className="cc-verdict">
-        <span className="pending-word">Not checked: {NOT_CHECKED[c.not_checked_reason ?? ""] ?? c.not_checked_reason}</span>
-      </p>
-      <p className="cc-claim">{hidden ? "A claim outside our content policy" : `“${c.claim_text}”`}</p>
+      <p className="cc-claim">{hidden ? "A statement outside our content policy" : `“${c.claim_text}”`}</p>
+      {!hidden && c.tag_note && <p className="meta stmt-note">{c.tag_note}</p>}
+      {verifiable && (canRequestVerify(c) || c.verification_status === "queued" || c.verification_status === "verifying"
+        || c.verification_status === "awaiting_review")
+        && <VerifyButton claimId={c.id} status={c.verification_status} error={c.verify_error} />}
       {!hidden && (
         <div className="cc-actions">
           {active && phase === "ended"
             ? <button className="btn small" onClick={onKeepWatching}>Keep watching</button>
-            : canWatch && <button className="btn small" onClick={onWatch}>▶ Watch 20 s</button>}
+            : canWatch && <button className="btn secondary small" onClick={onWatch}>▶ Watch 20 s</button>}
         </div>
       )}
     </article>
@@ -75,7 +92,7 @@ function SourceFull({ s, color }: { s: Citation; color: string }) {
 }
 
 /**
- * A claim with its evidence visible up front. "Watch 20 s" plays the moment; after the clip the card
+ * A verified claim (or one awaiting review) with its evidence visible up front. "Watch 20 s" plays the moment; after the clip the card
  * offers Keep watching or Next claim. "More" expands in place: what was said, why, all sources, actions.
  */
 export function ClaimCard({ claim: c, videoId, expanded, active, phase, countdown, hasNext, canWatch, onToggle, onWatch, onKeepWatching, onNext, onSeek, onShare, onCopySource }: {
@@ -87,8 +104,11 @@ export function ClaimCard({ claim: c, videoId, expanded, active, phase, countdow
   const visibleSources = v ? (v.verdict === "disputed" ? v.citations : v.citations.slice(0, 1)) : [];
 
   return (
-    <article id={`card-${c.id}`} data-claim={c.id} className={`claim-card${active ? " is-active" : ""}${expanded ? " is-open" : ""}`}>
+    <article id={`card-${c.id}`} data-claim={c.id} data-type={typeOf(c.statement_type)}
+             className={`claim-card stmt-card is-verified${active ? " is-active" : ""}${expanded ? " is-open" : ""}`}
+             style={{ ["--stype" as string]: STATEMENT_TYPES[typeOf(c.statement_type)].cssVar }}>
       <div className="cc-head">
+        <TypeTag type={c.statement_type} />
         <TimeLink videoId={videoId} seconds={c.start_s} onSeek={onSeek} />
         {c.speaker && <span className="meta">{c.speaker}</span>}
         {active && phase === "playing" && <span className="cc-playing">Playing</span>}
@@ -109,7 +129,7 @@ export function ClaimCard({ claim: c, videoId, expanded, active, phase, countdow
           ))}
         </div>
       )}
-      {!v && <p className="meta">A reviewer is checking this verdict before it's shown.</p>}
+      {!v && <p className="meta">Verified. A reviewer is checking the verdict before it&apos;s shown.</p>}
 
       {expanded && v && (
         <div className="cc-more">

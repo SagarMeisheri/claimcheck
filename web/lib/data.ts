@@ -2,7 +2,7 @@ import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type {
   AlsoSaidIn, ChannelBalance, ChannelPage, Claim, Episode, EpisodeDetail, PendingReview, Pestle, PreviewClaim, Verdict,
-  VerdictName,
+  VerdictName, VerificationStatus,
 } from "./types";
 
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -48,6 +48,7 @@ export function carouselOrder(published: Claim[]): Claim[] {
   return [...(supported[0] ? [supported[0]] : []), ...flagged, ...rest];
 }
 
+/** Feed fields. `claims` holds only claims with a verdict row (public, or hidden while awaiting review). */
 export function deriveFeedFields(ep: Episode, claims: Claim[]): Episode {
   const published = claims.filter((c) => c.verdict);
   const notable = published
@@ -55,12 +56,6 @@ export function deriveFeedFields(ep: Episode, claims: Claim[]): Episode {
     .sort((a, b) => NOTABLE.indexOf(a.verdict!.verdict) - NOTABLE.indexOf(b.verdict!.verdict)
       || (b.checkworthiness ?? 0) - (a.checkworthiness ?? 0));
   const top = notable[0];
-  const byTime = [...claims].sort((a, b) => a.start_s - b.start_s);
-  const unchecked = byTime.filter((c) => !c.verdict && c.not_checked_reason);
-  const CARD_MAX = 8;
-  const tabLists = {
-    flagged: notable, checked: carouselOrder(published), unchecked, all: byTime,
-  };
   return {
     ...ep,
     top_claim: top ? { id: top.id, start_s: top.start_s, claim_text: top.claim_text, verdict: top.verdict!.verdict } : null,
@@ -70,8 +65,6 @@ export function deriveFeedFields(ep: Episode, claims: Claim[]): Episode {
     preview_claims: carouselOrder(published).slice(0, 8).map(toPreview),
     published_claims: published.map(toPreview),
     checked_count: published.length,
-    tab_claims: Object.fromEntries(Object.entries(tabLists).map(([k, v]) => [k, v.slice(0, CARD_MAX).map(toPreview)])) as Episode["tab_claims"],
-    tab_counts: Object.fromEntries(Object.entries(tabLists).map(([k, v]) => [k, v.length])) as Episode["tab_counts"],
   };
 }
 
@@ -80,12 +73,12 @@ export function deriveFeedFields(ep: Episode, claims: Claim[]): Episode {
 type EpisodeRow = {
   id: string; youtube_video_id: string; title: string | null; duration_s: number | null; published_at: string | null;
   status: string; skip_reason?: string | null; tally: Record<string, number>; not_checked: Record<string, number>;
-  created_at: string; channel_id: string | null;
+  created_at: string; channel_id: string | null; statement_counts?: Record<string, number> | null;
   channels: { name: string; track: string; avatar_url: string | null } | null;
 };
 
-const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, tally, not_checked, created_at, channel_id, channels(name, track, avatar_url)";
-const CLAIM_COLS = "id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, claim_type, policy_tier, checkworthiness, not_checked_reason, verdict_id, episode_id, verdicts(id, verdict, confidence, reasoning, evidence_grade, review_status, escalated, citations(url, title, tier, quote))";
+const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, tally, not_checked, statement_counts, created_at, channel_id, channels(name, track, avatar_url)";
+const CLAIM_COLS = "id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, claim_type, statement_type, tag_note, verification_status, verify_error, policy_tier, checkworthiness, not_checked_reason, verdict_id, episode_id, verdicts(id, verdict, confidence, reasoning, evidence_grade, review_status, escalated, citations(url, title, tier, quote))";
 
 function toEpisode(r: EpisodeRow): Episode {
   return {
@@ -94,7 +87,7 @@ function toEpisode(r: EpisodeRow): Episode {
     channel_avatar: r.channels?.avatar_url ?? null,
     channel_track: (r.channels?.track as Episode["channel_track"]) ?? "finance_health",
     duration_s: r.duration_s ?? 0, published_at: r.published_at, status: r.status, skip_reason: r.skip_reason,
-    tally: r.tally ?? {}, not_checked: r.not_checked ?? {}, created_at: r.created_at,
+    tally: r.tally ?? {}, not_checked: r.not_checked ?? {}, statement_counts: r.statement_counts ?? {}, created_at: r.created_at,
   };
 }
 
@@ -103,7 +96,9 @@ function toClaim(c: any): Claim {
     ...c,
     // RLS hides verdicts awaiting review: the claim has a verdict_id but the join comes back empty.
     verdict: (c.verdicts as Verdict | null) ?? null,
-    awaiting_review: Boolean(c.verdict_id && !c.verdicts),
+    awaiting_review: Boolean(c.verdict_id && !c.verdicts) || c.verification_status === "awaiting_review",
+    statement_type: c.statement_type ?? (c.claim_type === "fact" ? "factual_claim" : "other"),
+    verification_status: (c.verification_status as VerificationStatus) ?? (c.verdict_id ? "verified" : "not_eligible"),
   };
 }
 
@@ -116,7 +111,10 @@ export async function getFeed(limit = 40): Promise<Episode[]> {
   if (error) throw error;
   const eps = (data as unknown as EpisodeRow[]).map(toEpisode);
   if (!eps.length) return [];
-  const { data: claims } = await db.from("claims").select(CLAIM_COLS).in("episode_id", eps.map((e) => e.id));
+  // Only claims with a verdict row: the carousel shows verified claims, and type counts come from
+  // episodes.statement_counts, so long podcasts with hundreds of statements don't hit the row limit.
+  const { data: claims } = await db.from("claims").select(CLAIM_COLS).in("episode_id", eps.map((e) => e.id))
+    .not("verdict_id", "is", null).limit(1000);
   const byEp = new Map<string, Claim[]>();
   for (const c of (claims ?? []).map(toClaim)) {
     const key = (c as any).episode_id as string;
@@ -195,7 +193,7 @@ export async function getAllEpisodes(): Promise<AdminEpisode[]> {
 
 export async function getPendingReviews(): Promise<PendingReview[]> {
   const { data, error } = await serviceDb().from("verdicts")
-    .select("id, verdict, confidence, reasoning, evidence_grade, review_status, escalated, downgrades, citations(url, title, tier, quote), claims(id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, claim_type, policy_tier, checkworthiness, not_checked_reason, episodes(id, title, youtube_video_id, channels(name)))")
+    .select("id, verdict, confidence, reasoning, evidence_grade, review_status, escalated, downgrades, citations(url, title, tier, quote), claims(id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, claim_type, statement_type, tag_note, verification_status, policy_tier, checkworthiness, not_checked_reason, episodes(id, title, youtube_video_id, channels(name)))")
     .eq("review_status", "pending").order("created_at").limit(50);
   if (error) throw error;
   return (data ?? []).flatMap((v: any) => (v.claims ?? []).slice(0, 1).map((c: any) => ({
@@ -213,4 +211,15 @@ export async function getClaimForCard(id: string): Promise<{ claim: Claim; episo
   const { data: ep } = await db.from("episodes").select(EP_COLS).eq("id", (c as any).episode_id).maybeSingle();
   if (!ep) return null;
   return { claim: toClaim(c), episode: toEpisode(ep as unknown as EpisodeRow) };
+}
+
+export type ClaimStatus = { id: string; verification_status: VerificationStatus; verify_error: string | null; video_id: string | null };
+
+/** Live verification state of one claim (no verdict: those stay behind RLS until reviewed). */
+export async function getClaimStatus(id: string): Promise<ClaimStatus | null> {
+  const { data } = await publicDb().from("claims").select("id, verification_status, verify_error, episodes(youtube_video_id)")
+    .eq("id", id).maybeSingle();
+  if (!data) return null;
+  const d = data as any;
+  return { id: d.id, verification_status: d.verification_status, verify_error: d.verify_error, video_id: d.episodes?.youtube_video_id ?? null };
 }

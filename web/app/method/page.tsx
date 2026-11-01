@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { STATEMENT_TYPES, TYPE_ORDER } from "@/lib/statements";
 import { VERDICTS } from "@/lib/verdicts";
 
 export const metadata: Metadata = { title: "How we check" };
@@ -14,13 +15,30 @@ export default function Method() {
 
       <h2>The steps</h2>
       <ol>
-        <li>We decide whether a video is worth checking: how many specific facts it contains, and who is speaking.</li>
-        <li>The AI lists the factual claims and the moment each was said. Opinions, predictions and personal stories are set aside.</li>
-        <li>The most important claims (up to 25 a video) are checked. Official sources are searched first: RBI, MoSPI, PIB, the Election Commission, PubMed and others.</li>
-        <li>A second AI model compares each claim with the sources and must quote the exact sentence it relied on.</li>
+        <li>We decide whether a video is worth analysing: how much substantive public-interest content it has, and who is speaking.</li>
+        <li>The AI breaks the video into statements, each with the moment it was said, and tags each one: factual claim, opinion, forecast, hearsay, analogy or loaded language. Only factual claims can be checked against sources; the other tags help you see how an argument is built.</li>
+        <li>The few most important factual claims (about four a video) are verified straight away. Any other factual claim can be verified by pressing Verify. A verified claim is saved and shown to everyone, so it&apos;s only checked once.</li>
+        <li>Verification searches official sources first: RBI, MoSPI, PIB, the Election Commission, PubMed and others. A second AI model compares the claim with the sources and must quote the exact sentence it relied on.</li>
         <li>Code then checks the work: the quote must really appear in the source, the numbers must match, and a False verdict needs a strong source, high confidence and a second independent check.</li>
-        <li>A person reviews every False verdict, and every Misleading or Disputed verdict on a political claim, before it appears.</li>
+        <li>A person reviews every False verdict, and every Misleading or Disputed verdict on a political claim, before it appears, including ones that viewers asked for.</li>
       </ol>
+
+      <h2>What the tags mean</h2>
+      <ul>
+        {TYPE_ORDER.map((k) => (
+          <li key={k}><span className="stype" style={{ ["--stype" as string]: STATEMENT_TYPES[k].cssVar }}>{STATEMENT_TYPES[k].label}</span> {STATEMENT_TYPES[k].meaning}</li>
+        ))}
+      </ul>
+      <p>
+        A tag describes the statement, not the speaker. It is a reading aid, not a verdict: an opinion or forecast can be
+        perfectly reasonable.
+      </p>
+
+      <h2>Limits on verification</h2>
+      <p>
+        Each person can verify up to 10 claims a day, and each video has a fixed budget for verification. When a video
+        reaches it, no more of its claims can be verified.
+      </p>
 
       <h2>What the verdicts mean</h2>
       <ul>
@@ -32,8 +50,8 @@ export default function Method() {
       <h2 id="policy">What we don&apos;t check</h2>
       <p>
         Religious or spiritual beliefs; claims about whole communities, castes or religions; private individuals and
-        children; the merits of court cases still being heard; attacks and disasters in their first 48 hours; satire;
-        opinions and predictions. For religion and caste, we only check numbers and documented events, such as census
+        children; the merits of court cases still being heard; attacks and disasters in their first 48 hours; satire.
+        Statements on these topics aren&apos;t shown at all. Opinions and predictions are tagged but not verified. For religion and caste, we only check numbers and documented events, such as census
         figures or election results.
       </p>
 

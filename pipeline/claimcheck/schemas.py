@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 PestleArea = Literal["political", "economic", "social", "technological", "legal", "environmental"]
 PolicyTier = Literal["normal", "stricter", "never"]
 ClaimType = Literal["fact", "opinion", "prediction", "anecdote"]
+# What kind of statement it is. Only factual_claim can be verified; the rest are tagged and shown.
+StatementType = Literal["factual_claim", "opinion", "forecast", "analogy", "loaded_language", "hearsay", "other"]
+VerificationStatus = Literal["not_eligible", "not_requested", "queued", "verifying", "verified", "awaiting_review", "failed"]
+# Legacy claim_type stored alongside statement_type (claims.claim_type check constraint, effective_tier()).
+_LEGACY_TYPE: dict[str, str] = {"factual_claim": "fact", "forecast": "prediction"}
+_FROM_LEGACY: dict[str, str] = {"fact": "factual_claim", "opinion": "opinion", "prediction": "forecast", "anecdote": "other"}
 Verdict = Literal["supported", "misleading", "false", "outdated", "disputed", "unverifiable"]
 
 
@@ -35,15 +41,32 @@ class TriageResult(BaseModel):
 
 # --- Extraction -----------------------------------------------------------------
 class ExtractedClaim(BaseModel):
-    start_ts: str = Field(description="HH:MM:SS or MM:SS where the claim starts")
+    """One tagged statement. The name is kept from when only factual claims were extracted."""
+
+    start_ts: str = Field(description="HH:MM:SS or MM:SS where the statement starts")
     speaker: str
-    claim: str = Field(description="One self-contained factual statement, speaker's numbers kept exactly")
+    claim: str = Field(description="The statement, self-contained, speaker's numbers kept exactly")
     context_quote: str = Field(description="The words actually spoken, verbatim, up to ~40 words")
     pestle_area: PestleArea
     topic: str = Field(description="snake_case topic, e.g. gdp, welfare_schemes, nutrition")
-    claim_type: ClaimType
+    statement_type: Optional[StatementType] = Field(
+        default=None, description="factual_claim, opinion, forecast, analogy, loaded_language, hearsay or other")
+    tag_note: str = Field(default="", description="Up to 15 words on why it has this tag; empty for plain factual claims")
+    claim_type: Optional[ClaimType] = None  # legacy; derived from statement_type when missing
     policy_tier: PolicyTier
     refers_to_visual: bool = False
+
+    @model_validator(mode="after")
+    def _fill_types(self) -> "ExtractedClaim":
+        if self.statement_type is None:
+            self.statement_type = _FROM_LEGACY.get(self.claim_type or "fact", "other")  # type: ignore[assignment]
+        if self.claim_type is None or (self.claim_type == "fact") != (self.statement_type == "factual_claim"):
+            self.claim_type = _LEGACY_TYPE.get(self.statement_type, "opinion")  # type: ignore[assignment]
+        return self
+
+    @property
+    def verifiable(self) -> bool:
+        return self.statement_type == "factual_claim"
 
 
 class ExtractionResult(BaseModel):
@@ -110,6 +133,18 @@ class ClaimRecord(BaseModel):
     checkworthiness: Optional[float] = None
     not_checked_reason: Optional[str] = None
     verdict: Optional[FinalVerdict] = None
+    auto_verified: bool = False  # picked by the Selector to verify during the run
+
+
+def verification_status(rec: ClaimRecord) -> str:
+    """The claims.verification_status value for a record leaving the pipeline."""
+    if rec.verdict is not None:
+        return "awaiting_review" if rec.verdict.review_status == "pending" else "verified"
+    if rec.not_checked_reason in ("budget", "error") and rec.claim.verifiable:
+        return "failed"  # auto-verify was attempted and didn't finish: a viewer can retry
+    if not rec.claim.verifiable or rec.not_checked_reason:
+        return "not_eligible"
+    return "not_requested"
 
 
 class GuardrailEvent(BaseModel):
