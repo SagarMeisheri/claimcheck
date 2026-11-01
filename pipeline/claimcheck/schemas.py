@@ -69,8 +69,25 @@ class ExtractedClaim(BaseModel):
         return self.statement_type == "factual_claim"
 
 
+class ExtractedStatement(BaseModel):
+    """What the extractor model returns. statement_type is required and the legacy claim_type is absent,
+    so the model can't skip the tag (an optional field was being left out and defaulted to factual_claim)."""
+
+    start_ts: str = Field(description="HH:MM:SS or MM:SS where the statement starts")
+    speaker: str
+    claim: str = Field(description="The statement, self-contained, speaker's numbers kept exactly")
+    context_quote: str = Field(description="The words actually spoken, verbatim, up to ~40 words")
+    statement_type: StatementType = Field(
+        description="Required tag: factual_claim, opinion, forecast, analogy, loaded_language, hearsay or other")
+    tag_note: str = Field(default="", description="Up to 15 words on why it has this tag; empty for plain factual claims")
+    pestle_area: PestleArea
+    topic: str = Field(description="snake_case topic, e.g. gdp, welfare_schemes, nutrition")
+    policy_tier: PolicyTier
+    refers_to_visual: bool = False
+
+
 class ExtractionResult(BaseModel):
-    claims: list[ExtractedClaim]
+    claims: list[ExtractedStatement]
 
 
 # --- Verification -----------------------------------------------------------------

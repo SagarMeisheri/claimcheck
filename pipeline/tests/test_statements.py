@@ -225,3 +225,9 @@ def test_runs_for_one_video_are_serialised(monkeypatch):
                              run_claim_verification("c2", settings=SETTINGS, store=store))
     asyncio.run(both())
     assert active["max"] == 1
+
+
+def test_extractor_schema_requires_statement_type():
+    from claimcheck.schemas import ExtractionResult
+    item = ExtractionResult.model_json_schema()["$defs"]["ExtractedStatement"]
+    assert "statement_type" in item["required"] and "claim_type" not in item["properties"]
