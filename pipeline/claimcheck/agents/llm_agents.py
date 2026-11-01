@@ -1,0 +1,143 @@
+"""LlmAgent definitions. Each has an output schema; tools only on the evidence agent
+(kept separate from the judge so no agent combines tools with an output schema)."""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Optional
+
+from google.adk.agents import LlmAgent
+from google.adk.agents.callback_context import CallbackContext
+from google.adk.models.llm_request import LlmRequest
+from google.adk.tools import FunctionTool
+from google.genai import types
+
+from .. import prompts
+from ..config import Settings
+from ..context import get_context
+from ..guardrails.injection import wrap_untrusted
+from ..guardrails.tool_limits import before_evidence_tool
+from ..schemas import ExtractionResult, JudgeResult, NormalizedQuery, PriorityResult, TriageResult
+from ..tools.evidence import search_and_extract
+
+
+def _model(name: str, settings: Settings) -> Any:
+    return name
+
+
+def _cfg(temperature: float = 0.2) -> types.GenerateContentConfig:
+    return types.GenerateContentConfig(temperature=temperature)
+
+
+# --- Callbacks ------------------------------------------------------------------------
+
+# Empty-but-valid outputs, so a skipped stage still satisfies its output schema.
+_EMPTY = {
+    "triage": {"worthiness": 0, "factual_density": "low", "speaker_type": "other", "pestle_mix": {},
+               "never_share": 0, "reason": "skipped"},
+    "extractor": {"claims": []},
+    "prioritiser": {"priorities": []},
+}
+
+
+def _skip(agent_name: str) -> types.Content:
+    return types.Content(role="model", parts=[types.Part(text=json.dumps(_EMPTY.get(agent_name, {})))])
+
+
+def skip_if_gated(callback_context: CallbackContext) -> Optional[types.Content]:
+    """before_agent_callback: once a gate has decided to skip the episode, later LLM stages do nothing."""
+    if callback_context.state.get("gate", {}).get("skip"):
+        return _skip(callback_context.agent_name)
+    return None
+
+
+def skip_if_no_claims(callback_context: CallbackContext) -> Optional[types.Content]:
+    gated = skip_if_gated(callback_context)
+    if gated:
+        return gated
+    if not callback_context.state.get("claims_for_ranking_list"):
+        return _skip(callback_context.agent_name)
+    return None
+
+
+def inject_video(callback_context: CallbackContext, llm_request: LlmRequest) -> None:
+    """before_model_callback on the extractor: adds the YouTube URL as a video part.
+
+    Agentic processing reads the transcript first and loads only the frames it needs.
+    Static mode is the fallback: low fps and low media resolution.
+    """
+    ctx = get_context()
+    url = callback_context.state["video_url"]
+    part = types.Part(file_data=types.FileData(file_uri=url, mime_type="video/mp4"))
+    if ctx.settings.video_processing == "agentic":
+        part.media_processing = types.MediaProcessing.AGENTIC
+    else:
+        part.media_processing = types.MediaProcessing.STATIC
+        part.video_metadata = types.VideoMetadata(fps=ctx.settings.static_fps)
+        part.media_resolution = types.PartMediaResolution(level=types.PartMediaResolutionLevel.MEDIA_RESOLUTION_LOW)
+    llm_request.contents.append(types.Content(role="user", parts=[part, types.Part(text="Extract the claims from this video.")]))
+
+
+def inject_sources(callback_context: CallbackContext, llm_request: LlmRequest) -> None:
+    """before_model_callback on the judge: adds fetched sources as delimited, untrusted data.
+
+    The judge sees exactly the text the quote check will later search, so a quote
+    that passes the check really is in what the judge read.
+    """
+    ctx = get_context()
+    docs = ctx.evidence.get(callback_context.state["claim_key"], {})
+    items = list(docs.items())
+    if callback_context.state.get("reorder_sources"):
+        items.reverse()
+    if not items:
+        blocks = "No sources were found."
+    else:
+        blocks = "\n\n".join(
+            wrap_untrusted(f"SOURCE {i + 1}", f"URL: {url}\nTitle: {d.get('title', '')}\nPublished: {d.get('publish_date') or 'unknown'}\n\n{d['text']}")
+            for i, (url, d) in enumerate(items)
+        )
+    llm_request.contents.append(types.Content(role="user", parts=[types.Part(text=f"Sources:\n\n{blocks}\n\nReturn your verdict.")]))
+
+
+# --- Agents -------------------------------------------------------------------------
+
+def triage_agent(s: Settings) -> LlmAgent:
+    return LlmAgent(name="triage", model=_model(s.fast_model, s), instruction=prompts.TRIAGE,
+                    include_contents="none", output_schema=TriageResult, output_key="triage",
+                    generate_content_config=_cfg(0.0), before_agent_callback=skip_if_gated)
+
+
+def extractor_agent(s: Settings) -> LlmAgent:
+    return LlmAgent(name="extractor", model=_model(s.fast_model, s), instruction=prompts.EXTRACT,
+                    include_contents="none", output_schema=ExtractionResult, output_key="extraction",
+                    generate_content_config=_cfg(0.1), before_agent_callback=skip_if_gated,
+                    before_model_callback=inject_video)
+
+
+def prioritiser_agent(s: Settings) -> LlmAgent:
+    return LlmAgent(name="prioritiser", model=_model(s.fast_model, s), instruction=prompts.PRIORITISE,
+                    include_contents="none", output_schema=PriorityResult, output_key="priorities",
+                    generate_content_config=_cfg(0.0), before_agent_callback=skip_if_no_claims)
+
+
+def normalizer_agent(s: Settings) -> LlmAgent:
+    return LlmAgent(name="normalizer", model=_model(s.fast_model, s), instruction=prompts.NORMALIZE,
+                    include_contents="none", output_schema=NormalizedQuery, output_key="normalized",
+                    generate_content_config=_cfg(0.0))
+
+
+def evidence_agent(s: Settings) -> LlmAgent:
+    return LlmAgent(name="evidence", model=_model(s.fast_model, s), instruction=prompts.EVIDENCE,
+                    include_contents="default", tools=[FunctionTool(search_and_extract)],
+                    before_tool_callback=before_evidence_tool, generate_content_config=_cfg(0.0))
+
+
+def judge_agent(s: Settings, name: str = "judge") -> LlmAgent:
+    return LlmAgent(name=name, model=_model(s.judge_model, s), instruction=prompts.JUDGE,
+                    include_contents="none", output_schema=JudgeResult, output_key=name,
+                    generate_content_config=_cfg(0.0), before_model_callback=inject_sources)
+
+
+def ranking_payload(claims: list[dict[str, Any]]) -> str:
+    return json.dumps([{"index": c["index"], "claim": c["claim"], "speaker": c["speaker"], "topic": c["topic"]} for c in claims],
+                      ensure_ascii=False)

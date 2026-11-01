@@ -1,0 +1,52 @@
+"""Global guardrail plugin: per-episode cost cap and token accounting.
+
+Registered once on every runner, so it applies to every agent and model call
+(including each claim's isolated verifier session).
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from google.adk.agents.callback_context import CallbackContext
+from google.adk.models.llm_request import LlmRequest
+from google.adk.models.llm_response import LlmResponse
+from google.adk.plugins.base_plugin import BasePlugin
+
+from ..context import get_context
+
+
+class BudgetPlugin(BasePlugin):
+    def __init__(self) -> None:
+        super().__init__(name="claimcheck_budget")
+        self._models: dict[tuple[str, str], str] = {}
+
+    async def before_model_callback(self, *, callback_context: CallbackContext, llm_request: LlmRequest) -> Optional[LlmResponse]:
+        ctx = get_context()
+        self._models[(callback_context.invocation_id, callback_context.agent_name)] = llm_request.model or ""
+        try:
+            ctx.budget.check()
+        except Exception:
+            ctx.log("budget", "episode_cost_cap", "blocked", f"spent ${ctx.budget.spent_usd:.2f}")
+            raise
+        return None
+
+    async def after_model_callback(self, *, callback_context: CallbackContext, llm_response: LlmResponse) -> Optional[LlmResponse]:
+        ctx = get_context()
+        usage = llm_response.usage_metadata
+        if usage is None:
+            return None
+        model = self._models.get((callback_context.invocation_id, callback_context.agent_name)) or llm_response.model_version or ""
+        price_in, price_out = _price_for(model, ctx.settings.prices)
+        tin = usage.prompt_token_count or 0
+        tout = (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0)
+        ctx.budget.add(tin / 1e6 * price_in + tout / 1e6 * price_out, tin, tout)
+        return None
+
+
+def _price_for(model: str, prices: dict) -> tuple[float, float]:
+    for name, p in prices.items():
+        if name and name in model:
+            return p
+    # Unknown model: assume the judge price so the cap errs on the safe side.
+    return max(prices.values(), key=lambda p: p[1])
