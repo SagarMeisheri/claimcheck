@@ -92,7 +92,12 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
         "youtube_video_id": video_id, "channel_id": (channel or {}).get("id"), "title": meta.get("title"),
         "status": "queued", "submitted_by": submitted_by,
     })
-    await store.update_episode(episode_id, {"status": "processing"})
+    # Save what the metadata call returned right away, so the home page can show the title, thumbnail
+    # and length while the video is still being analysed.
+    await store.update_episode(episode_id, {k: v for k, v in {
+        "status": "processing", "title": meta.get("title") or None, "duration_s": meta.get("duration_s") or None,
+        "published_at": meta.get("published_at") or None, "channel_id": (channel or {}).get("id"),
+    }.items() if v is not None})
 
     ec = EpisodeContext(episode_id=episode_id, video_id=video_id, track=track, settings=settings, policy=policy,
                         store=store, budget=Budget(cap_usd=settings.max_cost_usd_per_episode),

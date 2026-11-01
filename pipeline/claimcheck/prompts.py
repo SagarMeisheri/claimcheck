@@ -70,6 +70,9 @@ For every statement:
   private individuals or minors, merits of live court cases, attacks/disasters in the first 48 hours, satire;
   "stricter" for political, health, nutrition, science, legal and social-statistics claims; otherwise "normal".
 
+After the statements, write summary: 2-3 plain sentences saying what the video covers, who speaks and the main
+arguments or numbers discussed. Neutral tone, no verdicts, nothing that is not in the statements or the video.
+
 Skip ads, sponsor reads, intros, greetings, small talk and jokes. Return at most 150 statements in the
 order they were said, favouring substantive ones.
 

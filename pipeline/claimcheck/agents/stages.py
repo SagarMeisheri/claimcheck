@@ -159,6 +159,7 @@ class Publisher(BaseAgent):
         await ec.store.update_episode(ec.episode_id, {
             **base, "status": "in_review" if pending else "done", "tally": tally, "not_checked": not_checked,
             "statement_counts": statement_counts,
+            "summary": ((st.get("extraction") or {}).get("summary") or "").strip()[:1200] or None,
             "cost_usd": round(ec.budget.spent_usd, 4), "tokens_in": ec.budget.tokens_in, "tokens_out": ec.budget.tokens_out,
         })
         yield _event(self, ctx, {"published": True, "tally": tally, "not_checked": not_checked, "pending_review": pending,

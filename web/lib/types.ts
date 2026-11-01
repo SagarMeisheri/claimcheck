@@ -65,6 +65,8 @@ export interface PreviewClaim {
   source_line: string | null; // "Publisher: what it says", shortened
   pestle_area: Pestle;
   topic: string | null;
+  statement_type: StatementType;
+  verification_status: VerificationStatus;
 }
 
 export interface TopClaim {
@@ -86,6 +88,7 @@ export interface Episode {
   published_at: string | null;
   status: string;
   skip_reason?: string | null;
+  summary?: string | null; // 2-3 sentences on what the video covers, written by the extractor
   guest?: string | null;
   import_note?: string | null; // set when verdicts came from an outside analysis, not the pipeline
   tally: Partial<Record<VerdictName, number>>;
@@ -97,7 +100,7 @@ export interface Episode {
   claim_texts?: string[];
   pending_count?: number;
   statement_counts: Partial<Record<StatementType, number>>; // every tagged statement, by type
-  preview_claims?: PreviewClaim[]; // verified claims, ordered for the home carousel
+  preview_claims?: PreviewClaim[]; // statements of every type (verified first), for the home carousel
   published_claims?: PreviewClaim[]; // all published, for the Topics tab
   checked_count?: number; // verified claims with a public verdict
   video_pending?: boolean; // YouTube link not added yet (imported data)

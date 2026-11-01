@@ -32,7 +32,7 @@ export function CheckProgress({ videoId, compact = false }: { videoId: string; c
   return (
     <div className={`cprogress${compact ? " compact" : ""}`}>
       <div className="cprogress-top">
-        <span>{label}</span>
+        <span><span className="spinner" aria-hidden="true" /> {label}</span>
         <span className="meta">{pct}%</span>
       </div>
       <div className="cprogress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={label}>

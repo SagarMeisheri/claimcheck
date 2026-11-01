@@ -88,6 +88,7 @@ class ExtractedStatement(BaseModel):
 
 class ExtractionResult(BaseModel):
     claims: list[ExtractedStatement]
+    summary: str = Field(default="", description="2-3 plain sentences on what the video covers, written after the statements")
 
 
 # --- Verification -----------------------------------------------------------------

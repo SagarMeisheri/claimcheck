@@ -1,7 +1,7 @@
 import { FeedView } from "@/components/feed/FeedView";
 import { getFeed } from "@/lib/data";
 
-export const revalidate = 60;
+export const revalidate = 10;
 
 export default async function Home() {
   const episodes = await getFeed();

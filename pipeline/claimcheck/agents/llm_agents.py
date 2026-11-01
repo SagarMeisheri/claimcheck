@@ -35,7 +35,7 @@ def _cfg(temperature: float = 0.2) -> types.GenerateContentConfig:
 _EMPTY = {
     "triage": {"worthiness": 0, "factual_density": "low", "speaker_type": "other", "pestle_mix": {},
                "never_share": 0, "reason": "skipped"},
-    "extractor": {"claims": []},
+    "extractor": {"claims": [], "summary": ""},
 }
 
 

@@ -350,3 +350,23 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .bd-row { display: flex; align-items: center; gap: 0.4rem; }
 .bd-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; flex: none; }
 .bd-verified { font-size: 0.88rem; font-weight: 600; margin-top: 0.2rem; }
+
+/* Statement carousel: type tabs, statement cards, video summary beside the thumbnail */
+.stmt-tabs { display: flex; gap: 0.35rem; align-items: center; overflow-x: auto; padding: 0.55rem 0 0.1rem; }
+.stmt-tab { display: inline-flex; align-items: center; gap: 0.35rem; font: inherit; font-size: 0.9rem; padding: 0.2rem 0.7rem; cursor: pointer; border: 1px solid var(--rule); background: transparent; color: inherit; border-radius: 999px; white-space: nowrap; }
+.stmt-tab[aria-selected="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.stmt-tab[aria-selected="true"] .meta { color: inherit; opacity: 0.8; }
+.stmt-tabs-note { margin-left: auto; white-space: nowrap; padding-left: 0.6rem; }
+.stype-tag { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; font-weight: 600; }
+.ccard-statement { background: transparent; border-left: 3px solid var(--stype); }
+.vcard-blurb { margin: 0.5rem 0 0; font-size: 0.95rem; line-height: 1.5; color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 7; -webkit-box-orient: vertical; overflow: hidden; }
+.vcard-blurb .spinner { vertical-align: -0.1em; margin-right: 0.3rem; }
+
+/* Check a video, on the home page */
+.home-submit { margin-bottom: 1rem; }
+.submit-form.inline { display: flex; flex-wrap: wrap; gap: 0.5rem 0.6rem; align-items: flex-start; }
+.submit-form.inline .field { flex: 1 1 16rem; order: 1; }
+.submit-form.inline .btn { order: 2; white-space: nowrap; }
+.submit-form.inline .notice { flex: 1 1 100%; order: 0; margin: 0; }
+.submit-form.inline .preview { flex: 1 1 100%; order: 3; }
+.cprogress-top .spinner { margin-right: 0.35rem; vertical-align: -0.1em; }

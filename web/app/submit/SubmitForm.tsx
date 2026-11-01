@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useState } from "react";
 import { previewVideo, submitVideo, type ActionResult, type Preview } from "@/app/actions";
 import { CheckProgress } from "@/components/CheckProgress";
 import { Thumb } from "@/components/Thumb";
 
-export function SubmitForm() {
+/** `inline` = the compact home-page version: it stays on the page and the new video appears in the feed below. */
+export function SubmitForm({ inline = false }: { inline?: boolean }) {
+  const router = useRouter();
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(submitVideo, null);
   const [url, setUrl] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -23,7 +26,12 @@ export function SubmitForm() {
     return () => window.clearTimeout(id);
   }, [url]);
 
-  if (state?.ok && state.videoId) {
+  // Inline: clear the box and let the feed show the new video with its own progress.
+  useEffect(() => {
+    if (inline && state?.ok && state.videoId) { setUrl(""); setPreview(null); router.refresh(); }
+  }, [inline, state, router]);
+
+  if (!inline && state?.ok && state.videoId) {
     return (
       <div className="notice ok">
         <p>{state.message}</p>
@@ -34,12 +42,13 @@ export function SubmitForm() {
   }
 
   return (
-    <form action={action} className="submit-form">
+    <form action={action} className={`submit-form${inline ? " inline" : ""}`}>
+      {inline && state?.ok && <p className="notice ok" role="status">{state.message} It is in the list below.</p>}
       <div className="field">
-        <label htmlFor="url">YouTube link</label>
+        <label htmlFor="url" className={inline ? "visually-hidden" : undefined}>YouTube link</label>
         <input id="url" name="url" type="url" required inputMode="url" value={url} onChange={(e) => setUrl(e.target.value)}
-               placeholder="https://www.youtube.com/watch?v=…" aria-describedby="url-help" />
-        <span id="url-help" className="meta">Public videos, at least 5 minutes long and not live.</span>
+               placeholder={inline ? "Paste a YouTube link to check a video" : "https://www.youtube.com/watch?v=…"} aria-describedby="url-help" />
+        {!inline && <span id="url-help" className="meta">Public videos, at least 5 minutes long and not live.</span>}
       </div>
       {url && !looking && !preview && <p className="notice err">That isn&apos;t a YouTube video link. Paste a link like youtube.com/watch?v=… or youtu.be/…</p>}
       {preview && (
@@ -54,7 +63,7 @@ export function SubmitForm() {
       )}
       {state && !state.ok && <p className="notice err">{state.message}</p>}
       <button className="btn" disabled={pending || !preview || preview.alreadyChecked}>
-        {pending ? "Queuing…" : "Check this video"}
+        {pending ? <><span className="spinner" aria-hidden="true" /> Queuing…</> : "Check this video"}
       </button>
     </form>
   );

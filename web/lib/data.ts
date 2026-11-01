@@ -31,6 +31,7 @@ function toPreview(c: Claim): PreviewClaim {
     id: c.id, start_s: c.start_s, claim_text: c.claim_text, speaker: c.speaker, verdict: c.verdict?.verdict ?? null,
     not_checked_reason: c.not_checked_reason, awaiting_review: c.awaiting_review,
     source_line: s ? `${s.title ?? "Source"}: ${s.quote}` : null, pestle_area: c.pestle_area, topic: c.topic,
+    statement_type: c.statement_type, verification_status: c.verification_status,
   };
 }
 
@@ -49,7 +50,20 @@ export function carouselOrder(published: Claim[]): Claim[] {
 }
 
 /** Feed fields. `claims` holds only claims with a verdict row (public, or hidden while awaiting review). */
-export function deriveFeedFields(ep: Episode, claims: Claim[]): Episode {
+const PER_TYPE = 10; // statements per type kept for the home carousel tabs
+
+/** Carousel content: verified claims first, then the other statements in the order they were said; at most PER_TYPE per type. */
+export function carouselStatements(published: Claim[], unverified: Claim[]): Claim[] {
+  const visible = unverified.filter((c) => c.not_checked_reason !== "outside_policy")
+    .sort((a, b) => a.start_s - b.start_s);
+  const seen: Record<string, number> = {};
+  return [...carouselOrder(published), ...visible].filter((c) => {
+    seen[c.statement_type] = (seen[c.statement_type] ?? 0) + 1;
+    return seen[c.statement_type] <= PER_TYPE;
+  });
+}
+
+export function deriveFeedFields(ep: Episode, claims: Claim[], unverified: Claim[] = []): Episode {
   const published = claims.filter((c) => c.verdict);
   const notable = published
     .filter((c) => NOTABLE.includes(c.verdict!.verdict))
@@ -62,7 +76,7 @@ export function deriveFeedFields(ep: Episode, claims: Claim[]): Episode {
     pestle_areas: [...new Set(published.map((c) => c.pestle_area))] as Pestle[],
     claim_texts: published.map((c) => c.claim_text),
     pending_count: claims.filter((c) => c.awaiting_review).length,
-    preview_claims: carouselOrder(published).slice(0, 8).map(toPreview),
+    preview_claims: carouselStatements(published, unverified).map(toPreview),
     published_claims: published.map(toPreview),
     checked_count: published.length,
   };
@@ -73,11 +87,11 @@ export function deriveFeedFields(ep: Episode, claims: Claim[]): Episode {
 type EpisodeRow = {
   id: string; youtube_video_id: string; title: string | null; duration_s: number | null; published_at: string | null;
   status: string; skip_reason?: string | null; tally: Record<string, number>; not_checked: Record<string, number>;
-  created_at: string; channel_id: string | null; statement_counts?: Record<string, number> | null;
+  created_at: string; channel_id: string | null; statement_counts?: Record<string, number> | null; summary?: string | null;
   channels: { name: string; track: string; avatar_url: string | null } | null;
 };
 
-const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, tally, not_checked, statement_counts, created_at, channel_id, channels(name, track, avatar_url)";
+const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, tally, not_checked, statement_counts, summary, created_at, channel_id, channels(name, track, avatar_url)";
 const CLAIM_COLS = "id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, claim_type, statement_type, tag_note, verification_status, verify_error, policy_tier, checkworthiness, not_checked_reason, verdict_id, episode_id, verdicts(id, verdict, confidence, reasoning, evidence_grade, review_status, escalated, citations(url, title, tier, quote))";
 
 function toEpisode(r: EpisodeRow): Episode {
@@ -87,7 +101,7 @@ function toEpisode(r: EpisodeRow): Episode {
     channel_avatar: r.channels?.avatar_url ?? null,
     channel_track: (r.channels?.track as Episode["channel_track"]) ?? "finance_health",
     duration_s: r.duration_s ?? 0, published_at: r.published_at, status: r.status, skip_reason: r.skip_reason,
-    tally: r.tally ?? {}, not_checked: r.not_checked ?? {}, statement_counts: r.statement_counts ?? {}, created_at: r.created_at,
+    tally: r.tally ?? {}, not_checked: r.not_checked ?? {}, statement_counts: r.statement_counts ?? {}, summary: r.summary ?? null, created_at: r.created_at,
   };
 }
 
@@ -111,8 +125,7 @@ export async function getFeed(limit = 40): Promise<Episode[]> {
   if (error) throw error;
   const eps = (data as unknown as EpisodeRow[]).map(toEpisode);
   if (!eps.length) return [];
-  // Only claims with a verdict row: the carousel shows verified claims, and type counts come from
-  // episodes.statement_counts, so long podcasts with hundreds of statements don't hit the row limit.
+  // Verified claims (with verdict and sources); type counts come from episodes.statement_counts.
   const { data: claims } = await db.from("claims").select(CLAIM_COLS).in("episode_id", eps.map((e) => e.id))
     .not("verdict_id", "is", null).limit(1000);
   const byEp = new Map<string, Claim[]>();
@@ -120,7 +133,16 @@ export async function getFeed(limit = 40): Promise<Episode[]> {
     const key = (c as any).episode_id as string;
     byEp.set(key, [...(byEp.get(key) ?? []), c]);
   }
-  return eps.map((e) => deriveFeedFields(e, byEp.get(e.id) ?? []));
+  // The other statements (no verdict yet), without verdict joins, so the carousel can show every type.
+  const { data: rest } = await db.from("claims")
+    .select("id, idx, start_s, speaker, claim_text, pestle_area, topic, statement_type, verification_status, policy_tier, not_checked_reason, verdict_id, episode_id")
+    .in("episode_id", eps.map((e) => e.id)).is("verdict_id", null).order("start_s").limit(3000);
+  const restByEp = new Map<string, Claim[]>();
+  for (const c of (rest ?? []).map(toClaim)) {
+    const key = (c as any).episode_id as string;
+    restByEp.set(key, [...(restByEp.get(key) ?? []), c]);
+  }
+  return eps.map((e) => deriveFeedFields(e, byEp.get(e.id) ?? [], restByEp.get(e.id) ?? []));
 }
 
 async function withAlsoSaidIn(db: SupabaseClient, ep: EpisodeDetail): Promise<EpisodeDetail> {

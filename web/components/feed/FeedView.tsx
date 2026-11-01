@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { readFollows } from "@/lib/follows";
 import type { Episode, Pestle } from "@/lib/types";
 import { PESTLE } from "@/lib/verdicts";
+import { SubmitForm } from "@/app/submit/SubmitForm";
 import { TopicsView } from "./TopicsView";
 import { VideoCard } from "./VideoCard";
 
@@ -44,6 +45,9 @@ export function FeedView({ episodes }: { episodes: Episode[] }) {
 
   return (
     <div className="feed-layout">
+      <section className="home-submit" aria-label="Check a video">
+        <SubmitForm inline />
+      </section>
       <div className="feed-controls">
         <div className="tabs" role="tablist" aria-label="Feed">
           {tabBtn("latest", "Latest")}
