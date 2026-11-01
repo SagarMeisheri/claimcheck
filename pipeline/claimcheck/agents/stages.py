@@ -7,7 +7,7 @@ the rules they enforce cannot be talked around.
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Optional
 
 from google.adk.agents import BaseAgent
 from google.adk.agents.invocation_context import InvocationContext
@@ -28,6 +28,40 @@ def _event(agent: BaseAgent, ctx: InvocationContext, delta: dict[str, Any], text
     return Event(author=agent.name, invocation_id=ctx.invocation_id,
                  actions=EventActions(state_delta=delta, escalate=escalate or None),
                  content=types.Content(role="model", parts=[types.Part(text=text or agent.name)]))
+
+
+def classify_statement(claim: ExtractedClaim, policy: dict[str, Any]) -> tuple[str, Optional[str]]:
+    """Content policy in code: (effective tier, not_checked_reason). A None reason means verifiable.
+
+    Never-check topics are redacted whatever the statement type; other non-factual statements are
+    tagged with their type and never verified.
+    """
+    tier = effective_tier(claim.policy_tier, claim.topic, claim.claim_type, policy)
+    if claim.policy_tier == "never" or (claim.topic or "").lower().strip() in policy["never_topics"]:
+        return tier, "outside_policy"
+    if not claim.verifiable:
+        return tier, claim.statement_type  # opinion / forecast / analogy / loaded_language / hearsay / other
+    return tier, None
+
+
+def pick_auto_verify(records: list[ClaimRecord], priorities: list[dict[str, Any]], min_score: float, limit: int) -> list[int]:
+    """Top `limit` check-worthy factual claims. Sets checkworthiness and auto_verified on the records."""
+    pri = {p["index"]: p for p in priorities}
+    eligible = []
+    for r in records:
+        if r.not_checked_reason:
+            continue
+        p = pri.get(r.index)
+        if not p:
+            continue
+        r.checkworthiness = float(p["score"])
+        if p["label"] == "checkworthy_factual" and r.checkworthiness >= min_score:
+            eligible.append(r)
+    eligible.sort(key=lambda r: r.checkworthiness or 0, reverse=True)
+    selected = [r.index for r in eligible[:max(0, limit)]]
+    for r in records:
+        r.auto_verified = r.index in selected
+    return selected
 
 
 class IngestGate(BaseAgent):
@@ -81,7 +115,7 @@ class TriageGate(BaseAgent):
 
 
 class ClaimFilter(BaseAgent):
-    """Stage 3 guardrail: cap claims, re-apply the content policy in code, list what isn't checked."""
+    """Stage 3 guardrail: cap statements, re-apply the content policy in code, mark which can be verified."""
 
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
         ec = get_context()
@@ -101,12 +135,10 @@ class ClaimFilter(BaseAgent):
             except Exception as e:  # schema guardrail: malformed claims are dropped, not guessed at
                 ec.log("extract", "claim_schema_invalid", "skipped", str(e)[:200], i)
                 continue
-            tier = effective_tier(claim.policy_tier, claim.topic, claim.claim_type, ec.policy)
-            rec = ClaimRecord(index=i, start_s=ts_to_seconds(claim.start_ts), claim=claim, effective_tier=tier)
-            if claim.claim_type != "fact":
-                rec.not_checked_reason = claim.claim_type  # opinion / prediction / anecdote
-            elif tier == "never":
-                rec.not_checked_reason = "outside_policy"
+            tier, rec_reason = classify_statement(claim, ec.policy)
+            rec = ClaimRecord(index=i, start_s=ts_to_seconds(claim.start_ts), claim=claim, effective_tier=tier,
+                              not_checked_reason=rec_reason)
+            if rec_reason == "outside_policy":
                 ec.log("policy", "never_check_tier", "skipped", claim.topic, i)
             if tier != claim.policy_tier and tier != "never":
                 ec.log("policy", "tier_raised_in_code", "flagged", f"{claim.policy_tier} -> {tier} ({claim.topic})", i)
@@ -115,48 +147,34 @@ class ClaimFilter(BaseAgent):
                 rankable.append({"index": i, "claim": claim.claim, "speaker": claim.speaker, "topic": claim.topic})
         yield _event(self, ctx, {"claim_records": records, "claims_for_ranking_list": rankable,
                                  "claims_for_ranking": ranking_payload(rankable)},
-                     f"{len(rankable)} of {len(records)} claims eligible")
+                     f"{len(rankable)} of {len(records)} statements are verifiable factual claims")
 
 
 class Selector(BaseAgent):
-    """Stage 4 guardrail: keep the top-N check-worthy factual claims."""
+    """Stage 4 guardrail: auto-verify only the top few check-worthy factual claims.
+
+    Every other factual claim is left verifiable on request (not_checked_reason stays empty), so a new
+    video isn't an empty page but the run doesn't pay for claims nobody asks about.
+    """
 
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
         ec = get_context()
         st = ctx.session.state
         records = [ClaimRecord.model_validate(r) for r in st.get("claim_records", [])]
-        pri = {p["index"]: p for p in (st.get("priorities") or {}).get("priorities", [])}
         rules = ec.policy["claims"]
-        eligible = []
-        for r in records:
-            if r.not_checked_reason:
-                continue
-            p = pri.get(r.index)
-            if not p:
-                r.not_checked_reason = "not_prioritised"
-                continue
-            r.checkworthiness = float(p["score"])
-            if p["label"] != "checkworthy_factual":
-                r.not_checked_reason = "not_checkworthy"
-            elif r.checkworthiness < rules["min_checkworthiness"]:
-                r.not_checked_reason = "not_prioritised"
-            else:
-                eligible.append(r)
-        eligible.sort(key=lambda r: r.checkworthiness or 0, reverse=True)
-        for r in eligible[rules["max_verified"]:]:
-            r.not_checked_reason = "not_prioritised"
-        selected = [r.index for r in eligible[: rules["max_verified"]]]
-        minimum = ec.settings.min_checkable_claims
-        if minimum and len(selected) < minimum:
-            # Gate on what extraction actually found, not on a metadata guess: skip before spending on verification.
-            reason = (f"Only {len(selected)} checkable factual claim{'s' if len(selected) != 1 else ''} found "
-                      f"(minimum {minimum}); the rest were opinions, predictions or outside policy.")
-            ec.log("select", "too_few_checkable_claims", "skipped", reason)
+        limit = ec.settings.auto_verify if ec.settings.auto_verify >= 0 else int(rules["auto_verify"])
+        selected = pick_auto_verify(records, (st.get("priorities") or {}).get("priorities", []),
+                                    rules["min_checkworthiness"], limit)
+        minimum = ec.settings.min_statements
+        if minimum and len(records) < minimum:
+            reason = (f"Only {len(records)} substantive statement{'s' if len(records) != 1 else ''} found "
+                      f"(minimum {minimum}).")
+            ec.log("select", "too_few_statements", "skipped", reason)
             yield _event(self, ctx, {"claim_records": [r.model_dump() for r in records], "selected": [],
                                      "gate": {"skip": True, "stage": "select", "reason": reason}}, reason)
             return
         yield _event(self, ctx, {"claim_records": [r.model_dump() for r in records], "selected": selected},
-                     f"{len(selected)} claims selected for verification")
+                     f"{len(selected)} claims selected for automatic verification")
 
 
 class ClaimFanOut(BaseAgent):
@@ -178,7 +196,7 @@ class ClaimFanOut(BaseAgent):
         done = 0
 
         async def report() -> None:
-            await report_progress(ec, f"Verifying claims ({done} of {total} done)", 60 + int(35 * done / max(total, 1)))
+            await report_progress(ec, f"Verifying the top claims ({done} of {total} done)", 60 + int(35 * done / max(total, 1)))
 
         async def run(rec: ClaimRecord) -> None:
             nonlocal done
@@ -229,12 +247,17 @@ class Publisher(BaseAgent):
             if r.verdict and r.verdict.review_status != "pending":
                 tally[r.verdict.verdict] = tally.get(r.verdict.verdict, 0) + 1
         not_checked: dict[str, int] = {}
+        statement_counts: dict[str, int] = {}
         for r in records:
             if r.not_checked_reason:
                 not_checked[r.not_checked_reason] = not_checked.get(r.not_checked_reason, 0) + 1
+            t = r.claim.statement_type or "other"
+            statement_counts[t] = statement_counts.get(t, 0) + 1
         await ec.store.update_episode(ec.episode_id, {
             **base, "status": "in_review" if pending else "done", "tally": tally, "not_checked": not_checked,
+            "statement_counts": statement_counts,
             "cost_usd": round(ec.budget.spent_usd, 4), "tokens_in": ec.budget.tokens_in, "tokens_out": ec.budget.tokens_out,
         })
-        yield _event(self, ctx, {"published": True, "tally": tally, "not_checked": not_checked, "pending_review": pending},
+        yield _event(self, ctx, {"published": True, "tally": tally, "not_checked": not_checked, "pending_review": pending,
+                                 "statement_counts": statement_counts},
                      f"published: {tally}")

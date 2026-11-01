@@ -1,4 +1,7 @@
 export type VerdictName = "supported" | "misleading" | "false" | "outdated" | "disputed" | "unverifiable";
+export type StatementType = "factual_claim" | "opinion" | "forecast" | "analogy" | "loaded_language" | "hearsay" | "other";
+/** Verification of a single statement. Only factual claims can leave "not_eligible". */
+export type VerificationStatus = "not_eligible" | "not_requested" | "queued" | "verifying" | "verified" | "awaiting_review" | "failed";
 export type Pestle = "political" | "economic" | "social" | "technological" | "legal" | "environmental";
 
 export interface Citation {
@@ -39,15 +42,17 @@ export interface Claim {
   pestle_area: Pestle;
   topic: string | null;
   claim_type: string;
+  statement_type: StatementType;
+  tag_note: string | null;
+  verification_status: VerificationStatus;
+  verify_error: string | null;
   policy_tier: string;
   checkworthiness: number | null;
   not_checked_reason: string | null;
-  verdict: Verdict | null; // null = not checked, or checked but awaiting review
+  verdict: Verdict | null; // null = not verified, or verified but awaiting review
   awaiting_review: boolean;
   also_said_in?: AlsoSaidIn[];
 }
-
-export type ClaimTab = "flagged" | "checked" | "unchecked" | "all";
 
 export interface PreviewClaim {
   id: string;
@@ -91,11 +96,10 @@ export interface Episode {
   pestle_areas?: Pestle[];
   claim_texts?: string[];
   pending_count?: number;
-  preview_claims?: PreviewClaim[]; // ordered for the home carousel
+  statement_counts: Partial<Record<StatementType, number>>; // every tagged statement, by type
+  preview_claims?: PreviewClaim[]; // verified claims, ordered for the home carousel
   published_claims?: PreviewClaim[]; // all published, for the Topics tab
-  checked_count?: number;
-  tab_claims?: Record<ClaimTab, PreviewClaim[]>; // first few claims per home-card tab
-  tab_counts?: Record<ClaimTab, number>;
+  checked_count?: number; // verified claims with a public verdict
   video_pending?: boolean; // YouTube link not added yet (imported data)
 }
 

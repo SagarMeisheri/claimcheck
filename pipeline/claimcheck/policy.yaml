@@ -13,9 +13,16 @@ triage:
 
 # --- Extraction and prioritisation ------------------------------------------
 claims:
-  max_extracted: 60            # hard cap on claims kept from extraction
-  max_verified: 25             # top-N by check-worthiness that get verified
-  min_checkworthiness: 0.35    # below this a claim is "not prioritised"
+  max_extracted: 150           # hard cap on statements kept from extraction (all types)
+  auto_verify: 4               # top-N factual claims verified during the run; the rest are verified on request
+  min_checkworthiness: 0.35    # below this a factual claim is not auto-verified (it can still be verified on request)
+
+# --- On-demand verification -------------------------------------------------------
+# Rate limits are enforced by the web app (web/app/actions.ts); the per-video cost cap
+# (CLAIMCHECK_MAX_COST_USD) is enforced by the pipeline and covers the run plus every
+# on-demand verification of that video.
+on_demand:
+  statement_types: [factual_claim]   # only these get a Verify button
 
 # --- Content policy tiers ----------------------------------------------------
 # Every claim gets one PESTLE area and one tier from the extractor; code
@@ -38,7 +45,7 @@ stricter_topics: [elections, welfare_schemes, policy_outcomes, foreign_policy, d
 never_topics: [religious_belief, community_generalisation, private_individual, minor, live_court_case,
                breaking_disaster, satire]
 
-claim_types_checked: [fact]          # opinion, prediction, anecdote are listed as "not checked"
+claim_types_checked: [fact]          # legacy claim_type; opinions, forecasts, analogies etc. are tagged, not verified
 
 pestle_areas: [political, economic, social, technological, legal, environmental]
 

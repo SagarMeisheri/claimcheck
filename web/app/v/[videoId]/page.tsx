@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { ScorecardView } from "@/components/watch/ScorecardView";
+import { ScorecardView, type View } from "@/components/watch/ScorecardView";
+import { STATEMENT_TYPES } from "@/lib/statements";
 import { getEpisodeByVideo } from "@/lib/data";
 
 export const revalidate = 30;
@@ -30,7 +31,17 @@ export default async function WatchPage({ params, searchParams }: Props) {
       initialT={Number.isFinite(t) ? t : null}
       autoplay={sp.play === "1"}
       momentId={sp.moment ?? null}
-      initialView={sp.view === "all" || sp.view === "flagged" || sp.view === "checked" || sp.view === "unchecked" || sp.view === "topics" ? sp.view : null}
+      initialView={parseView(sp.view)}
     />
   );
+}
+
+/** ?view=all|verified|factual_claim|opinion|... (old links: flagged/checked -> verified, unchecked/topics -> all). */
+function parseView(v: string | undefined): View | null {
+  if (!v) return null;
+  if (v === "all" || v === "verified") return v;
+  if (v in STATEMENT_TYPES) return v as View;
+  if (v === "flagged" || v === "checked") return "verified";
+  if (v === "unchecked" || v === "topics") return "all";
+  return null;
 }

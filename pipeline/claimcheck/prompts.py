@@ -15,9 +15,11 @@ Video metadata:
 {{video_metadata}}
 
 Score the video:
-- worthiness (0-1): how many specific, checkable factual claims it likely contains (numbers, statistics,
-  named studies, rules, dated events) weighted by public importance. A ministerial interview or prime-time
-  debate full of figures scores high; an opinion monologue, vlog, or comedy scores low.
+- worthiness (0-1): how much substantive public-interest content it has to analyse, weighted by public
+  importance. Specific, checkable factual claims (numbers, statistics, named studies, rules, dated events)
+  count most; forecasts, opinions and arguments about markets, policy, health or politics also count.
+  A ministerial interview, market podcast or expert panel scores high; a vlog, comedy or entertainment
+  chat scores low.
 - factual_density: low / medium / high.
 - speaker_type: who mainly speaks.
 - pestle_mix: share of content in each PESTLE area (political, economic, social, technological, legal, environmental).
@@ -29,27 +31,47 @@ Score the video:
 {UNTRUSTED_RULE}
 """
 
-EXTRACT = f"""You extract checkable factual claims from a YouTube video for a fact-checking service in India.
+EXTRACT = f"""You break a YouTube video (often a long podcast, panel or interview) into tagged statements for an
+analysis service in India. Each statement is tagged by type, so viewers can tell facts from opinions,
+forecasts and rhetoric. Only factual claims are fact-checked later.
 
 Video: {{video_title}} ({{channel_title}})
 
 Use the spoken transcript. Look at video frames only when the speaker points at something on screen
-(a chart, a document, a label) and the claim depends on it; then set refers_to_visual=true.
+(a chart, a document, a label) and the statement depends on it; then set refers_to_visual=true.
 
-For every claim:
-- claim: one self-contained factual statement. Keep the speaker's numbers, units and time periods exactly.
-  Resolve pronouns ("it", "this scheme") to the named thing. One fact per claim.
+statement_type, one per statement:
+- factual_claim: a checkable statement about the past or present (numbers, statistics, named studies,
+  rules, dated events). Keep the speaker's numbers, units and time periods exactly.
+- opinion: a value judgement or personal appraisal that can't be proven true or false
+  ("uniquely unattractive", "this trend is ridiculous").
+- forecast: a forward-looking statement, especially one stated as certain ("this will collapse",
+  "yields will reach 8%").
+- analogy: comparing the present to a past event to borrow its weight ("this is the dot-com bubble again").
+- loaded_language: emotionally charged metaphor or buzzword doing the work of an argument
+  ("Ponzi finance", "house of cards", "spiking the drinks").
+- hearsay: a claim resting on vague or anonymous sources ("strategists are saying", "I read somewhere",
+  "rumours suggest").
+- other: a personal story or anything that fits none of the above but is still a substantive statement.
+If a statement contains a checkable fact, tag it factual_claim even if the wording is loaded, and mention
+the framing in tag_note.
+
+For every statement:
+- claim: the statement, self-contained. Resolve pronouns ("it", "this scheme") to the named thing.
+  One idea per statement. For factual_claim, one fact per statement.
 - context_quote: the words actually spoken (verbatim, Hindi or English as spoken, up to ~40 words).
-- start_ts: when the claim starts (MM:SS or HH:MM:SS).
+- start_ts: when it starts (MM:SS or HH:MM:SS).
 - speaker: name if stated, otherwise role (Host, Guest, Minister, Panellist 2).
 - pestle_area and a snake_case topic (gdp, unemployment, welfare_schemes, elections, crime, nutrition, ...).
-- claim_type: fact, opinion, prediction or anecdote. Include opinions/predictions only if they sound
-  factual, and label them honestly.
+- tag_note: for non-factual types, up to 15 neutral words on why it got this tag (e.g. "compares AI capex
+  to the 1990s telecom bubble"). Describe the statement, never the speaker's motives or honesty. Empty for
+  plain factual claims.
 - policy_tier: "never" for religious/spiritual beliefs, claims about whole communities/castes/religions,
   private individuals or minors, merits of live court cases, attacks/disasters in the first 48 hours, satire;
   "stricter" for political, health, nutrition, science, legal and social-statistics claims; otherwise "normal".
 
-Skip ads, sponsor reads, intros, greetings and jokes. Return at most 60 claims, the most specific first.
+Skip ads, sponsor reads, intros, greetings, small talk and jokes. Return at most 150 statements in the
+order they were said, favouring substantive ones.
 
 {UNTRUSTED_RULE}
 """

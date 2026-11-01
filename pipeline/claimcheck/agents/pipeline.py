@@ -4,11 +4,11 @@ EpisodePipeline (SequentialAgent)
   IngestGate      code   metadata + input guardrails
   TriageAgent     LLM    worthiness, PESTLE mix, never-check share
   TriageGate      code   skip low-value / off-policy videos
-  ExtractorAgent  LLM    agentic video -> claims
-  ClaimFilter     code   cap, content policy in code, "not checked" reasons
-  PrioritiserAgent LLM   check-worthiness score per claim
-  Selector        code   top-N
-  ClaimFanOut     code   one isolated verifier session per claim (see verifier.py)
+  ExtractorAgent  LLM    agentic video -> tagged statements (factual claim, opinion, forecast, ...)
+  ClaimFilter     code   cap, content policy in code, which statements are verifiable
+  PrioritiserAgent LLM   check-worthiness score per factual claim
+  Selector        code   top few factual claims to verify now (the rest: on request, see on_demand.py)
+  ClaimFanOut     code   one isolated verifier session per selected claim (see verifier.py)
   Publisher       code   the only writer
 """
 
@@ -59,11 +59,11 @@ STAGE_PROGRESS = [
     ("ingest_gate", "Checking the video details", 5),
     ("triage", "Judging whether the video is worth checking", 10),
     ("triage_gate", "Applying the checking rules", 12),
-    ("extractor", "Reading the video and pulling out claims", 50),
-    ("claim_filter", "Filtering claims by policy", 52),
+    ("extractor", "Reading the video and tagging statements", 50),
+    ("claim_filter", "Applying the content policy", 52),
     ("prioritiser", "Ranking claims by importance", 58),
-    ("selector", "Choosing claims to verify", 60),
-    ("claim_fanout", "Verifying claims", 95),
+    ("selector", "Choosing the top claims to verify", 60),
+    ("claim_fanout", "Verifying the top claims", 95),
     ("publisher", "Saving results", 100),
 ]
 _STAGE_INDEX = {name: i for i, (name, _, _) in enumerate(STAGE_PROGRESS)}
