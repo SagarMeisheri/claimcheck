@@ -48,3 +48,4 @@ async def _fetch(video_id: str, settings: Settings) -> dict[str, Any]:
         "default_audio_language": sn.get("defaultAudioLanguage"),
     }
 
+

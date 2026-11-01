@@ -18,6 +18,8 @@ export interface Verdict {
   confidence: number;
   reasoning: string;
   evidence_grade: string;
+  score?: number | null; // 0-100 truthfulness computed in code; null for Unverifiable
+  correction?: string | null; // False verdicts: the correct fact according to the sources
   review_status: "not_needed" | "pending" | "approved" | "changed";
   escalated: boolean;
   downgrades?: string[];
@@ -67,6 +69,15 @@ export interface PreviewClaim {
   topic: string | null;
   statement_type: StatementType;
   verification_status: VerificationStatus;
+}
+
+/** What the status endpoint returns once a claim's verification has finished and its verdict is public. */
+export interface ClaimOutcome {
+  verdict: VerdictName;
+  score: number | null;
+  reasoning: string;
+  correction: string | null;
+  sources: { url: string; title: string | null; tier: number; quote: string }[];
 }
 
 export interface TopClaim {

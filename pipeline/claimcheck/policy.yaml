@@ -135,7 +135,7 @@ sources:
 # --- Verdict rules ---------------------------------------------------------------
 verdicts:
   false_min_confidence: 0.8
-  false_requires_second_judge: true
+  false_requires_second_judge: false   # one judge; a False verdict still waits for a person (review.always)
   escalate_below_confidence: 0.6
   min_quote_chars: 25
   number_tolerance: 0.05             # 5% relative tolerance when matching numbers

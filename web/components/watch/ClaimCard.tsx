@@ -4,7 +4,7 @@ import Link from "next/link";
 import { FeedbackForm } from "@/components/FeedbackForm";
 import type { Citation, Claim } from "@/lib/types";
 import { STATEMENT_TYPES, canRequestVerify, typeOf } from "@/lib/statements";
-import { TIER_LABEL, VERDICTS, clock, domain, ytLink } from "@/lib/verdicts";
+import { TIER_LABEL, VERDICTS, clock, domain, scoreLabel, ytLink } from "@/lib/verdicts";
 import { VerifyButton } from "./VerifyButton";
 
 export type CardPhase = "idle" | "playing" | "ended";
@@ -106,8 +106,8 @@ export function ClaimCard({ claim: c, videoId, expanded, active, phase, countdow
 
   return (
     <article id={`card-${c.id}`} data-claim={c.id} data-type={typeOf(c.statement_type)}
-             className={`claim-card stmt-card is-verified${active ? " is-active" : ""}${expanded ? " is-open" : ""}`}
-             style={{ ["--stype" as string]: STATEMENT_TYPES[typeOf(c.statement_type)].cssVar }}>
+             className={`claim-card stmt-card is-verified${v ? " vtone" : ""}${active ? " is-active" : ""}${expanded ? " is-open" : ""}`}
+             style={{ ["--stype" as string]: STATEMENT_TYPES[typeOf(c.statement_type)].cssVar, ["--vc" as string]: color }}>
       <div className="cc-head">
         <TypeTag type={c.statement_type} />
         <TimeLink videoId={videoId} seconds={c.start_s} onSeek={onSeek} />
@@ -115,10 +115,14 @@ export function ClaimCard({ claim: c, videoId, expanded, active, phase, countdow
         {active && phase === "playing" && <span className="cc-playing">Playing</span>}
       </div>
 
-      {v ? <p className="cc-verdict"><span className="vword" style={{ color }}>{VERDICTS[v.verdict].label}</span></p>
+      {v ? <p className="cc-verdict">
+             <span className="vbadge" style={{ background: color }}>{VERDICTS[v.verdict].label.toUpperCase()}</span>
+             {scoreLabel(v.score) && <span className="vscore" title="Truthfulness score, computed from the verdict, the judge's confidence and the sources">{scoreLabel(v.score)}</span>}
+           </p>
          : <p className="cc-verdict"><span className="pending-word">With a reviewer</span></p>}
 
       <p className="cc-claim">“{c.claim_text}”</p>
+      {v?.verdict === "false" && v.correction && <p className="cc-correction"><strong>Correction: </strong>{v.correction}</p>}
 
       {!expanded && visibleSources.length > 0 && (
         <div className="cc-sources">
@@ -139,7 +143,7 @@ export function ClaimCard({ claim: c, videoId, expanded, active, phase, countdow
           <div className={`quotes${v.citations.length > 1 ? " quotes-two" : ""}`}>
             {v.citations.map((s) => <SourceFull key={`${s.title}-${s.url}`} s={s} color={color} />)}
           </div>
-          <h3 className="sheet-h">Why</h3>
+          <h3 className="sheet-h">{v.verdict === "unverifiable" ? "Why it can't be verified" : v.verdict === "false" ? "What is wrong" : "Why"}</h3>
           <p>{v.reasoning}</p>
           {v.evidence_grade && v.evidence_grade !== "not_applicable" && (
             <p className="meta">Strength of evidence: {v.evidence_grade.replaceAll("_", " ")}</p>

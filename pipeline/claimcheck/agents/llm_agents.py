@@ -1,5 +1,4 @@
-"""LlmAgent definitions. Each has an output schema; tools only on the evidence agent
-(kept separate from the judge so no agent combines tools with an output schema)."""
+"""LlmAgent definitions. Each has an output schema and no tools: web searches run in code (tools/evidence.py)."""
 
 from __future__ import annotations
 
@@ -9,16 +8,13 @@ from typing import Any, Optional
 from google.adk.agents import LlmAgent
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.models.llm_request import LlmRequest
-from google.adk.tools import FunctionTool
 from google.genai import types
 
 from .. import prompts
 from ..config import Settings
 from ..context import get_context
 from ..guardrails.injection import wrap_untrusted
-from ..guardrails.tool_limits import before_evidence_tool
-from ..schemas import ExtractionResult, JudgeResult, NormalizedQuery, TriageResult
-from ..tools.evidence import search_and_extract
+from ..schemas import ExtractionResult, JudgeOutput, SearchPlan, TriageResult
 
 
 def _model(name: str, settings: Settings) -> Any:
@@ -108,19 +104,13 @@ def extractor_agent(s: Settings) -> LlmAgent:
                     before_model_callback=inject_video)
 
 
-def normalizer_agent(s: Settings) -> LlmAgent:
-    return LlmAgent(name="normalizer", model=_model(s.fast_model, s), instruction=prompts.NORMALIZE,
-                    include_contents="none", output_schema=NormalizedQuery, output_key="normalized",
+def planner_agent(s: Settings) -> LlmAgent:
+    return LlmAgent(name="planner", model=_model(s.fast_model, s), instruction=prompts.PLAN,
+                    include_contents="none", output_schema=SearchPlan, output_key="plan",
                     generate_content_config=_cfg(0.0))
-
-
-def evidence_agent(s: Settings) -> LlmAgent:
-    return LlmAgent(name="evidence", model=_model(s.fast_model, s), instruction=prompts.EVIDENCE,
-                    include_contents="default", tools=[FunctionTool(search_and_extract)],
-                    before_tool_callback=before_evidence_tool, generate_content_config=_cfg(0.0))
 
 
 def judge_agent(s: Settings, name: str = "judge") -> LlmAgent:
     return LlmAgent(name=name, model=_model(s.judge_model, s), instruction=prompts.JUDGE,
-                    include_contents="none", output_schema=JudgeResult, output_key=name,
+                    include_contents="none", output_schema=JudgeOutput, output_key=name,
                     generate_content_config=_cfg(0.0), before_model_callback=inject_sources)

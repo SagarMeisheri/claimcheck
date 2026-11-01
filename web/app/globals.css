@@ -370,3 +370,19 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .submit-form.inline .notice { flex: 1 1 100%; order: 0; margin: 0; }
 .submit-form.inline .preview { flex: 1 1 100%; order: 3; }
 .cprogress-top .spinner { margin-right: 0.35rem; vertical-align: -0.1em; }
+
+/* --- Verdict colour coding (True green, False red, Unverifiable grey) and the inline Verify loader ----------- */
+.vtone, .ccard.is-verdict { border-color: var(--vc); border-left-width: 4px; background: color-mix(in srgb, var(--vc) 8%, var(--paper-raised)); }
+.vbadge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px; color: #fff; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; }
+.vscore { font-weight: 700; font-size: 0.9rem; margin-left: 0.45rem; font-variant-numeric: tabular-nums; }
+.ccard-verdict { display: flex; align-items: center; }
+.cc-correction { margin: 0.3rem 0 0; padding: 0.4rem 0.6rem; border-left: 3px solid var(--vc); background: color-mix(in srgb, var(--vc) 10%, transparent); font-size: 0.93rem; }
+.ccard-foot { border-top: 1px solid var(--rule); padding: 0.45rem 0.75rem; }
+.ccard-verify { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.ccard-verify-msg { font-size: 0.82rem; }
+.ccard-verifying { margin: 0; display: flex; align-items: center; gap: 0.45rem; font-size: 0.9rem; font-weight: 600; }
+.ccard.is-verifying { border-color: var(--t-factual); }
+@media (prefers-reduced-motion: no-preference) { .ccard.is-verifying { animation: ccard-pulse 1.6s ease-in-out infinite; } }
+@keyframes ccard-pulse { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-factual) 25%, transparent); } }
+.vcard-channel { flex-wrap: wrap; }
+.vcard-channel-name { font-weight: 600; color: var(--ink); }

@@ -72,7 +72,7 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
           <Link href={base} className="vcard-title">{ep.title}</Link>
           <div className="vcard-channel">
             <Avatar src={ep.channel_avatar} name={ep.channel_name} size={20} />
-            {ep.channel_id ? <Link href={`/c/${ep.channel_id}`}>{ep.channel_name}</Link> : <span>{ep.channel_name}</span>}
+            {ep.channel_id ? <Link href={`/c/${ep.channel_id}`} className="vcard-channel-name">{ep.channel_name}</Link> : <span>{ep.channel_name}</span>}
           </div>
           {ep.guest && <div className="vcard-guest">with {ep.guest}</div>}
           <div className="vcard-when">{ep.published_at ? timeAgo(ep.published_at) : ""}</div>

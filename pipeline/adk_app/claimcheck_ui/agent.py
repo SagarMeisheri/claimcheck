@@ -17,6 +17,7 @@ from google.adk.events import Event, EventActions
 from google.genai import types
 
 from claimcheck.agents.pipeline import build_stages, make_plugins_factory
+from claimcheck.channels import resolve_channel
 from claimcheck.config import get_settings
 from claimcheck.context import Budget, EpisodeContext, set_context
 from claimcheck.guardrails.input_checks import parse_video_id
@@ -42,7 +43,7 @@ class UiSetup(BaseAgent):
             return
         store = make_store(_settings)
         meta = await fetch_metadata(video_id, _settings)  # the one YouTube Data API call for this video
-        channel = await store.get_channel(meta.get("channel_id", "")) if meta.get("channel_id") else None
+        channel = await resolve_channel(store, meta)
         track = (channel or {}).get("track", "finance_health")
         episode_id = await store.create_episode({
             "youtube_video_id": video_id, "channel_id": (channel or {}).get("id"), "title": meta.get("title"),

@@ -159,14 +159,12 @@ def apply_verdict_checks(
         if not strong:
             downgrade("unverifiable", "false_needs_strong_source")
         elif confidence < rules["false_min_confidence"]:
-            downgrade("misleading" if confidence >= rules["escalate_below_confidence"] else "unverifiable",
-                      "false_low_confidence", f"confidence {confidence:.2f}")
+            downgrade("unverifiable", "false_low_confidence", f"confidence {confidence:.2f}")
         elif rules.get("false_requires_second_judge"):
             if second_opinion is None:
                 downgrade("unverifiable", "false_second_judge_missing")
             elif second_opinion.verdict != "false":
-                downgrade("misleading" if second_opinion.verdict in ("misleading", "false") else "unverifiable",
-                          "false_second_judge_disagrees", f"second judge said {second_opinion.verdict}")
+                downgrade("unverifiable", "false_second_judge_disagrees", f"second judge said {second_opinion.verdict}")
 
     # 6. Outdated needs a valid citation (already enforced) - nothing more in MVP.
 
@@ -181,11 +179,34 @@ def apply_verdict_checks(
         verdict=verdict,  # type: ignore[arg-type]
         confidence=round(confidence, 3),
         reasoning=reasoning,
+        correction=judge.correction if verdict == "false" else "",
         evidence_grade=judge.evidence_grade or "not_applicable",
         citations=good if verdict != "unverifiable" else [],
         downgrades=[f"{r}: {d}" for r, d in downgrades],
     )
     return final, downgrades
+
+
+_TIER_STRENGTH = {1: 1.0, 2: 0.7, 3: 0.4}
+
+
+def truth_score(verdict: str, confidence: float, citations: list[Citation]) -> Optional[int]:
+    """0-100 truthfulness, computed from the checked verdict, never asked of the model.
+
+    100 = clearly supported by strong sources, 0 = clearly contradicted, None = unverifiable (no score is honest).
+    Strength blends the judge's confidence, the best source tier and how many verified citations back it.
+    """
+    if verdict in ("unverifiable", "disputed"):
+        return None
+    good = [c for c in citations if c.quote_check_passed]
+    best = max((_TIER_STRENGTH.get(c.tier, 0.2) for c in good), default=0.0)
+    strength = 0.6 * confidence + 0.25 * best + 0.15 * min(1.0, len({c.url for c in good}) / 2)
+    strength = max(0.0, min(1.0, strength))
+    if verdict in ("supported", "outdated"):
+        return round(50 + 50 * strength) if verdict == "supported" else round(25 + 25 * strength)
+    if verdict == "misleading":
+        return round(35 + 15 * (1 - strength))
+    return round(50 - 50 * strength)  # false
 
 
 def needs_second_opinion(judge: JudgeResult, policy: dict[str, Any]) -> bool:

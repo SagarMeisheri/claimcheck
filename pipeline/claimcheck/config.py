@@ -48,13 +48,13 @@ class Settings:
 
     # Limits and guardrails
     max_cost_usd_per_episode: float = float(_env("CLAIMCHECK_MAX_COST_USD", "3.0"))
-    max_searches_per_claim: int = int(_env("CLAIMCHECK_MAX_SEARCHES_PER_CLAIM", "4"))
+    # Hard cap on web searches per Verify click. The planner proposes searches; code truncates to this (never above 3).
+    max_searches_per_claim: int = min(3, int(_env("CLAIMCHECK_MAX_SEARCHES_PER_CLAIM", "3")))
     tool_timeout_s: float = float(_env("CLAIMCHECK_TOOL_TIMEOUT_S", "60"))
     cache_similarity: float = float(_env("CLAIMCHECK_CACHE_SIMILARITY", "0.92"))
     cache_max_age_days: int = int(_env("CLAIMCHECK_CACHE_MAX_AGE_DAYS", "90"))
     # Dev flag: ignore the triage worthiness threshold (the never-check share gate still applies).
     skip_worthiness: bool = _env("CLAIMCHECK_SKIP_WORTHINESS", "0") == "1"
-    enable_escalation: bool = _env("CLAIMCHECK_ENABLE_ESCALATION", "1") == "1"
 
     # USD per 1M tokens (input, output). Argon is an ASSUMPTION until Google publishes pricing.
     prices: dict = field(default_factory=lambda: {
@@ -63,7 +63,6 @@ class Settings:
     })
     search_cost_usd: float = 0.005
     extract_cost_usd: float = 0.001
-    task_core_cost_usd: float = 0.025
 
 
 def get_settings() -> Settings:

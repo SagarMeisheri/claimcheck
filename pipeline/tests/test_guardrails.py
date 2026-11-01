@@ -19,8 +19,8 @@ GDP_QUOTE = "Real GDP grew by 7.4 per cent in FY2025-26, compared with 6.5 per c
 EVIDENCE = {GDP_URL: {"title": "MoSPI", "text": GDP_TEXT, "tier": 1}}
 
 
-def judge(verdict, conf=0.9, url=GDP_URL, quote=GDP_QUOTE, reasoning="MoSPI reports 7.4 per cent."):
-    return JudgeResult(verdict=verdict, confidence=conf, reasoning=reasoning,
+def judge(verdict, conf=0.9, url=GDP_URL, quote=GDP_QUOTE, reasoning="MoSPI reports 7.4 per cent.", correction=""):
+    return JudgeResult(verdict=verdict, confidence=conf, reasoning=reasoning, correction=correction,
                        citations=[JudgeCitation(url=url, title="MoSPI", quote=quote)] if url else [])
 
 
@@ -94,19 +94,15 @@ def test_number_mismatch_blocks_supported():
     assert fv.verdict == "unverifiable" and any(r == "number_mismatch" for r, _ in d)
 
 
-def test_false_needs_second_judge():
+def test_false_with_strong_source_stands_without_a_second_judge():
     c = claim("India's GDP grew by 12 per cent in FY2025-26.")
-    fv, _ = apply_verdict_checks(judge("false"), c, "normal", EVIDENCE, POLICY, second_opinion=None)
+    fv, _ = apply_verdict_checks(judge("false", correction="GDP grew 7.4%."), c, "normal", EVIDENCE, POLICY)
+    assert fv.verdict == "false" and fv.correction == "GDP grew 7.4%."
+
+
+def test_false_low_confidence_becomes_unverifiable():
+    fv, _ = apply_verdict_checks(judge("false", conf=0.7), claim(), "normal", EVIDENCE, POLICY)
     assert fv.verdict == "unverifiable"
-    fv, _ = apply_verdict_checks(judge("false"), c, "normal", EVIDENCE, POLICY, second_opinion=judge("false"))
-    assert fv.verdict == "false"
-    fv, _ = apply_verdict_checks(judge("false"), c, "normal", EVIDENCE, POLICY, second_opinion=judge("misleading"))
-    assert fv.verdict == "misleading"
-
-
-def test_false_low_confidence_downgraded():
-    fv, _ = apply_verdict_checks(judge("false", conf=0.7), claim(), "normal", EVIDENCE, POLICY, second_opinion=judge("false"))
-    assert fv.verdict == "misleading"
 
 
 def test_stricter_tier_requires_official_source():

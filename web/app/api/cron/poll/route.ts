@@ -11,7 +11,7 @@ export async function GET(req: Request) {
     return new NextResponse("unauthorised", { status: 401 });
   }
   const db = serviceDb();
-  const { data: channels } = await db.from("channels").select("id, youtube_channel_id, track, perceived_lean, rss_url").eq("active", true);
+  const { data: channels } = await db.from("channels").select("id, youtube_channel_id, track, perceived_lean, rss_url").eq("active", true).eq("polled", true);
 
   // This week's political episode count per side, so the side that is behind goes first.
   const weekAgo = new Date(Date.now() - 7 * 86400e3).toISOString();

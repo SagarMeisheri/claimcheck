@@ -68,7 +68,7 @@ def test_verification_status_mapping():
 
 
 # --- On-demand precheck ----------------------------------------------------------------------
-SETTINGS = Settings()
+SETTINGS = Settings(max_cost_usd_per_episode=3.0)  # pinned: a local .env must not change the tests
 
 
 def row(**kw):

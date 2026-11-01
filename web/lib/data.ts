@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type {
-  AlsoSaidIn, ChannelBalance, ChannelPage, Claim, Episode, EpisodeDetail, PendingReview, Pestle, PreviewClaim, Verdict,
+  AlsoSaidIn, ChannelBalance, ClaimOutcome, ChannelPage, Claim, Episode, EpisodeDetail, PendingReview, Pestle, PreviewClaim, Verdict,
   VerdictName, VerificationStatus,
 } from "./types";
 
@@ -92,7 +92,7 @@ type EpisodeRow = {
 };
 
 const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, tally, not_checked, statement_counts, summary, created_at, channel_id, channels(name, track, avatar_url)";
-const CLAIM_COLS = "id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, claim_type, statement_type, tag_note, verification_status, verify_error, policy_tier, checkworthiness, not_checked_reason, verdict_id, episode_id, verdicts(id, verdict, confidence, reasoning, evidence_grade, review_status, escalated, citations(url, title, tier, quote))";
+const CLAIM_COLS = "id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, claim_type, statement_type, tag_note, verification_status, verify_error, policy_tier, checkworthiness, not_checked_reason, verdict_id, episode_id, verdicts(id, verdict, confidence, reasoning, score, correction, evidence_grade, review_status, escalated, citations(url, title, tier, quote))";
 
 function toEpisode(r: EpisodeRow): Episode {
   return {
@@ -191,7 +191,7 @@ export async function getChannel(id: string): Promise<ChannelPage | null> {
 export async function getBalance(): Promise<ChannelBalance[]> {
   // Service role: needs the internal perceived_lean column, but only aggregates leave this function.
   const { data, error } = await serviceDb().from("channels")
-    .select("name, track, perceived_lean, episodes(status, tally)").eq("active", true);
+    .select("name, track, perceived_lean, episodes(status, tally)").eq("active", true).eq("polled", true); // curated channels only
   if (error) throw error;
   return (data ?? []).map((ch: any) => {
     const eps = (ch.episodes ?? []).filter((e: any) => ["done", "in_review"].includes(e.status));
@@ -215,7 +215,7 @@ export async function getAllEpisodes(): Promise<AdminEpisode[]> {
 
 export async function getPendingReviews(): Promise<PendingReview[]> {
   const { data, error } = await serviceDb().from("verdicts")
-    .select("id, verdict, confidence, reasoning, evidence_grade, review_status, escalated, downgrades, citations(url, title, tier, quote), claims(id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, claim_type, statement_type, tag_note, verification_status, policy_tier, checkworthiness, not_checked_reason, episodes(id, title, youtube_video_id, channels(name)))")
+    .select("id, verdict, confidence, reasoning, score, correction, evidence_grade, review_status, escalated, downgrades, citations(url, title, tier, quote), claims(id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, claim_type, statement_type, tag_note, verification_status, policy_tier, checkworthiness, not_checked_reason, episodes(id, title, youtube_video_id, channels(name)))")
     .eq("review_status", "pending").order("created_at").limit(50);
   if (error) throw error;
   return (data ?? []).flatMap((v: any) => (v.claims ?? []).slice(0, 1).map((c: any) => ({
@@ -235,13 +235,19 @@ export async function getClaimForCard(id: string): Promise<{ claim: Claim; episo
   return { claim: toClaim(c), episode: toEpisode(ep as unknown as EpisodeRow) };
 }
 
-export type ClaimStatus = { id: string; verification_status: VerificationStatus; verify_error: string | null; video_id: string | null };
+export type ClaimStatus = { id: string; verification_status: VerificationStatus; verify_error: string | null; video_id: string | null; outcome: ClaimOutcome | null };
 
-/** Live verification state of one claim (no verdict: those stay behind RLS until reviewed). */
+/** Live verification state of one claim. The verdict is included only when it is public (RLS hides it while awaiting review). */
 export async function getClaimStatus(id: string): Promise<ClaimStatus | null> {
-  const { data } = await publicDb().from("claims").select("id, verification_status, verify_error, episodes(youtube_video_id)")
+  const { data } = await publicDb().from("claims")
+    .select("id, verification_status, verify_error, episodes(youtube_video_id), verdicts(verdict, reasoning, score, correction, citations(url, title, tier, quote))")
     .eq("id", id).maybeSingle();
   if (!data) return null;
   const d = data as any;
-  return { id: d.id, verification_status: d.verification_status, verify_error: d.verify_error, video_id: d.episodes?.youtube_video_id ?? null };
+  const v = d.verdicts;
+  const outcome: ClaimOutcome | null = v ? {
+    verdict: v.verdict, score: v.score ?? null, reasoning: v.reasoning, correction: v.correction ?? null,
+    sources: (v.citations ?? []).slice(0, 3),
+  } : null;
+  return { id: d.id, verification_status: d.verification_status, verify_error: d.verify_error, video_id: d.episodes?.youtube_video_id ?? null, outcome };
 }

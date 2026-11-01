@@ -25,6 +25,7 @@ def ts_to_seconds(ts: str) -> int:
 
 class Store(Protocol):
     async def get_channel(self, youtube_channel_id: str) -> Optional[dict[str, Any]]: ...
+    async def add_channel(self, row: dict[str, Any]) -> Optional[dict[str, Any]]: ...
     async def create_episode(self, row: dict[str, Any]) -> str: ...
     async def update_episode(self, episode_id: str, fields: dict[str, Any]) -> None: ...
     async def match_verdict(self, embedding: list[float], threshold: float, max_age_days: int) -> Optional[tuple[str, FinalVerdict]]: ...
@@ -53,6 +54,11 @@ class SupabaseStore:
         r = self.db.table("channels").select("*").eq("youtube_channel_id", youtube_channel_id).limit(1).execute()
         return r.data[0] if r.data else None
 
+    async def add_channel(self, row: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Creates a channel row (a no-op if it already exists) and returns it."""
+        self.db.table("channels").upsert(row, on_conflict="youtube_channel_id", ignore_duplicates=True).execute()
+        return await self.get_channel(row["youtube_channel_id"])
+
     async def create_episode(self, row: dict[str, Any]) -> str:
         r = self.db.table("episodes").upsert(row, on_conflict="youtube_video_id").execute()
         return r.data[0]["id"]
@@ -78,6 +84,7 @@ class SupabaseStore:
         now = dt.datetime.now(dt.timezone.utc)
         vrow = {"verdict": v.verdict, "confidence": v.confidence, "reasoning": v.reasoning,
                 "evidence_grade": v.evidence_grade, "model": judge_model, "escalated": v.escalated,
+                "score": v.score, "correction": v.correction or None,
                 "review_status": v.review_status, "downgrades": v.downgrades,
                 "recheck_after": (now + dt.timedelta(days=90)).isoformat()}
         verdict_id = self.db.table("verdicts").insert(vrow).execute().data[0]["id"]

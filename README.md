@@ -57,14 +57,17 @@ EpisodePipeline (ADK SequentialAgent)                       POST /episodes
                            hearsay, other
   ClaimFilter       code   150-statement cap; content policy re-applied in code (never-check topics are
                            redacted for every type); only factual claims are verifiable
-    ClaimVerifier: cache check -> Normalizer -> JudgeLoop(Evidence -> Judge -> ConfidenceGate) x2
-    then: Task API escalation if unsure, second judge for any False, verdict checks, review flag
+    (nothing is verified in this run; a viewer presses Verify, see below)
   Publisher         code   the only writer; also stores statement counts by type
 
 On-demand (agents/on_demand.py)                             POST /claims/{id}/verify
   web app           rate limits (10 per person per day, 120 per hour site-wide), marks the claim queued
   precheck          code   factual claim, not redacted, not already verified, video under its cost cap
-  ClaimVerifier     same verifier and guardrails as above, one video at a time so the cap holds
+  ClaimVerifier     one video at a time so the cap holds. Cache check (code), then an ADK Workflow:
+                    plan (LLM: official / corroborating / counter-evidence searches) -> clamp (code: at most
+                    3, never more) -> search (parallel_worker: 3 Parallel search+extract at once, no retries)
+                    -> judge (LLM: TRUE / FALSE / UNVERIFIABLE + explanation, correction, cited quotes).
+                    Then in code: quote, number and source-tier checks, 0-100 score, review flag
   save              verdict on the claim row (shared by everyone), cost added to the video, tally
                     recomputed; a False (or political Misleading/Disputed) waits for review
 ```
@@ -78,7 +81,7 @@ Guardrails live in `pipeline/claimcheck/guardrails/` and `policy.yaml`:
 | Every model call | Per-episode cost cap ($3) via an ADK plugin; Model Armor plugin when templates are configured. The cap covers the first pass plus every on-demand verification of that video |
 | Verify button | Factual claims only; 10 requests per person per day (salted IP hash) and 120 per hour site-wide (`VERIFY_PER_PERSON_PER_DAY`, `VERIFY_SITE_PER_HOUR`); a claim is verified once and the verdict reused for everyone |
 | Evidence tool | Model picks only query and scope; domains come from policy (tier-1 list per PESTLE area, blocklist always), 4 searches per claim, 60 s timeout, injection lines stripped from pages |
-| Verdicts | Quote must appear in the fetched text; numbers must match (Indian units understood); stricter-tier claims need a tier-1 source; False needs a strong source, confidence >= 0.8 and agreement from a second judge; Disputed needs two sources; reasoning rewritten if it accuses anyone of lying |
+| Verdicts | Quote must appear in the fetched text; numbers must match (Indian units understood); stricter-tier claims need a tier-1 source; False needs a strong source and confidence >= 0.8, otherwise it becomes Unverifiable; a 0-100 truthfulness score is computed in code (none for Unverifiable); reasoning rewritten if it accuses anyone of lying |
 | Publishing | Every False, and political Misleading/Disputed, waits for human review, including on-demand ones; pending verdicts are hidden by RLS and excluded from tallies (the claim shows "With a reviewer"); never-check statements are stored redacted |
 
 All of these are covered by tests in `pipeline/tests/`.
@@ -101,7 +104,7 @@ Verified: guardrail, policy, tagging and on-demand tests, the SQL schema and RLS
 Not yet run against live services: Gemini (including agentic video on a real YouTube URL), Parallel Search/Extract/Task, YouTube Data API, the real YouTube embedded player and thumbnails, Supabase, Model Armor. Expect a short shakedown on first live run. In particular:
 - Gemini 4 Argon pricing is an assumption in `config.py` ($2.50/$15 per M tokens).
 - Agentic video uses `types.Part(media_processing=AGENTIC)` from google-genai 2.34; confirm your model accepts it, or set `CLAIMCHECK_VIDEO_PROCESSING=static`.
-- `SequentialAgent`/`LoopAgent` emit deprecation warnings in ADK 2.13 in favour of the new `Workflow` graph API; they work today, and migrating is a contained change in `agents/pipeline.py` and `agents/verifier.py`.
+- The claim verifier uses the ADK `Workflow` graph API. The first-pass pipeline (`agents/pipeline.py`) still uses `SequentialAgent`, which emits a deprecation warning in ADK 2.13.
 - The Supabase Python client is synchronous; fine at MVP volume, swap for the async client if throughput matters.
 
 Before launch: have a lawyer review the content policy, corrections process and election-period obligations.

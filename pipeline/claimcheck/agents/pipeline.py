@@ -89,7 +89,9 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
 
     from ..tools.youtube import fetch_metadata  # channel lookup decides the track before the run
     meta = await fetch_metadata(video_id, settings)
-    channel = await store.get_channel(meta.get("channel_id", "")) if meta.get("channel_id") else None
+    from ..channels import resolve_channel
+
+    channel = await resolve_channel(store, meta)
     track = (channel or {}).get("track", "finance_health")
     episode_id = episode_id or await store.create_episode({
         "youtube_video_id": video_id, "channel_id": (channel or {}).get("id"), "title": meta.get("title"),

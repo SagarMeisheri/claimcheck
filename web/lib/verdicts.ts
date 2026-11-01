@@ -1,13 +1,18 @@
 import type { Pestle, VerdictName } from "./types";
 
 export const VERDICTS: Record<VerdictName, { label: string; meaning: string; cssVar: string }> = {
-  supported: { label: "Supported", meaning: "A reliable source states the same fact.", cssVar: "var(--v-supported)" },
+  supported: { label: "True", meaning: "A reliable source states the same fact.", cssVar: "var(--v-supported)" },
   misleading: { label: "Misleading", meaning: "Close, but the period, base or framing is wrong.", cssVar: "var(--v-misleading)" },
-  false: { label: "False", meaning: "The best available source contradicts it.", cssVar: "var(--v-false)" },
+  false: { label: "False", meaning: "The best available source contradicts it. The correction is shown.", cssVar: "var(--v-false)" },
   outdated: { label: "Outdated", meaning: "True once, but the figure or rule has changed.", cssVar: "var(--v-outdated)" },
   disputed: { label: "Disputed data", meaning: "Official and independent sources disagree; both are shown.", cssVar: "var(--v-disputed)" },
-  unverifiable: { label: "Unverifiable", meaning: "No reliable source addresses it.", cssVar: "var(--v-unverifiable)" },
+  unverifiable: { label: "Unverifiable", meaning: "The sources don't settle it. The reason is given.", cssVar: "var(--v-unverifiable)" },
 };
+
+/** "True · 92/100" style label for a verdict word with its score. */
+export function scoreLabel(score: number | null | undefined): string | null {
+  return score === null || score === undefined ? null : `${score}/100`;
+}
 
 export const VERDICT_ORDER: VerdictName[] = ["false", "misleading", "disputed", "outdated", "supported", "unverifiable"];
 

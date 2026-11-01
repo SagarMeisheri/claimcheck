@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { PreviewClaim, StatementType } from "@/lib/types";
+import { InlineVerify, type InlineResult } from "./InlineVerify";
 import { STATEMENT_TYPES, TYPE_ORDER, totalStatements, typeOf } from "@/lib/statements";
-import { VERDICTS, clock } from "@/lib/verdicts";
+import { VERDICTS, clock, domain, scoreLabel } from "@/lib/verdicts";
 
 type Counts = Partial<Record<StatementType, number>>;
 type Tab = "all" | StatementType;
@@ -12,28 +13,52 @@ type Tab = "all" | StatementType;
 function Card({ videoId, c, videoPending, active, onPlay }: {
   videoId: string; c: PreviewClaim; videoPending: boolean; active: boolean; onPlay(c: PreviewClaim): void;
 }) {
-  const v = c.verdict ? VERDICTS[c.verdict] : null;
+  // A verdict can arrive while the page is open (the Verify button below), so the card keeps its own copy.
+  const [result, setResult] = useState<InlineResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const onBusy = useCallback((b: boolean) => setBusy(b), []);
+  const onDone = useCallback((r: InlineResult) => setResult(r), []);
+
+  const verdict = c.verdict ?? result?.outcome?.verdict ?? null;
+  const v = verdict ? VERDICTS[verdict] : null;
+  const score = scoreLabel(result?.outcome?.score);
+  const src = result?.outcome?.sources[0];
+  const sourceLine = c.source_line ?? (src ? `${src.title ?? domain(src.url)}: ${src.quote}` : null);
+  const awaiting = c.awaiting_review || result?.status === "awaiting_review";
   const t = STATEMENT_TYPES[typeOf(c.statement_type)];
-  const verifiable = typeOf(c.statement_type) === "factual_claim" && !v && !c.awaiting_review;
+  const factual = typeOf(c.statement_type) === "factual_claim";
+  const verifiable = factual && !v && !awaiting;
+  const cls = `ccard${active ? " is-active" : ""}${v ? " is-verdict" : " ccard-statement"}${busy ? " is-verifying" : ""}`;
   return (
-    <article className={`ccard${active ? " is-active" : ""}${v ? "" : " ccard-statement"}`} role="listitem"
-             style={{ ["--stype" as string]: t.cssVar }}>
+    <article className={cls} role="listitem"
+             style={{ ["--stype" as string]: t.cssVar, ["--vc" as string]: v ? v.cssVar : undefined }}>
       {/* Clicking a statement plays the video from its timestamp, right here on the home page. */}
       <button type="button" className="ccard-main ccard-playbtn" disabled={videoPending} onClick={() => onPlay(c)}
               aria-label={`Play the video from ${clock(c.start_s)}: ${c.claim_text}`}>
         <span className="ccard-head">
           <span className="ts">▶ {clock(c.start_s)}</span>
           <span className="stype-tag"><span className="bd-dot" style={{ background: t.cssVar }} aria-hidden="true" />{t.label}</span>
-          {v && <span className="vword" style={{ color: v.cssVar }}>{v.label}</span>}
           {active && <span className="cc-playing">Playing</span>}
         </span>
+        {v && (
+          <span className="ccard-verdict">
+            <span className="vbadge" style={{ background: v.cssVar }}>{v.label.toUpperCase()}</span>
+            {score && <span className="vscore">{score}</span>}
+          </span>
+        )}
         <span className="ccard-text">{c.claim_text}</span>
-        {v && c.source_line && <span className="ccard-src" style={{ borderColor: v.cssVar }}>{c.source_line}</span>}
-        {c.awaiting_review && <span className="meta">Verified, with a reviewer</span>}
+        {v && sourceLine && <span className="ccard-src" style={{ borderColor: v.cssVar }}>{sourceLine}</span>}
+        {awaiting && <span className="meta">Verified, with a reviewer</span>}
       </button>
-      <Link href={`/v/${videoId}#claim-${c.id}`} className="ccard-play">
-        {v ? "Sources and details" : verifiable ? "Open to verify" : "Open in the video page"}
-      </Link>
+      {verifiable && !videoPending ? (
+        <div className="ccard-foot">
+          <InlineVerify claimId={c.id} status={c.verification_status} onBusy={onBusy} onDone={onDone} />
+        </div>
+      ) : (v || factual) && (
+        <Link href={`/v/${videoId}#claim-${c.id}`} className="ccard-play">
+          {v ? "Sources and details" : "Open in the video page"}
+        </Link>
+      )}
     </article>
   );
 }
