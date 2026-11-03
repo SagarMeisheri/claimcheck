@@ -1,4 +1,4 @@
-"""Stage 1 guardrail: only valid, public, long-enough, non-live videos get in."""
+"""Stage 1 guardrail: only valid, public, finished videos get in."""
 
 from __future__ import annotations
 
@@ -42,13 +42,12 @@ def parse_iso8601_duration(s: str) -> int:
 
 
 def validate_metadata(meta: dict[str, Any], policy: dict[str, Any]) -> tuple[bool, str]:
-    """Returns (ok, reason). Reason is shown to users when a video is rejected."""
+    """Returns (ok, reason). Reason is shown to users when a video is rejected.
+
+    Any kind of video is welcome; only what Gemini can't read is turned away.
+    """
     if meta.get("privacy_status") != "public":
-        return False, "Only public videos can be checked (this one is private or unlisted)."
+        return False, "Only public videos can be analysed (this one is private, unlisted or no longer available)."
     if meta.get("live_broadcast_content") in ("live", "upcoming"):
-        return False, "Live streams and premieres can't be checked until they finish."
-    if meta.get("is_short"):
-        return False, "Shorts aren't covered in this version."
-    if int(meta.get("duration_s", 0)) < int(policy["triage"]["min_duration_s"]):
-        return False, "Videos under 5 minutes aren't covered."
+        return False, "Live streams and premieres can't be analysed until they finish."
     return True, ""

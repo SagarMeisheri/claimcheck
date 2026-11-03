@@ -1,12 +1,10 @@
-"""EpisodePipeline: the ADK app that turns one YouTube URL into a scorecard.
+"""EpisodePipeline: the ADK app that turns one YouTube URL into a tagged breakdown of what was said.
 
 EpisodePipeline (SequentialAgent)
-  IngestGate      code   metadata + input guardrails
-  TriageAgent     LLM    worthiness, PESTLE mix, never-check share
-  TriageGate      code   skip low-value / off-policy videos
-  ExtractorAgent  LLM    agentic video -> tagged statements (factual claim, opinion, forecast, ...)
-  ClaimFilter     code   cap, content policy in code, which statements are verifiable
-  Publisher       code   the only writer (claims are verified later, on request: see on_demand.py)
+  IngestGate      code   metadata + input guardrails (public, finished)
+  ExtractorAgent  LLM    agentic video -> tagged statements (claim, opinion, forecast, other) + summary
+  ClaimFilter     code   cap, content policy in code, which statements can have sources looked up
+  Publisher       code   the only writer (sources are looked up later, on request: see sources_on_demand.py)
 """
 
 from __future__ import annotations
@@ -27,9 +25,9 @@ from ..guardrails.budget import BudgetPlugin
 from ..guardrails.input_checks import parse_video_id
 from ..policy import load_policy
 from ..store import make_store
-from .llm_agents import extractor_agent, triage_agent
+from .llm_agents import extractor_agent
 from .streaming import StatementStreamer
-from .stages import ClaimFilter, IngestGate, Publisher, TriageGate
+from .stages import ClaimFilter, IngestGate, Publisher
 
 log = logging.getLogger("claimcheck")
 APP = "claimcheck"
@@ -39,8 +37,6 @@ def build_stages(settings: Settings) -> list:
     """Fresh (unparented) stage agents, so they can be placed in the pipeline or in the adk web wrapper."""
     return [
         IngestGate(name="ingest_gate"),
-        triage_agent(settings),
-        TriageGate(name="triage_gate"),
         extractor_agent(settings),
         ClaimFilter(name="claim_filter"),
         Publisher(name="publisher"),
@@ -53,9 +49,7 @@ def build_pipeline(settings: Settings) -> SequentialAgent:
 
 # (agent name, label shown while it runs, % complete once it has finished)
 STAGE_PROGRESS = [
-    ("ingest_gate", "Checking the video details", 5),
-    ("triage", "Judging whether the video is worth checking", 10),
-    ("triage_gate", "Applying the checking rules", 12),
+    ("ingest_gate", "Checking the video details", 12),
     ("extractor", "Reading the video and tagging statements", 85),
     ("claim_filter", "Applying the content policy", 92),
     ("publisher", "Saving results", 100),
@@ -87,12 +81,11 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
     if not video_id:
         return {"status": "rejected", "reason": "Not a valid YouTube video URL."}
 
-    from ..tools.youtube import fetch_metadata  # channel lookup decides the track before the run
+    from ..tools.youtube import fetch_metadata  # one YouTube API call, shared with the ingest gate
     meta = await fetch_metadata(video_id, settings)
     from ..channels import resolve_channel
 
     channel = await resolve_channel(store, meta)
-    track = (channel or {}).get("track", "finance_health")
     episode_id = episode_id or await store.create_episode({
         "youtube_video_id": video_id, "channel_id": (channel or {}).get("id"), "title": meta.get("title"),
         "status": "queued", "submitted_by": submitted_by,
@@ -104,17 +97,17 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
         "published_at": meta.get("published_at") or None, "channel_id": (channel or {}).get("id"),
     }.items() if v is not None})
 
-    ec = EpisodeContext(episode_id=episode_id, video_id=video_id, track=track, settings=settings, policy=policy,
+    ec = EpisodeContext(episode_id=episode_id, video_id=video_id, settings=settings, policy=policy,
                         store=store, budget=Budget(cap_usd=settings.max_cost_usd_per_episode),
                         plugins_factory=make_plugins_factory(settings), duration_s=int(meta.get("duration_s") or 0))
     token = set_context(ec)
     runner = InMemoryRunner(agent=build_pipeline(settings), app_name=APP, plugins=ec.plugins_factory())
     session = await runner.session_service.create_session(app_name=APP, user_id="pipeline", state={
-        "video_url": f"https://www.youtube.com/watch?v={video_id}", "episode_id": episode_id, "track": track,
+        "video_url": f"https://www.youtube.com/watch?v={video_id}", "episode_id": episode_id,
     })
     try:
         await report_progress(ec, STAGE_PROGRESS[0][1], 2)
-        await store.clear_unverified_statements(episode_id)  # leftovers from an earlier attempt would clash with the new rows
+        await store.clear_statements_without_sources(episode_id)  # leftovers from an earlier attempt would clash with the new rows
         streamer = StatementStreamer(ec)
         last = -1
         # SSE streaming: the extractor's reply arrives in pieces and each finished statement is saved at once.
@@ -134,20 +127,19 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
         st = final.state
         gate = st.get("gate", {})
         result = {"episode_id": episode_id, "status": "skipped" if gate.get("skip") else "published",
-                  "skip_reason": gate.get("reason"), "tally": st.get("tally"), "not_checked": st.get("not_checked"),
-                  "pending_review": st.get("pending_review", 0), "cost_usd": round(ec.budget.spent_usd, 4),
-                  "guardrail_events": [e.model_dump() for e in ec.events]}
-        if result["status"] == "published" and settings.auto_verify:
-            # The statements are already on screen. Now check the most check-worthy claims, each one appearing as it finishes.
-            from .video_verifier import run_video_verification
+                  "skip_reason": gate.get("reason"), "statement_counts": st.get("statement_counts"),
+                  "cost_usd": round(ec.budget.spent_usd, 4), "guardrail_events": [e.model_dump() for e in ec.events]}
+        if result["status"] == "published" and settings.auto_sources:
+            # The statements are already on screen. Now look up sources for the claims, each appearing as it finishes.
+            from .video_sources import run_video_sources
             try:
-                result["auto_verify"] = await run_video_verification(episode_id, settings=settings, store=store)
+                result["sources"] = await run_video_sources(episode_id, settings=settings, store=store)
             except Exception:
-                log.exception("automatic verification crashed for %s", episode_id)
+                log.exception("automatic source lookup crashed for %s", episode_id)
         return result
     except Exception as e:
         if is_budget_error(e):
-            reason = f"Stopped by the per-episode cost cap (${settings.max_cost_usd_per_episode:.2f})."
+            reason = f"Stopped by the per-video cost cap (${settings.max_cost_usd_per_episode:.2f})."
             await store.update_episode(episode_id, {"status": "failed", "skip_reason": reason})
             await store.save_guardrail_events(episode_id, ec.events)
             return {"episode_id": episode_id, "status": "failed", "reason": reason}
@@ -156,7 +148,6 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
         await store.save_guardrail_events(episode_id, ec.events)
         return {"episode_id": episode_id, "status": "failed", "reason": f"{type(e).__name__}: {e}"}
     finally:
-        from contextvars import Token  # noqa: F401
         try:
             token.var.reset(token)
         except ValueError:

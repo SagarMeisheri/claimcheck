@@ -1,20 +1,15 @@
 "use client";
 
-import Link from "next/link";
-import { FeedbackForm } from "@/components/FeedbackForm";
+import { useState } from "react";
+import { CheckSources } from "@/components/CheckSources";
+import { ReportForm } from "@/components/ReportForm";
+import { SourceList } from "@/components/SourceList";
 import { TopicTags } from "@/components/TopicTags";
-import type { Citation, Claim } from "@/lib/types";
-import { STATEMENT_TYPES, canRequestVerify, typeOf } from "@/lib/statements";
-import { TIER_LABEL, VERDICTS, clock, domain, scoreLabel, ytLink } from "@/lib/verdicts";
-import { VerifyButton } from "./VerifyButton";
+import type { Claim } from "@/lib/types";
+import { STATEMENT_TYPES, SEARCHING, canCheckSources, typeOf } from "@/lib/statements";
+import { clock, ytLink } from "@/lib/format";
 
 export type CardPhase = "idle" | "playing" | "ended";
-
-const PLAIN_TIER: Record<number, string> = {
-  1: "Official statistics, regulator, court or peer-reviewed research",
-  2: TIER_LABEL[2],
-  3: TIER_LABEL[3],
-};
 
 /** A real link to the moment on YouTube (works with open-in-new-tab); a normal click seeks the player here instead. */
 export function TimeLink({ videoId, seconds, onSeek, className = "cc-ts" }: {
@@ -29,168 +24,65 @@ export function TimeLink({ videoId, seconds, onSeek, className = "cc-ts" }: {
   );
 }
 
-/** Colour-coded tag for a statement's type (Claim, Opinion, Forecast, ...). */
+/** Colour-coded tag for a statement's type (Claim, Opinion, Forecast, Other). */
 export function TypeTag({ type }: { type: string }) {
   const t = STATEMENT_TYPES[typeOf(type)];
-  return <span className="stype" style={{ ["--stype" as string]: t.cssVar }} title={t.meaning}>{t.label}</span>;
+  return <span className="stype" style={{ ["--stype" as string]: t.cssVar }} title={`${t.meaning} Tagged by AI.`}>{t.label}</span>;
 }
 
 /**
- * A tagged statement without a public verdict: an opinion, forecast, hearsay and so on, or a factual
- * claim nobody has verified yet (with a Verify button).
+ * One statement: its AI tag, time, the AI's plain-words version of what was said, the AI transcript on request,
+ * and for claims, "Check sources" or the sources already found. Nothing here judges the statement or the speaker.
  */
-export function StatementCard({ claim: c, videoId, active, phase, canWatch, canVerify = true, activeTopic, onTopic, onSeek, onWatch, onKeepWatching }: {
+export function StatementCard({ claim: c, videoId, active, phase, canWatch, canLookUp = true, hasNext, countdown,
+  activeTopic, onTopic, onSeek, onWatch, onKeepWatching, onNext, onShare }: {
   claim: Claim; videoId: string; active: boolean; phase: CardPhase; canWatch: boolean;
-  canVerify?: boolean; // false while the video is still being analysed
+  canLookUp?: boolean; // false while the video is still being analysed
+  hasNext: boolean; countdown: number | null;
   activeTopic?: string | null; onTopic(t: string): void;
-  onSeek(): void; onWatch(): void; onKeepWatching(): void;
+  onSeek(): void; onWatch(): void; onKeepWatching(): void; onNext(): void; onShare(): void;
 }) {
+  const [showQuote, setShowQuote] = useState(false);
   const hidden = c.not_checked_reason === "outside_policy"; // text and moment stay unpublished
   const type = typeOf(c.statement_type);
-  const verifiable = c.statement_type === "factual_claim" && !hidden;
+  const isClaim = type === "factual_claim" && !hidden;
+  const showSources = isClaim && canLookUp && (canCheckSources(c) || SEARCHING.includes(c.sources_status));
   return (
     <article id={`card-${c.id}`} data-claim={c.id} data-type={type}
-             className={`claim-card stmt-card${verifiable ? "" : " claim-card-unchecked"}${active ? " is-active" : ""}`}
+             className={`claim-card stmt-card${isClaim ? "" : " claim-card-unchecked"}${active ? " is-active" : ""}`}
              style={{ ["--stype" as string]: STATEMENT_TYPES[type].cssVar }}>
       <div className="cc-head">
         <TypeTag type={type} />
         {!hidden && <TimeLink videoId={videoId} seconds={c.start_s} onSeek={onSeek} />}
-        {c.speaker && !hidden && <span className="meta">{c.speaker}</span>}
+        {c.speaker && !hidden && <span className="meta" title="Speaker as identified by AI from the video">{c.speaker} <span className="ai-note">(identified by AI)</span></span>}
         {active && phase === "playing" && <span className="cc-playing">Playing</span>}
       </div>
-      <p className="cc-claim">{hidden ? "A statement outside our content policy" : `“${c.claim_text}”`}</p>
-      {!hidden && c.tag_note && <p className="meta stmt-note">{c.tag_note}</p>}
+      <p className="cc-claim">{hidden ? "A statement that isn't shown under our content policy" : c.claim_text}</p>
       {!hidden && <TopicTags topics={c.topics} active={activeTopic} onPick={onTopic} />}
-      {verifiable && canVerify && (canRequestVerify(c) || c.verification_status === "queued" || c.verification_status === "verifying"
-        || c.verification_status === "awaiting_review")
-        && <VerifyButton claimId={c.id} status={c.verification_status} error={c.verify_error} />}
+
+      {!hidden && c.context_quote && (
+        showQuote
+          ? <p className="said"><span className="ai-note">AI transcript, may contain errors. Check the video.</span><br />“{c.context_quote}”</p>
+          : <button type="button" className="linkish said-toggle" onClick={() => setShowQuote(true)}>What was said</button>
+      )}
+
+      {isClaim && c.sources_status === "done" && <SourceList sources={c.sources} />}
+      {showSources && <CheckSources claimId={c.id} status={c.sources_status} error={c.sources_error} />}
+
       {!hidden && (
         <div className="cc-actions">
-          {active && phase === "ended"
-            ? <button className="btn small" onClick={onKeepWatching}>Keep watching</button>
-            : canWatch && <button className="btn secondary small" onClick={onWatch}>▶ Watch 20 s</button>}
-        </div>
-      )}
-    </article>
-  );
-}
-
-function SourceText({ s }: { s: Citation }) {
-  return s.summary ? <>{s.quote}</> : <>“{s.quote}”</>;
-}
-
-function SourceFull({ s, color }: { s: Citation; color: string }) {
-  return (
-    <figure className="source" style={{ borderColor: color }}>
-      {s.summary
-        ? <p className="source-summary"><span className="meta">Source summary: </span>{s.quote}</p>
-        : <blockquote>“{s.quote}”</blockquote>}
-      <figcaption>
-        {s.url
-          ? <><a href={s.url} target="_blank" rel="noopener noreferrer">{s.title || domain(s.url)}</a>
-              <span className="meta"> {domain(s.url)}. {PLAIN_TIER[s.tier] ?? ""}</span></>
-          : <><span>{s.title}</span><span className="meta"> (source link to be attached)</span></>}
-      </figcaption>
-    </figure>
-  );
-}
-
-/**
- * A verified claim (or one awaiting review) with its evidence visible up front. "Watch 20 s" plays the moment; after the clip the card
- * offers Keep watching or Next claim. "More" expands in place: what was said, why, all sources, actions.
- */
-export function ClaimCard({ claim: c, videoId, expanded, active, phase, countdown, hasNext, canWatch, activeTopic, onTopic, onToggle, onWatch, onKeepWatching, onNext, onSeek, onShare, onCopySource }: {
-  claim: Claim; videoId: string; expanded: boolean; active: boolean; phase: CardPhase; countdown: number | null; hasNext: boolean; canWatch: boolean;
-  activeTopic?: string | null; onTopic(t: string): void;
-  onToggle(): void; onWatch(): void; onKeepWatching(): void; onNext(): void; onSeek(): void; onShare(): void; onCopySource(): void;
-}) {
-  const v = c.verdict;
-  const color = v ? VERDICTS[v.verdict].cssVar : "var(--ink-soft)";
-  const visibleSources = v ? (v.verdict === "disputed" ? v.citations : v.citations.slice(0, 1)) : [];
-
-  return (
-    <article id={`card-${c.id}`} data-claim={c.id} data-type={typeOf(c.statement_type)}
-             className={`claim-card stmt-card is-verified${v ? " vtone" : ""}${active ? " is-active" : ""}${expanded ? " is-open" : ""}`}
-             style={{ ["--stype" as string]: STATEMENT_TYPES[typeOf(c.statement_type)].cssVar, ["--vc" as string]: color }}>
-      <div className="cc-head">
-        <TypeTag type={c.statement_type} />
-        <TimeLink videoId={videoId} seconds={c.start_s} onSeek={onSeek} />
-        {c.speaker && <span className="meta">{c.speaker}</span>}
-        {active && phase === "playing" && <span className="cc-playing">Playing</span>}
-      </div>
-
-      {v ? <p className="cc-verdict">
-             <span className="vbadge" style={{ background: color }}>{VERDICTS[v.verdict].label.toUpperCase()}</span>
-             {scoreLabel(v.score) && <span className="vscore" title="Truthfulness score, computed from the verdict, the judge's confidence and the sources">{scoreLabel(v.score)}</span>}
-             {v.basis === "model_knowledge" && <span className="basis-note" title="Answered from well-established general knowledge. No source was searched.">General knowledge</span>}
-           </p>
-         : <p className="cc-verdict"><span className="pending-word">With a reviewer</span></p>}
-
-      <p className="cc-claim">“{c.claim_text}”</p>
-      <TopicTags topics={c.topics} active={activeTopic} onPick={onTopic} />
-      {v?.verdict === "false" && v.correction && <p className="cc-correction"><strong>Correction: </strong>{v.correction}</p>}
-
-      {!expanded && visibleSources.length > 0 && (
-        <div className="cc-sources">
-          {visibleSources.map((s) => (
-            <p key={`${s.title}-${s.url}`} className="cc-src" style={{ borderColor: color }}>
-              <span className="cc-src-text"><SourceText s={s} /></span>
-              <span className="meta"> {s.title ?? (s.url ? domain(s.url) : "")}</span>
-            </p>
-          ))}
-        </div>
-      )}
-      {!v && <p className="meta">Verified. A reviewer is checking the verdict before it&apos;s shown.</p>}
-
-      {expanded && v && (
-        <div className="cc-more">
-          {c.context_quote && <p className="said">What was said: “{c.context_quote}”</p>}
-          <p className="meta">{VERDICTS[v.verdict].meaning}</p>
-          <div className={`quotes${v.citations.length > 1 ? " quotes-two" : ""}`}>
-            {v.citations.map((s) => <SourceFull key={`${s.title}-${s.url}`} s={s} color={color} />)}
-          </div>
-          <h3 className="sheet-h">{v.verdict === "unverifiable" ? "Why it can't be verified" : v.verdict === "false" ? "What is wrong" : "Why"}</h3>
-          <p>{v.reasoning}</p>
-          {v.evidence_grade && v.evidence_grade !== "not_applicable" && (
-            <p className="meta">Strength of evidence: {v.evidence_grade.replaceAll("_", " ")}</p>
-          )}
-          <p className="trust">
-            {v.citations.some((s) => s.summary) ? "Imported verdict; the quote check hasn't run yet." : "Checked by AI; the quote was verified in the source."}
-            {v.review_status === "approved" && " Reviewed by a person before publishing."}
-            {v.review_status === "changed" && " Verdict changed after review by a person."}
-          </p>
-          {!!c.also_said_in?.length && (
+          {active && phase === "ended" ? (
             <>
-              <h3 className="sheet-h">Also said in</h3>
-              <ul className="also">
-                {c.also_said_in.map((a) => (
-                  <li key={a.claim_id}>
-                    <Link href={`/v/${a.youtube_video_id}#claim-${a.claim_id}`}>{a.title}</Link>
-                    <span className="meta"> {a.channel_name}, at {clock(a.start_s)}</span>
-                  </li>
-                ))}
-              </ul>
+              <button className="btn small" onClick={onKeepWatching}>Keep watching</button>
+              {hasNext && <button className="btn secondary small" onClick={onNext}>Next{countdown !== null ? ` (${countdown})` : ""}</button>}
             </>
+          ) : (
+            canWatch && <button className="btn secondary small" onClick={onWatch}>▶ Watch 20 s</button>
           )}
-          <div className="cc-actions">
-            <button className="btn secondary small" onClick={onShare}>Share</button>
-            {v.citations.length > 0 && <button className="btn secondary small" onClick={onCopySource}>Copy source</button>}
-          </div>
-          <FeedbackForm claimId={c.id} />
+          <button className="btn secondary small" onClick={onShare}>Share</button>
+          <ReportForm claimId={c.id} hasSources={c.sources.length > 0} />
         </div>
       )}
-
-      <div className="cc-actions">
-        {active && phase === "ended" ? (
-          <>
-            <button className="btn small" onClick={onKeepWatching}>Keep watching</button>
-            {hasNext && <button className="btn secondary small" onClick={onNext}>Next claim{countdown !== null ? ` (${countdown})` : ""}</button>}
-          </>
-        ) : (
-          canWatch && <button className="btn small" onClick={onWatch}>▶ Watch 20 s</button>
-        )}
-        {v && <button className="btn secondary small" onClick={onToggle} aria-expanded={expanded}>{expanded ? "Less" : "More"}</button>}
-      </div>
     </article>
   );
 }

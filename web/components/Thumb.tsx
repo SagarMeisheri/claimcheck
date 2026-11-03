@@ -21,11 +21,7 @@ export function Thumb({ videoId, title, duration, eager = false }: { videoId: st
   );
 }
 
-export function Avatar({ src, name, size = 28 }: { src: string | null; name: string; size?: number }) {
-  const [failed, setFailed] = useState(false);
-  if (src && !failed) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img className="avatar" src={src} alt="" width={size} height={size} onError={() => setFailed(true)} />;
-  }
+/** A channel's initial. Channel avatars come from the YouTube API and would have to be refreshed every 30 days; an initial doesn't. */
+export function Avatar({ name, size = 28 }: { name: string; size?: number }) {
   return <span className="avatar avatar-initial" style={{ width: size, height: size }} aria-hidden="true">{name.slice(0, 1)}</span>;
 }

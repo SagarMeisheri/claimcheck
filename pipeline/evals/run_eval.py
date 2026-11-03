@@ -1,13 +1,15 @@
-"""Gold-set evaluation: rerun on every prompt or model change (week 1-2 gates).
+"""Gold-set evaluation: rerun on every prompt or model change.
 
 Gold file format (JSONL), one video per line:
-  {"url": "https://www.youtube.com/watch?v=...", "side": "supportive|critical|neutral",
-   "claims": [{"match": "4 crore houses", "verdict": "supported"}, ...]}
+  {"url": "https://www.youtube.com/watch?v=...",
+   "statements": [{"match": "4 crore houses", "type": "factual_claim", "source_domain": "pib.gov.in"}, ...]}
 
-`match` is a case-insensitive substring of the extracted claim text.
+`match` is a case-insensitive substring of the extracted statement text. `type` is the expected tag
+(factual_claim, opinion, forecast, other). `source_domain` is optional: for factual claims, a site that
+"Check sources" should find (the lookup is run for those claims, so it costs searches).
 
-Reports: extraction recall, verdict agreement, False<->Supported confusion (must be <= 3%),
-skipped claims, and cost per video.
+Reports: extraction recall, tag agreement, source recall (when source_domain is given) and cost per video.
+Gates: recall >= 80%, tag agreement >= 80%.
 
   python -m evals.run_eval evals/gold_set.example.jsonl
 """
@@ -16,49 +18,58 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 import warnings
 from collections import Counter
 
 warnings.filterwarnings("ignore")
-import logging
 logging.getLogger("google_adk").setLevel(logging.ERROR)
 
 
 async def main(path: str) -> None:
     from claimcheck.agents.pipeline import run_episode
+    from claimcheck.agents.sources_on_demand import run_claim_sources
     from claimcheck.config import get_settings
+    from claimcheck.policy import domain_of
     from claimcheck.store import make_store
 
     settings = get_settings()
+    store = make_store(settings)
     gold = [json.loads(line) for line in open(path) if line.strip()]
-    found = agree = total = severe = 0
-    costs, confusion = [], Counter()
+    found = agree = total = src_total = src_found = 0
+    costs: list[float] = []
+    confusion: Counter = Counter()
     for item in gold:
-        store = make_store(settings)
         res = await run_episode(item["url"], settings=settings, store=store)
-        costs.append(res.get("cost_usd", 0))
-        rows = (store.db.table("claims").select("claim_text, not_checked_reason, verdicts(verdict)")
+        rows = (store.db.table("claims").select("id, claim_text, statement_type, sources_status")
                 .eq("episode_id", res.get("episode_id")).execute().data)
-        for g in item["claims"]:
+        for g in item["statements"]:
             total += 1
             hit = next((r for r in rows if g["match"].lower() in r["claim_text"].lower()), None)
             if hit is None:
-                confusion[(g["verdict"], "not_extracted")] += 1
+                confusion[(g["type"], "not_extracted")] += 1
                 continue
             found += 1
-            got = hit["verdicts"]["verdict"] if hit["verdicts"] else f"not_checked:{hit['not_checked_reason']}"
-            confusion[(g["verdict"], got)] += 1
-            agree += got == g["verdict"]
-            severe += {g["verdict"], got} == {"false", "supported"}
-    print(f"Videos: {len(gold)}  Gold claims: {total}")
+            confusion[(g["type"], hit["statement_type"])] += 1
+            agree += hit["statement_type"] == g["type"]
+            if g.get("source_domain") and hit["statement_type"] == "factual_claim":
+                src_total += 1
+                if hit["sources_status"] != "done" and await store.start_claim_sources(hit["id"]):
+                    await run_claim_sources(hit["id"], settings=settings, store=store)
+                urls = [s["url"] for s in store.db.table("claim_sources").select("url").eq("claim_id", hit["id"]).execute().data]
+                src_found += any(domain_of(u).endswith(g["source_domain"]) for u in urls)
+        ep = store.db.table("episodes").select("cost_usd").eq("id", res.get("episode_id")).execute().data
+        costs.append(float((ep[0] if ep else {}).get("cost_usd") or 0))
+    print(f"Videos: {len(gold)}  Gold statements: {total}")
     print(f"Extraction recall: {found / max(total, 1):.0%}  (gate: >= 80%)")
-    print(f"Verdict agreement: {agree / max(total, 1):.0%}  (gate: >= 80%)")
-    print(f"False<->Supported confusion: {severe / max(total, 1):.1%}  (gate: <= 3%)")
+    print(f"Tag agreement: {agree / max(total, 1):.0%}  (gate: >= 80%)")
+    if src_total:
+        print(f"Source recall: {src_found / src_total:.0%} of {src_total} claims found the expected site")
     print(f"Mean cost per video: ${sum(costs) / max(len(costs), 1):.3f}")
     print("Confusion (expected -> got):")
     for (e, g), n in confusion.most_common():
-        print(f"  {e:>12} -> {g}: {n}")
+        print(f"  {e:>14} -> {g}: {n}")
 
 
 if __name__ == "__main__":

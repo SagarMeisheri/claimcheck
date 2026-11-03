@@ -11,7 +11,7 @@ const vector = pgv.vector ?? pgv.default ?? pgv.pgvector
 const dir = process.argv[2] ?? 'supabase/migrations'
 const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()
 const before = files.filter((f) => f < '0006')
-const after = files.filter((f) => f >= '0006')
+const after = files.filter((f) => f >= '0006' && f < '0012') // 0012 hides verdicts: see test_sources_migration.mjs
 const db = new PGlite({ extensions: { vector } })
 await db.exec(`create schema extensions; create role anon; create role authenticated; create role service_role;`)
 for (const f of before) await db.exec(fs.readFileSync(path.join(dir, f), 'utf8'))

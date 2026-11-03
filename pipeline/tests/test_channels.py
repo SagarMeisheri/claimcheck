@@ -1,4 +1,4 @@
-"""A video from a channel we don't track gets a channel row (name, icon, handle) instead of 'Submitted video'."""
+"""A video from a channel we don't know yet gets a channel row (id and name) instead of 'Submitted video'."""
 
 import asyncio
 
@@ -19,7 +19,7 @@ class FakeStore:
 
 
 def test_known_channel_is_reused():
-    got = asyncio.run(channels.resolve_channel(FakeStore({"id": "ch1", "track": "politics"}), META))
+    got = asyncio.run(channels.resolve_channel(FakeStore({"id": "ch1"}), META))
     assert got["id"] == "ch1"
 
 
@@ -27,7 +27,7 @@ def test_unknown_channel_is_created_from_the_video_metadata_unpolled():
     store = FakeStore()
     got = asyncio.run(channels.resolve_channel(store, META))
     assert got["id"] == "ch-new" and got["name"] == "Some Channel" and got["polled"] is False
-    assert got["youtube_channel_id"] == "UC123" and got["track"] == "finance_health"
+    assert got["youtube_channel_id"] == "UC123" and "track" not in got
 
 
 def test_no_channel_id_or_name_means_no_channel():

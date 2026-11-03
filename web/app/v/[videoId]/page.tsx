@@ -37,12 +37,12 @@ export default async function WatchPage({ params, searchParams }: Props) {
   );
 }
 
-/** ?view=all|verified|factual_claim|opinion|... (old links: flagged/checked -> verified, unchecked/topics -> all). */
+/** ?view=all|with_sources|factual_claim|opinion|forecast|other. Old links (verified, flagged, hearsay, ...) still open. */
 function parseView(v: string | undefined): View | null {
   if (!v) return null;
-  if (v === "all" || v === "verified") return v;
+  if (v === "all" || v === "with_sources") return v;
   if (v in STATEMENT_TYPES) return v as View;
-  if (v === "flagged" || v === "checked") return "verified";
-  if (v === "unchecked" || v === "topics") return "all";
-  return null;
+  if (["verified", "flagged", "checked"].includes(v)) return "with_sources";
+  if (["hearsay", "analogy", "loaded_language"].includes(v)) return "other";
+  return "all";
 }

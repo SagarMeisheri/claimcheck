@@ -1,37 +1,41 @@
-import type { StatementType, VerificationStatus } from "./types";
+import type { SourcesStatus, StatementType } from "./types";
 
 /** Statement types, in the order filter chips and breakdowns show them. */
 export const STATEMENT_TYPES: Record<StatementType, { label: string; one: string; plural: string; meaning: string; cssVar: string }> = {
-  factual_claim: { one: "claim", label: "Claim", plural: "claims", meaning: "A statement about the past or present that can be checked against sources. Not yet judged true or false.", cssVar: "var(--t-factual)" },
-  opinion: { one: "opinion", label: "Opinion", plural: "opinions", meaning: "A value judgement that can't be proven true or false.", cssVar: "var(--t-opinion)" },
-  forecast: { one: "forecast", label: "Forecast", plural: "forecasts", meaning: "A prediction. It can't be checked until it happens.", cssVar: "var(--t-forecast)" },
-  hearsay: { one: "hearsay", label: "Hearsay", plural: "hearsay", meaning: "Rests on vague or anonymous sources (\"people are saying\").", cssVar: "var(--t-hearsay)" },
-  analogy: { one: "analogy", label: "Analogy", plural: "analogies", meaning: "Compares now to a past event to borrow its weight.", cssVar: "var(--t-analogy)" },
-  loaded_language: { one: "loaded language", label: "Loaded language", plural: "loaded language", meaning: "Emotionally charged wording doing the work of an argument.", cssVar: "var(--t-loaded)" },
-  other: { one: "other", label: "Other", plural: "other", meaning: "A personal story or other statement.", cssVar: "var(--t-other)" },
+  factual_claim: { one: "claim", label: "Claim", plural: "claims", meaning: "A statement about the past or present that sources could address. Tagged by AI; not judged true or false.", cssVar: "var(--t-factual)" },
+  opinion: { one: "opinion", label: "Opinion", plural: "opinions", meaning: "A view or value judgement.", cssVar: "var(--t-opinion)" },
+  forecast: { one: "forecast", label: "Forecast", plural: "forecasts", meaning: "A statement about the future.", cssVar: "var(--t-forecast)" },
+  other: { one: "other", label: "Other", plural: "other", meaning: "A story, comparison or other remark.", cssVar: "var(--t-other)" },
 };
 
-export const TYPE_ORDER: StatementType[] = ["factual_claim", "opinion", "forecast", "hearsay", "analogy", "loaded_language", "other"];
-/** Filter chips always shown on the video page, even at zero; the rest appear only when present. */
-export const CORE_TYPES: StatementType[] = ["factual_claim", "opinion", "forecast", "hearsay"];
+export const TYPE_ORDER: StatementType[] = ["factual_claim", "opinion", "forecast", "other"];
 
+/** Tags from before the four-tag set fold into "other" (the database was migrated too; this covers cached pages). */
 export function typeOf(t: string | null | undefined): StatementType {
   return t && t in STATEMENT_TYPES ? (t as StatementType) : "other";
 }
 
-export const VERIFYING: VerificationStatus[] = ["queued", "verifying"];
+export const SEARCHING: SourcesStatus[] = ["queued", "searching"];
 
-/** Whether a Verify button makes sense for this claim right now. */
-export function canRequestVerify(c: { statement_type: string; verification_status: VerificationStatus; not_checked_reason: string | null }): boolean {
+/** Whether a "Check sources" button makes sense for this statement right now. */
+export function canCheckSources(c: { statement_type: string; sources_status: SourcesStatus; not_checked_reason: string | null }): boolean {
   return c.statement_type === "factual_claim" && c.not_checked_reason !== "outside_policy"
-    && (c.verification_status === "not_requested" || c.verification_status === "failed");
+    && (c.sources_status === "not_requested" || c.sources_status === "failed");
 }
 
 /** "42 statements: 9 claims, 14 opinions, ..." */
 export function breakdownParts(counts: Partial<Record<StatementType, number>>): string[] {
-  return TYPE_ORDER.filter((t) => counts[t]).map((t) => `${counts[t]} ${counts[t] === 1 ? STATEMENT_TYPES[t].one : STATEMENT_TYPES[t].plural}`);
+  const merged = mergeCounts(counts);
+  return TYPE_ORDER.filter((t) => merged[t]).map((t) => `${merged[t]} ${merged[t] === 1 ? STATEMENT_TYPES[t].one : STATEMENT_TYPES[t].plural}`);
 }
 
 export function totalStatements(counts: Partial<Record<StatementType, number>>): number {
   return Object.values(counts).reduce((a, b) => a + (b || 0), 0);
+}
+
+/** Counts keyed by any stored type, folded into the four tags. */
+export function mergeCounts(counts: Record<string, number | undefined>): Partial<Record<StatementType, number>> {
+  const out: Partial<Record<StatementType, number>> = {};
+  for (const [k, n] of Object.entries(counts)) out[typeOf(k)] = (out[typeOf(k)] ?? 0) + (n ?? 0);
+  return out;
 }

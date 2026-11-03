@@ -1,27 +1,35 @@
-# ClaimCheck MVP
+# ClaimCheck
 
-Turns a YouTube video (especially long podcasts, panels and interviews) into a tagged list of its statements: each one is marked as a claim, opinion, forecast, hearsay, analogy or loaded language, with a link to the moment it was said. Nothing is verified automatically; viewers press **Verify** on the claims they want checked. A verdict comes with an exact quote from an official or reliable source and is saved for everyone. Built for Indian political, finance and health videos.
+Paste a YouTube link (any public, finished video) and ClaimCheck breaks it into what was said: an AI summary and
+every statement with its timestamp, tagged as a **claim, opinion, forecast or other**, filterable by type and
+subject, playable 20 s at a time. For a claim, a viewer can press **Check sources**: up to three sentences copied
+word for word from official or established news pages about the same subject, with links.
+
+**ClaimCheck is not a fact-checker.** Nothing is judged true or false, there are no scores, and sources are shown for
+context only. Earlier versions published verdicts; that was removed (see `REPORT-adoption-and-legal.md` for why), and
+old verdict data is kept in the database but hidden from the public (migration 0012).
 
 ```
 pipeline/   Python service: Google ADK agents + guardrails (Cloud Run)
-web/        Next.js 16 app: video feed, watch-and-check screen, channels, balance, review queue, share cards (Vercel)
-supabase/   Postgres schema with pgvector cache and row-level security
+web/        Next.js 16 app: feed, video page, channels, reviewer page (Vercel)
+supabase/   Postgres schema, row-level security and column grants
 ```
 
 ## Run it locally
 
-Needs Docker, the Supabase CLI, Python 3.11+, Node 20+. There is no demo or fake data: the app starts empty and shows only videos you submit.
+Needs Docker, the Supabase CLI, Python 3.11+, Node 20+. There is no demo data: the app shows only videos you submit.
 
 ```bash
-supabase start && supabase db reset        # local Postgres with migrations 0001-0006 (ports 55321-55329)
+supabase start && supabase db reset        # local Postgres with migrations 0001-0012 (ports 55321-55329)
 
 cd pipeline
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env                       # add GOOGLE_API_KEY, PARALLEL_API_KEY, YOUTUBE_API_KEY, Supabase keys
-pytest                                     # guardrail, policy, tagging and on-demand tests (no keys needed)
+cp .env.example .env                       # GOOGLE_API_KEY, PARALLEL_API_KEY, YOUTUBE_API_KEY, Supabase keys
+pytest                                     # all tests run offline, no keys needed
 python -m claimcheck.cli "https://www.youtube.com/watch?v=VIDEO_ID"
-python -m claimcheck.cli --verify-claim CLAIM_ID   # verify one stored claim, as the Verify button does
+python -m claimcheck.cli --sources CLAIM_ID        # look up sources for one claim, as the button does
+python -m claimcheck.cli --sources-all EPISODE_ID  # "Check sources for all claims"
 uvicorn claimcheck.server:app --port 8080  # the service the web app calls
 
 cd ../web
@@ -29,82 +37,96 @@ cp .env.example .env.local                 # Supabase URL/keys from `supabase st
 npm install && npm run dev                 # http://localhost:3000
 ```
 
-The YouTube Data API is called once per submitted video (one quota unit, in `pipeline/claimcheck/tools/youtube.py`). Nothing polls it in the background locally; the channel RSS cron only runs on Vercel, and `scripts/seed_channels.py` only when you run it.
-
 ## The web app
 
 | Route | Screen |
 | --- | --- |
-| `/` | Home: each video is a compact header (thumbnail, title, channel, guest), a verdict strip, "X of Y verified claims supported, N flagged", and a horizontal carousel. The first card is the video's breakdown (statements by type, how many verified, how many with a reviewer) and links to the video page; the rest are verified claims only (strongest supported claim first, then flagged by severity). Each claim card opens that claim on the video page or plays 20 s of it. Tabs: Latest, Topics (verified claims across videos grouped by subject), Following; PESTLE and track filters; search across titles, channels, guests and verified claim text |
-| `/v/VIDEO_ID` | Video page: the player is a thumbnail until tapped (no YouTube load), a breakdown of the statements by type, then every statement as a colour-coded card with filter chips (All, Claim, Opinion, Forecast, Hearsay, plus Analogy / Loaded language when present, and Verified). Unverified claims have a **Verify** button that shows Queued / Verifying / With a reviewer while it runs. Verified claims expand in place (sources, reasoning, share, feedback). Every card has "Watch 20 s", which plays the statement with 3 s of lead-in and then offers Keep watching or Next claim. "Play verified claims in order" steps through them by itself. The track under the player has one tick per statement (verdict colour if verified, type colour otherwise); on phones the player and track pin to the top while you read. J/K move between verified claims |
-| `/v/VIDEO_ID#claim-ID` | Same, with that claim open and the video cued 5 s before it. `?moment=ID` plays that claim's 20 s, `?view=all\|verified\|factual_claim\|opinion\|forecast\|hearsay\|...` picks the filter (old `flagged`/`checked` links open Verified), `?t=640` cues a time, `?play=1` plays |
-| `/c/CHANNEL_ID` | Channel page with its checked videos and Follow (stored in the browser) |
-| `/submit`, `/balance`, `/method`, `/review` | Check a video (with link preview), balance, method, reviewer queue |
+| `/` | Feed of analysed videos: thumbnail, AI summary, breakdown by type, "Check sources for all claims", and a paged carousel of statements (tabs by type, subject chips). Each statement plays in place from its timestamp. Tabs: Latest, Topics (claims across videos by subject), Following (stored in the browser). Search and PESTLE filters |
+| `/v/VIDEO_ID` | Video page: player (loads only on tap, YouTube's own defaults), a track with one tick per statement, AI summary, filter chips (All, Claim, Opinion, Forecast, Other, With sources) and subject chips. Each statement card shows the AI's wording, the speaker "(identified by AI)", "What was said" (AI transcript, labelled), Watch 20 s, Share, Report a problem, and for claims Check sources / the sources found. "Play in order", J/K |
+| `/v/VIDEO_ID#claim-ID` | Same, cued to that statement. `?moment=ID` plays its 20 s, `?view=all\|with_sources\|factual_claim\|opinion\|forecast\|other`, `?t=640`, `?play=1` |
+| `/c/CHANNEL_ID` | A channel's analysed videos and Follow |
+| `/submit` | Analyse a video (with link preview) |
+| `/method`, `/privacy` | How it works (limits of AI output, what isn't shown, reporting); privacy and YouTube terms |
+| `/review` | Reviewer (HTTP basic auth): open reports (hide statement, mark fixed, nothing wrong) and the videos list (stop, delete) |
 
-Nothing is drawn over YouTube thumbnails or the player, and the player is never shrunk below 200x200, per YouTube's API policies. UI tests: build, start on port 3100, then `node tests/ui.test.js` (uses a stand-in for the YouTube player script).
+Nothing is drawn over YouTube thumbnails or the player, the player's speed and captions are YouTube's defaults, and
+it is never shrunk below 200x200, per YouTube's API policies.
 
-## How a video is checked
-
-A video is analysed in two steps: a first pass that extracts and tags every statement (nothing is verified), then on-demand verification of any claim a viewer picks.
+## How a video is analysed
 
 ```
 EpisodePipeline (ADK SequentialAgent)                       POST /episodes
-  IngestGate        code   public, 5+ min, not live; metadata treated as untrusted
-  TriageAgent       LLM    worthiness (substantive public-interest content), PESTLE mix, never-check share
-  TriageGate        code   skip if worthiness < 0.5 or > 30% never-check
-  ExtractorAgent    LLM    Gemini Flash, YouTube URL with agentic video processing; every statement with
-                           timestamp and type: factual_claim, opinion, forecast, analogy, loaded_language,
-                           hearsay, other
-  ClaimFilter       code   150-statement cap; content policy re-applied in code (never-check topics are
-                           redacted for every type); only claims are verifiable
-    (nothing is verified in this run; a viewer presses Verify, see below)
-  Publisher         code   the only writer; also stores statement counts by type
+  IngestGate      code   public and finished (not live); title/description treated as untrusted
+  ExtractorAgent  LLM    Gemini 3.8 Flash reads the YouTube URL (agentic video processing): every statement with
+                         timestamp, speaker (a name only if said or shown), tag (claim / opinion / forecast / other),
+                         1-2 subject tags, plus a neutral 2-3 sentence summary. Statements stream to the database as
+                         they are written
+  ClaimFilter     code   150-statement cap; never-show topics redacted in code whatever the model said
+  Publisher       code   the only writer; statement counts, summary, cost
 
-On-demand (agents/on_demand.py)                             POST /claims/{id}/verify
-  web app           rate limits (10 per person per day, 120 per hour site-wide), marks the claim queued
-  precheck          code   claim, not redacted, not already verified, video under its cost cap
-  ClaimVerifier     one video at a time so the cap holds. Cache check (code), then an ADK Workflow:
-                    plan (LLM: official / corroborating / counter-evidence searches) -> clamp (code: at most
-                    3, never more) -> search (parallel_worker: 3 Parallel search+extract at once, no retries)
-                    -> judge (LLM: TRUE / FALSE / UNVERIFIABLE + explanation, correction, cited quotes).
-                    Then in code: quote, number and source-tier checks, 0-100 score, review flag
-  save              verdict on the claim row (shared by everyone), cost added to the video, tally
-                    recomputed; a False (or political Misleading/Disputed) waits for review
+Sources for one claim (agents/sources.py)                   POST /claims/{id}/sources
+  web app         rate limits (10 per person per day, 120 per hour site-wide), marks the claim queued
+  precheck        code   a claim, not redacted, no sources yet, video under its cost cap; one lookup per video at a time
+  Workflow        plan (LLM: original source / independent source / other figures) -> clamp (code: at most 3)
+                  -> search (3 Parallel search+extract at once, no retries) -> pick (LLM: one sentence per relevant
+                  source, never an assessment)
+  checks (code)   page was fetched, the sentence is on it word for word (25+ chars), site is tier 1 (official,
+                  peer-reviewed) or tier 2 (established news/research); blocklisted sites never; at most 3
+  save            sources on the claim (shared by everyone), or "no relevant source found"
+
+Sources for a whole video (agents/video_sources.py)          POST /episodes/{id}/sources-all
+  one cheap triage call groups claims that one search can cover, then one search + one pick per group, in
+  parallel, then one follow-up search for claims with nothing found. Same checks in code. Leftovers go back to
+  "not requested" so a viewer can still press the button
 ```
 
-Each claim row has a `verification_status`: `not_eligible` (not a claim, or redacted), `not_requested`, `queued`, `verifying`, `verified`, `awaiting_review` or `failed` (can be retried). A claim stuck in `queued`/`verifying` for 30 minutes can be requested again, and a pipeline restart marks interrupted ones `failed`.
+Each claim has a `sources_status`: `not_eligible` (not a claim, or redacted), `not_requested`, `queued`, `searching`,
+`done` (sources saved, possibly none) or `failed` (can be retried). A pipeline restart marks interrupted ones `failed`.
 
-Guardrails live in `pipeline/claimcheck/guardrails/` and `policy.yaml`:
+## Guardrails (`pipeline/claimcheck/guardrails/`, `policy.yaml`)
 
 | Where | Rule |
 | --- | --- |
-| Every model call | Per-episode cost cap ($3) via an ADK plugin; Model Armor plugin when templates are configured. The cap covers the first pass plus every on-demand verification of that video |
-| Verify button | Claims only; 10 requests per person per day (salted IP hash) and 120 per hour site-wide (`VERIFY_PER_PERSON_PER_DAY`, `VERIFY_SITE_PER_HOUR`); a claim is verified once and the verdict reused for everyone |
-| Evidence tool | Model picks only query and scope; domains come from policy (tier-1 list per PESTLE area, blocklist always), 4 searches per claim, 60 s timeout, injection lines stripped from pages |
-| Verdicts | Quote must appear in the fetched text; numbers must match (Indian units understood); stricter-tier claims need a tier-1 source; False needs a strong source and confidence >= 0.8, otherwise it becomes Unverifiable; a 0-100 truthfulness score is computed in code (none for Unverifiable); reasoning rewritten if it accuses anyone of lying |
-| Publishing | Every False, and political Misleading/Disputed, waits for human review, including on-demand ones; pending verdicts are hidden by RLS and excluded from tallies (the claim shows "With a reviewer"); never-check statements are stored redacted |
+| Every model call | Per-video cost cap ($3) via an ADK plugin, covering the first pass and every source lookup; counts prompt, output, thinking **and tool-use** tokens (agentic video bills frames and transcript as tool use). Prices in `config.py` use the published 2027 Flash price so the cap never undercounts. Model Armor plugin when templates are configured |
+| Prompts | Describe, never evaluate; no prompt asks whether a claim is true or for a view of a speaker. All video text and fetched pages are wrapped as untrusted data; instruction-like lines in pages are removed |
+| Buttons | Claims only; 10 "Check sources" per person per day and 120 per hour site-wide, 3 "Check sources for all" per person per day and 20 per hour (`SOURCES_*` env vars; 0 disables). Submissions: 5 per person per day |
+| Sources | The model picks only queries and sentences. Code decides the number of searches (max 3), the domains (blocklist always), and what is shown (fetched page, exact sentence, tier 1 or 2) |
+| Content policy | Religious beliefs, claims about whole communities/castes/religions, private individuals and minors, live court cases, disasters in the first 48 h, satire: stored redacted and never shown |
+| Reports | "Report a problem" on every statement goes to `/review`; a reviewer can hide a statement for everyone |
+| YouTube data | Refreshed every 25 days by the daily maintenance cron (YouTube allows 30); videos no longer public are marked `removed` and hidden; no channel avatars stored |
+| Privacy | Salted IP hashes only, for rate limits; deleted after 30 days by the maintenance cron |
 
-All of these are covered by tests in `pipeline/tests/`.
+All of these are covered by tests in `pipeline/tests/` (61 tests, offline).
 
 ## Going live
 
-1. **Supabase**: create a project and run every migration in order (SQL editor, or `supabase db push` which applies them all):
-   `0001_init.sql`, `0002_review.sql`, `0003_ui.sql`, `0004_grants.sql` (table privileges; without it the site can't read anything on newer Supabase projects), `0005_progress.sql` (progress bar column) and `0006_statements.sql` (statement types, verification status, statement counts, verify-request log; it backfills existing claims). An existing database only needs the ones it's missing, in order. Deploy order for this change: run `0006` first, then the pipeline, then the web app. Seed channels: `python pipeline/scripts/seed_channels.py` (needs `YOUTUBE_API_KEY`; it prints any handles it couldn't resolve).
-2. **Pipeline (Cloud Run)**: `cd pipeline && gcloud run deploy claimcheck-pipeline --source . --set-env-vars ...` with:
-   `GOOGLE_API_KEY`, `PARALLEL_API_KEY`, `YOUTUBE_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `PIPELINE_SHARED_SECRET`, and optionally `MODEL_ARMOR_PROMPT_TEMPLATE` / `MODEL_ARMOR_TOOL_TEMPLATE`. Set request timeout to 60 min and CPU always allocated (runs continue after the HTTP response). Keep `--max-instances=1`: runs, and the per-video lock that keeps on-demand verifications under the cost cap, live in memory.
-3. **Web (Vercel)**: import `web/`, set the variables in `web/.env.example` (optionally `VERIFY_PER_PERSON_PER_DAY` and `VERIFY_SITE_PER_HOUR` for the Verify button). The cron in `vercel.json` polls channel RSS every 10 minutes (needs Vercel Pro; Hobby allows daily).
-4. **Gold set**: label 20 episodes (10 political, balanced by side) in `pipeline/evals/gold_set.example.jsonl` format and run `python -m evals.run_eval your_gold.jsonl`. Gates: recall >= 80%, agreement >= 80%, False/Supported confusion <= 3%.
+1. **Supabase**: create a project and run every migration in order (`supabase db push`, or the SQL editor):
+   `0001`–`0012`. An existing database only needs the ones it's missing. `0012_sources_only.sql` hides old verdicts,
+   merges hearsay/analogy/loaded-language into "other", adds sources, rate-limit and YouTube-refresh columns. If
+   0006–0011 were applied by hand (not through the CLI), apply 0012 the same way: running `supabase migration up`
+   would re-run 0006's backfill. Deploy order: migration, then pipeline, then web.
+2. **Pipeline (Cloud Run)**: `cd pipeline && gcloud run deploy claimcheck-pipeline --source . --set-env-vars ...` with
+   `GOOGLE_API_KEY`, `PARALLEL_API_KEY`, `YOUTUBE_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+   `PIPELINE_SHARED_SECRET`, optionally `MODEL_ARMOR_*`. Request timeout 60 min, CPU always allocated, and
+   `--max-instances=1` (runs and the per-video lock live in memory).
+3. **Web (Vercel)**: import `web/`, set the variables in `web/.env.example`, including `NEXT_PUBLIC_CONTACT_EMAIL`,
+   `REVIEW_PASSWORD` and `CRON_SECRET`. `vercel.json` runs `/api/cron/maintenance` daily (allowed on Hobby).
+4. **Gold set**: label ~20 videos in `pipeline/evals/gold_set.example.jsonl` format (statement, expected tag,
+   optionally a site Check sources should find) and run `python -m evals.run_eval your_gold.jsonl`. Gates: extraction
+   recall >= 80%, tag agreement >= 80%.
 
-Model names and limits are environment variables (`CLAIMCHECK_FAST_MODEL`, `CLAIMCHECK_JUDGE_MODEL`, `CLAIMCHECK_VIDEO_PROCESSING=static` for the fallback, etc.); see `pipeline/claimcheck/config.py`.
+Model names, limits and prices are environment variables (`CLAIMCHECK_FAST_MODEL`, `CLAIMCHECK_LITE_MODEL`,
+`CLAIMCHECK_PRICES_JSON`, `CLAIMCHECK_VIDEO_PROCESSING=static` for the fallback, ...); see `pipeline/claimcheck/config.py`.
 
 ## What has and hasn't been verified
 
-Verified: guardrail, policy, tagging and on-demand tests, the SQL schema and RLS (local Supabase, migrations 0001-0004; 0006 in PGlite with `supabase/test_statements_migration.mjs`), and the web build and empty-state pages. The full pipeline has not been run against live services yet (see below); the scripted-model pipeline tests and the browser UI tests were removed along with the fake and demo data.
+Verified: all pipeline tests; migration 0012 in PGlite (`node supabase/test_sources_migration.mjs`, with
+`@electric-sql/pglite` installed) and on a local Supabase; web typecheck and production build; the pages in a real
+browser against local data, including filing and resolving a report.
 
-Not yet run against live services: Gemini (including agentic video on a real YouTube URL), Parallel Search/Extract/Task, YouTube Data API, the real YouTube embedded player and thumbnails, Supabase, Model Armor. Expect a short shakedown on first live run. In particular:
-- Gemini 4 Argon pricing is an assumption in `config.py` ($2.50/$15 per M tokens).
-- Agentic video uses `types.Part(media_processing=AGENTIC)` from google-genai 2.34; confirm your model accepts it, or set `CLAIMCHECK_VIDEO_PROCESSING=static`.
-- The claim verifier uses the ADK `Workflow` graph API. The first-pass pipeline (`agents/pipeline.py`) still uses `SequentialAgent`, which emits a deprecation warning in ADK 2.13.
-- The Supabase Python client is synchronous; fine at MVP volume, swap for the async client if throughput matters.
+Not yet run against live services in this version: a full extraction with agentic video on a real URL (check that
+the model doesn't silently fall back to static processing, and that tool-use tokens show up in the cost), and a live
+"Check sources" (Parallel + Gemini). Expect a short shakedown on first live run.
 
-Before launch: have a lawyer review the content policy, corrections process and election-period obligations.
+Before launch: have a lawyer review the content policy, the reporting process and the IT Rules 2021 obligations
+for digital publishers.

@@ -1,7 +1,7 @@
 [project]
 name = "claimcheck"
 version = "0.1.0"
-description = "ClaimCheck pipeline: verifies factual claims in YouTube videos with Google ADK and Gemini"
+description = "ClaimCheck pipeline: tags the statements in YouTube videos and finds sources for claims, with Google ADK and Gemini"
 requires-python = ">=3.11"
 dependencies = [
   "google-adk[gcp]>=2.8",

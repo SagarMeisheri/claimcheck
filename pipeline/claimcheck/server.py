@@ -1,7 +1,7 @@
-"""HTTP entry point (Cloud Run). The web app or cron calls POST /episodes.
+"""HTTP entry point (Cloud Run). The web app calls these endpoints with a shared secret.
 
-Auth: a shared secret in the X-Pipeline-Secret header. The service never takes
-instructions from video content; it only accepts a URL.
+Auth: a shared secret in the X-Pipeline-Secret header. The service never takes instructions from video content;
+it only accepts a URL or an id.
 """
 
 from __future__ import annotations
@@ -10,9 +10,10 @@ import asyncio
 import hmac
 import logging
 import warnings
+from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from .config import get_settings
@@ -22,36 +23,24 @@ from .store import make_store
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("google_adk").setLevel(logging.ERROR)
+log = logging.getLogger("claimcheck")
 
-app = FastAPI(title="ClaimCheck pipeline")
 _settings = get_settings()
 _store = make_store(_settings)
-_running: dict[str, asyncio.Task] = {}  # episode_id -> task, so a run can be cancelled
+_running: dict[str, asyncio.Task] = {}  # key -> task, so a run can be cancelled and not started twice
 
 
-@app.on_event("startup")
-def _fail_orphaned_runs() -> None:
-    """Runs live in this process only: after a restart, anything still 'processing' can never finish."""
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Runs live in this process only: after a restart, anything still running can never finish.
     try:
-        _store.db.table("episodes").update({"status": "failed", "skip_reason": "Interrupted by a service restart. Delete it or submit it again."}
-                                           ).eq("status", "processing").execute()
+        _store.reset_interrupted()
     except Exception:
-        logging.getLogger("claimcheck").exception("could not clean up orphaned runs")
-    try:
-        _store.db.table("episodes").update({"auto_verify_status": None}).eq("auto_verify_status", "running").execute()
-    except Exception:
-        logging.getLogger("claimcheck").exception("could not clear interrupted automatic verifications")
-    try:
-        _store.reset_interrupted_verifications()
-    except Exception:
-        logging.getLogger("claimcheck").exception("could not clean up interrupted verifications")
+        log.exception("could not clean up interrupted runs")
+    yield
 
 
-class RunRequest(BaseModel):
-    url: str
-    episode_id: Optional[str] = None
-    submitted_by: Optional[str] = None
-    wait: bool = False  # true = run inline and return the result (useful for local testing)
+app = FastAPI(title="ClaimCheck pipeline", lifespan=lifespan)
 
 
 def _auth(secret: Optional[str]) -> None:
@@ -62,32 +51,48 @@ def _auth(secret: Optional[str]) -> None:
         raise HTTPException(401, "bad secret")
 
 
+def _start(key: str, coro) -> None:
+    task = asyncio.create_task(coro)
+    _running[key] = task
+    task.add_done_callback(lambda t, k=key: _running.pop(k, None) if _running.get(k) is t else None)
+
+
+def _busy(key: str) -> bool:
+    task = _running.get(key)
+    return bool(task and not task.done())
+
+
 @app.get("/healthz")
 async def healthz() -> dict:
-    return {"ok": True, "fast_model": _settings.fast_model, "judge_model": _settings.judge_model}
+    return {"ok": True, "fast_model": _settings.fast_model, "lite_model": _settings.lite_model}
+
+
+class RunRequest(BaseModel):
+    url: str
+    episode_id: Optional[str] = None
+    submitted_by: Optional[str] = None
+    wait: bool = False  # true = run inline and return the result (useful for local testing)
 
 
 @app.post("/episodes")
-async def run(req: RunRequest, background: BackgroundTasks, x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
+async def run(req: RunRequest, x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
     _auth(x_pipeline_secret)
     if not parse_video_id(req.url):
         raise HTTPException(400, "Not a valid YouTube video URL")
     from .agents.pipeline import run_episode
 
     if req.wait:
-        return await run_episode(req.url, settings=_settings, store=_store, episode_id=req.episode_id,
-                                 submitted_by=req.submitted_by)
-    task = asyncio.create_task(run_episode(req.url, settings=_settings, store=_store, episode_id=req.episode_id,
-                                           submitted_by=req.submitted_by))
-    key = req.episode_id or str(id(task))
-    _running[key] = task
-    task.add_done_callback(lambda t, k=key: _running.pop(k, None) if _running.get(k) is t else None)
+        return await run_episode(req.url, settings=_settings, store=_store, episode_id=req.episode_id, submitted_by=req.submitted_by)
+    key = req.episode_id or req.url
+    if _busy(key):
+        return {"accepted": True, "episode_id": req.episode_id}
+    _start(key, run_episode(req.url, settings=_settings, store=_store, episode_id=req.episode_id, submitted_by=req.submitted_by))
     return {"accepted": True, "episode_id": req.episode_id}
 
 
 @app.post("/episodes/{episode_id}/cancel")
 async def cancel(episode_id: str, x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
-    """Stops a running check and marks the episode skipped. Works even if the run is no longer in memory."""
+    """Stops a running analysis and marks the episode skipped. Works even if the run is no longer in memory."""
     _auth(x_pipeline_secret)
     task = _running.get(episode_id)
     was_running = bool(task and not task.done())
@@ -102,51 +107,54 @@ async def cancel(episode_id: str, x_pipeline_secret: Optional[str] = Header(defa
     return {"cancelled": True, "was_running": was_running}
 
 
-@app.post("/episodes/{episode_id}/verify-all")
-async def verify_all(episode_id: str, wait: bool = False, x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
-    """Runs the automatic whole-video verifier on a video that has finished its first pass (also useful to retry)."""
+@app.post("/episodes/{episode_id}/sources-all")
+async def sources_all(episode_id: str, wait: bool = False, x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
+    """Looks up sources for every claim of a video that has finished its first pass."""
     _auth(x_pipeline_secret)
-    from .agents.video_verifier import run_video_verification
+    from .agents.video_sources import run_video_sources
 
-    key = f"auto:{episode_id}"
-    running = _running.get(key)
-    if running and not running.done():
-        raise HTTPException(409, "Already verifying this video.")
+    key = f"sources-all:{episode_id}"
+    if _busy(key):
+        raise HTTPException(409, "Already checking sources for this video.")
     if not await _store.get_episode(episode_id):
         raise HTTPException(404, "Video not found.")
     if wait:
-        return await run_video_verification(episode_id, settings=_settings, store=_store, manual=True)
-    task = asyncio.create_task(run_video_verification(episode_id, settings=_settings, store=_store, manual=True))
-    _running[key] = task
-    task.add_done_callback(lambda t, k=key: _running.pop(k, None) if _running.get(k) is t else None)
+        return await run_video_sources(episode_id, settings=_settings, store=_store)
+    _start(key, run_video_sources(episode_id, settings=_settings, store=_store))
     return {"accepted": True, "episode_id": episode_id}
 
 
-class VerifyRequest(BaseModel):
-    wait: bool = False  # true = verify inline and return the result (local testing)
+class SourcesRequest(BaseModel):
+    wait: bool = False  # true = run inline and return the result (local testing)
 
 
-@app.post("/claims/{claim_id}/verify")
-async def verify_one(claim_id: str, req: Optional[VerifyRequest] = None,
-                     x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
-    """Verifies one factual claim on request. The web app has already rate-limited the request.
+@app.post("/claims/{claim_id}/sources")
+async def sources_one(claim_id: str, req: Optional[SourcesRequest] = None,
+                      x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
+    """Looks up sources for one factual claim. The web app has already rate-limited the request.
 
-    Answers 409 with a readable reason when the claim can't be verified (not factual, already verified,
-    video over its cost cap), so the web app can show it straight away.
+    Answers 409 with a readable reason when it can't run (not a claim, already done, video over its cost cap),
+    so the web app can show it straight away.
     """
     _auth(x_pipeline_secret)
-    from .agents.on_demand import precheck, run_claim_verification
+    from .agents.sources_on_demand import precheck, run_claim_sources
 
-    row = await _store.get_claim_for_verification(claim_id)
+    row = await _store.get_claim_for_sources(claim_id)
     ok, reason, code = precheck(row, _settings)
     if not ok:
         raise HTTPException(code, reason)
-    if not await _store.start_claim_verification(claim_id):
-        raise HTTPException(409, "Already being verified.")
+    if not await _store.start_claim_sources(claim_id):
+        raise HTTPException(409, "Already searching.")
     if req and req.wait:
-        return await run_claim_verification(claim_id, settings=_settings, store=_store)
-    task = asyncio.create_task(run_claim_verification(claim_id, settings=_settings, store=_store))
-    key = f"claim:{claim_id}"
-    _running[key] = task
-    task.add_done_callback(lambda t, k=key: _running.pop(k, None) if _running.get(k) is t else None)
-    return {"accepted": True, "claim_id": claim_id, "status": "verifying"}
+        return await run_claim_sources(claim_id, settings=_settings, store=_store)
+    _start(f"claim:{claim_id}", run_claim_sources(claim_id, settings=_settings, store=_store))
+    return {"accepted": True, "claim_id": claim_id, "status": "searching"}
+
+
+@app.post("/maintenance/youtube-refresh")
+async def youtube_refresh(x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
+    """Called daily by the web app's maintenance cron."""
+    _auth(x_pipeline_secret)
+    from .maintenance import refresh_youtube_data
+
+    return await refresh_youtube_data(_store, _settings)

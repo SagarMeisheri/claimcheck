@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "ClaimCheck", template: "%s | ClaimCheck" },
-  description: "Every claim in India's big political and money videos, checked against official sources, with the timestamp.",
+  description: "Paste a YouTube link and see every statement in the video, tagged and timestamped, with sources for its claims.",
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
 };
 
@@ -26,18 +26,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="brand">ClaimCheck</Link>
             <nav className="site-nav" aria-label="Main">
               <Link href="/">Latest</Link>
-              <Link href="/submit">Check a video</Link>
-              <Link href="/balance">Balance</Link>
-              <Link href="/method">How we check</Link>
+              <Link href="/submit">Analyse a video</Link>
+              <Link href="/method">How it works</Link>
+              <Link href="/privacy">Privacy</Link>
             </nav>
           </div>
         </header>
         <main>{children}</main>
         <footer>
           <div>
-            Verdicts are produced by AI and checked against the quoted sources; False and political Misleading or
-            Disputed verdicts are reviewed by a person before they appear. Found a mistake? Use “Wrong verdict?” on any
-            claim. <Link href="/method">Read how we check</Link>.
+            AI-generated breakdowns of YouTube videos. Not a fact-check: nothing is judged true or false, and sources are
+            shown for context. Quotes, speakers and tags can be wrong; use “Report a problem” on any statement.{" "}
+            <Link href="/method">How it works</Link> · <Link href="/privacy">Privacy</Link>.
           </div>
         </footer>
       </body>

@@ -1,58 +1,28 @@
 # ClaimCheck content policy and source policy.
 # Changing this file changes behaviour without touching prompts.
-# Loaded by claimcheck/policy.py; the triage gate, evidence tool
-# and verdict checks all read it.
+# Loaded by claimcheck/policy.py. ClaimCheck tags statements and, on request, shows sources for a claim.
+# It never judges a claim true or false.
 
-version: 1
-
-# --- Triage gate -------------------------------------------------------------
-triage:
-  min_worthiness: 0.5          # videos scoring below this are skipped
-  max_never_share: 0.30        # skip if more than 30% of content is "never check"
-  min_duration_s: 300          # 5 minutes
+version: 2
 
 # --- Extraction ------------------------------------------
 claims:
   max_extracted: 150           # hard cap on statements kept from extraction (all types)
 
-# --- On-demand verification -------------------------------------------------------
-# Rate limits are enforced by the web app (web/app/actions.ts); the per-video cost cap
-# (CLAIMCHECK_MAX_COST_USD) is enforced by the pipeline and covers the run plus every
-# on-demand verification of that video.
-on_demand:
-  statement_types: [factual_claim]   # only these get a Verify button
-
-# --- Content policy tiers ----------------------------------------------------
-# Every claim gets one PESTLE area and one tier from the extractor; code
-# re-applies the never-check rules below regardless of what the model said.
-tiers:
-  normal:
-    description: Personal finance, markets, tax and EPFO rules, company numbers, economy statistics, technology, environment data.
-  stricter:
-    description: Political claims, health and nutrition, science, legal rules, social statistics.
-    review_verdicts: ["false", misleading, disputed]
-  never:
-    description: Religious or spiritual beliefs; claims about whole communities, castes or religions; private individuals and minors; merits of live court cases; attacks and disasters in the first 48 hours; satire; opinions, predictions, anecdotes.
-
-# Topics that are always "stricter", whatever the model says.
-stricter_topics: [elections, welfare_schemes, policy_outcomes, foreign_policy, defence, history_of_leaders,
-                  health, nutrition, supplements, medicine, science, crime, census, caste_statistics, law, courts]
-
-# Topics that are always "never".
+# Statements about these topics are stored redacted and never shown, whatever their type.
 never_topics: [religious_belief, community_generalisation, private_individual, minor, live_court_case,
                breaking_disaster, satire]
 
-claim_types_checked: [fact]          # legacy claim_type; opinions, forecasts, analogies etc. are tagged, not verified
-
 pestle_areas: [political, economic, social, technological, legal, environmental]
 
-# --- Human review -------------------------------------------------------------
-review:
-  always: ["false"]                    # every False verdict waits for a person
-  politics_track: [misleading, disputed]
+# --- Showing sources -----------------------------------------------------------------
+sources_rules:
+  min_quote_chars: 25          # a quote shorter than this can't be checked meaningfully
+  max_per_claim: 3
+  allowed_tiers: [1, 2]        # official / peer-reviewed, or established news and research organisations
 
 # --- Source tiers -------------------------------------------------------------
-# Tier is computed in code from the URL; the model's own tier claim is ignored.
+# Tier is computed in code from the URL; the model's own view of a source is ignored.
 sources:
   tier1_suffixes: [".gov.in", ".nic.in", ".gov"]
   tier1_domains:
@@ -109,7 +79,7 @@ sources:
     - bmj.com
     - jamanetwork.com
     - cmie.com
-  # Never used as evidence (Parallel allows at most 10 domains per policy).
+  # Never used as a source (Parallel allows at most 10 domains per policy).
   blocklist:
     - x.com
     - twitter.com
@@ -122,7 +92,7 @@ sources:
     - sharechat.com
     - koo.in
 
-  # First-pass search is restricted to these per PESTLE area (max 10 each).
+  # Searches with scope "tier1" are restricted to these per PESTLE area (max 10 each).
   tier1_by_area:
     political: [eci.gov.in, pib.gov.in, sansad.in, prsindia.org, indiabudget.gov.in, mea.gov.in, data.gov.in, mospi.gov.in, pmayg.dord.gov.in, pmay-urban.gov.in]
     economic: [mospi.gov.in, rbi.org.in, indiabudget.gov.in, commerce.gov.in, pib.gov.in, sebi.gov.in, incometaxindia.gov.in, worldbank.org, imf.org, data.gov.in]
@@ -130,13 +100,3 @@ sources:
     technological: [npci.org.in, trai.gov.in, meity.gov.in, isro.gov.in, dpiit.gov.in, pib.gov.in, data.gov.in, mospi.gov.in, sansad.in, rbi.org.in]
     legal: [indiacode.nic.in, egazette.gov.in, sci.gov.in, incometaxindia.gov.in, sebi.gov.in, rbi.org.in, prsindia.org, sansad.in, epfindia.gov.in, labour.gov.in]
     environmental: [cpcb.nic.in, imd.gov.in, mnre.gov.in, cea.nic.in, fsi.nic.in, cwc.gov.in, moef.gov.in, pib.gov.in, data.gov.in, sansad.in]
-
-# --- Verdict rules ---------------------------------------------------------------
-verdicts:
-  false_min_confidence: 0.8
-  false_requires_second_judge: false   # one judge; a False verdict still waits for a person (review.always)
-  escalate_below_confidence: 0.6
-  min_quote_chars: 25
-  number_tolerance: 0.05             # 5% relative tolerance when matching numbers
-  # Reasoning containing these is rewritten into the neutral template.
-  banned_reasoning_terms: [lied, lying, liar, deliberately, propaganda, "fake news", dishonest, deceitful, misinformation campaign, agenda]

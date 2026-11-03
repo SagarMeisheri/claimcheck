@@ -3,19 +3,16 @@
 import { useRef, useState } from "react";
 import type { Claim } from "@/lib/types";
 import { STATEMENT_TYPES, typeOf } from "@/lib/statements";
-import { VERDICTS, clock } from "@/lib/verdicts";
+import { clock } from "@/lib/format";
 
 function tickClass(c: Claim): string {
-  if (c.verdict) return `tick tick-${c.verdict.verdict}`;
-  if (c.awaiting_review) return "tick tick-pending";
   if (c.not_checked_reason === "outside_policy") return "tick tick-skipped";
-  return "tick tick-stmt"; // unverified statement: short tick in its type colour
+  return `tick tick-stmt${c.sources.length ? " tick-sourced" : ""}`;
 }
 
 function statusLabel(c: Claim): string {
-  if (c.verdict) return VERDICTS[c.verdict.verdict].label;
-  if (c.awaiting_review) return "with a reviewer";
-  return STATEMENT_TYPES[typeOf(c.statement_type)].label.toLowerCase();
+  const label = STATEMENT_TYPES[typeOf(c.statement_type)].label.toLowerCase();
+  return c.sources.length ? `${label}, with sources` : label;
 }
 
 export function tickLabel(c: Claim): string {
@@ -23,8 +20,8 @@ export function tickLabel(c: Claim): string {
 }
 
 /**
- * Our timeline under the player: one tick per claim at its timestamp, a playhead that follows the
- * video, tap a tick to seek, drag along the track to scrub from claim to claim.
+ * Our timeline under the player: one tick per statement at its timestamp (in its type's colour), a playhead that
+ * follows the video, tap a tick to seek, drag along the track to scrub from statement to statement.
  */
 export function ClaimTrack({ claims, duration, time, currentId, onSeekClaim }: {
   claims: Claim[]; duration: number; time: number; currentId: string | null; onSeekClaim(c: Claim): void;
@@ -32,7 +29,7 @@ export function ClaimTrack({ claims, duration, time, currentId, onSeekClaim }: {
   const total = Math.max(duration, ...claims.map((c) => c.start_s + 20), 60);
   const ref = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<{ claim: Claim; x: number } | null>(null);
-  const seekable = claims.filter((c) => c.not_checked_reason !== "outside_policy"); // redacted claims stay unlinked
+  const seekable = claims.filter((c) => c.not_checked_reason !== "outside_policy"); // redacted statements stay unlinked
 
   const nearest = (clientX: number) => {
     const r = ref.current!.getBoundingClientRect();
@@ -63,7 +60,7 @@ export function ClaimTrack({ claims, duration, time, currentId, onSeekClaim }: {
           <button
             key={c.id}
             className={`${tickClass(c)}${c.id === currentId ? " tick-current" : ""}`}
-            style={{ left: `${(c.start_s / total) * 100}%`, ["--tick" as string]: c.verdict ? VERDICTS[c.verdict.verdict].cssVar : STATEMENT_TYPES[typeOf(c.statement_type)].cssVar }}
+            style={{ left: `${(c.start_s / total) * 100}%`, ["--tick" as string]: STATEMENT_TYPES[typeOf(c.statement_type)].cssVar }}
             aria-label={tickLabel(c)}
             title={tickLabel(c)}
             disabled={c.not_checked_reason === "outside_policy"}

@@ -14,10 +14,11 @@ from .. import prompts
 from ..config import Settings
 from ..context import get_context
 from ..guardrails.injection import wrap_untrusted
-from ..schemas import BatchJudgeOutput, BatchTriage, ExtractionResult, JudgeOutput, KnowledgeResult, SearchPlan, TriageResult
+from ..schemas import BatchPick, BatchTriage, ExtractionResult, SearchPlan, SourcePick
 
 
 def _model(name: str, settings: Settings) -> Any:
+    """The model for an agent. A seam for tests, which swap in a scripted model."""
     return name
 
 
@@ -27,22 +28,10 @@ def _cfg(temperature: float = 0.2) -> types.GenerateContentConfig:
 
 # --- Callbacks ------------------------------------------------------------------------
 
-# Empty-but-valid outputs, so a skipped stage still satisfies its output schema.
-_EMPTY = {
-    "triage": {"worthiness": 0, "factual_density": "low", "speaker_type": "other", "pestle_mix": {},
-               "never_share": 0, "reason": "skipped"},
-    "extractor": {"claims": [], "summary": ""},
-}
-
-
-def _skip(agent_name: str) -> types.Content:
-    return types.Content(role="model", parts=[types.Part(text=json.dumps(_EMPTY.get(agent_name, {})))])
-
-
 def skip_if_gated(callback_context: CallbackContext) -> Optional[types.Content]:
-    """before_agent_callback: once a gate has decided to skip the episode, later LLM stages do nothing."""
+    """before_agent_callback: once a gate has decided to skip the video, the extractor does nothing."""
     if callback_context.state.get("gate", {}).get("skip"):
-        return _skip(callback_context.agent_name)
+        return types.Content(role="model", parts=[types.Part(text=json.dumps({"claims": [], "summary": ""}))])
     return None
 
 
@@ -61,37 +50,30 @@ def inject_video(callback_context: CallbackContext, llm_request: LlmRequest) -> 
         part.media_processing = types.MediaProcessing.STATIC
         part.video_metadata = types.VideoMetadata(fps=ctx.settings.static_fps)
         part.media_resolution = types.PartMediaResolution(level=types.PartMediaResolutionLevel.MEDIA_RESOLUTION_LOW)
-    llm_request.contents.append(types.Content(role="user", parts=[part, types.Part(text="Extract the claims from this video.")]))
+    llm_request.contents.append(types.Content(role="user", parts=[part, types.Part(text="Tag the statements in this video.")]))
+
+
+def _source_blocks(key: str) -> str:
+    """The fetched pages for one search key, as delimited, untrusted blocks.
+
+    The picker sees exactly the text the quote check will later search, so a quote that passes the check really
+    is on the page the picker read.
+    """
+    docs = get_context().evidence.get(key, {})
+    if not docs:
+        return "No sources were found."
+    return "\n\n".join(
+        wrap_untrusted(f"SOURCE {i + 1}", f"URL: {url}\nTitle: {d.get('title', '')}\nPublished: {d.get('publish_date') or 'unknown'}\n\n{d['text']}")
+        for i, (url, d) in enumerate(docs.items()))
 
 
 def inject_sources(callback_context: CallbackContext, llm_request: LlmRequest) -> None:
-    """before_model_callback on the judge: adds fetched sources as delimited, untrusted data.
-
-    The judge sees exactly the text the quote check will later search, so a quote
-    that passes the check really is in what the judge read.
-    """
-    ctx = get_context()
-    docs = ctx.evidence.get(callback_context.state["claim_key"], {})
-    items = list(docs.items())
-    if callback_context.state.get("reorder_sources"):
-        items.reverse()
-    if not items:
-        blocks = "No sources were found."
-    else:
-        blocks = "\n\n".join(
-            wrap_untrusted(f"SOURCE {i + 1}", f"URL: {url}\nTitle: {d.get('title', '')}\nPublished: {d.get('publish_date') or 'unknown'}\n\n{d['text']}")
-            for i, (url, d) in enumerate(items)
-        )
-    llm_request.contents.append(types.Content(role="user", parts=[types.Part(text=f"Sources:\n\n{blocks}\n\nReturn your verdict.")]))
+    """before_model_callback on both pickers: adds the fetched pages as untrusted data."""
+    blocks = _source_blocks(callback_context.state["claim_key"])
+    llm_request.contents.append(types.Content(role="user", parts=[types.Part(text=f"Sources:\n\n{blocks}\n\nReturn the sentences.")]))
 
 
-# --- Agents -------------------------------------------------------------------------
-
-def triage_agent(s: Settings) -> LlmAgent:
-    return LlmAgent(name="triage", model=_model(s.fast_model, s), instruction=prompts.TRIAGE,
-                    include_contents="none", output_schema=TriageResult, output_key="triage",
-                    generate_content_config=_cfg(0.0), before_agent_callback=skip_if_gated)
-
+# --- First pass -----------------------------------------------------------------------
 
 def extractor_agent(s: Settings) -> LlmAgent:
     cfg = _cfg(0.1)
@@ -104,32 +86,21 @@ def extractor_agent(s: Settings) -> LlmAgent:
                     before_model_callback=inject_video)
 
 
+# --- Sources for one claim ------------------------------------------------------------
+
 def planner_agent(s: Settings) -> LlmAgent:
     return LlmAgent(name="planner", model=_model(s.fast_model, s), instruction=prompts.PLAN,
                     include_contents="none", output_schema=SearchPlan, output_key="plan",
                     generate_content_config=_cfg(0.0))
 
 
-def judge_agent(s: Settings, name: str = "judge") -> LlmAgent:
-    return LlmAgent(name=name, model=_model(s.judge_model, s), instruction=prompts.JUDGE,
-                    include_contents="none", output_schema=JudgeOutput, output_key=name,
+def picker_agent(s: Settings) -> LlmAgent:
+    return LlmAgent(name="picker", model=_model(s.fast_model, s), instruction=prompts.PICK,
+                    include_contents="none", output_schema=SourcePick, output_key="picked",
                     generate_content_config=_cfg(0.0), before_model_callback=inject_sources)
 
 
-# --- Automatic whole-video verification (agents/video_verifier.py). Cheap model; claims arrive through state. ---
-
-def inject_group_sources(callback_context: CallbackContext, llm_request: LlmRequest) -> None:
-    """before_model_callback on the batch judge: the fetched sources for this group, as untrusted blocks."""
-    ctx = get_context()
-    docs = ctx.evidence.get(callback_context.state["claim_key"], {})
-    if not docs:
-        blocks = "No sources were found."
-    else:
-        blocks = "\n\n".join(
-            wrap_untrusted(f"SOURCE {i + 1}", f"URL: {url}\nTitle: {d.get('title', '')}\nPublished: {d.get('publish_date') or 'unknown'}\n\n{d['text']}")
-            for i, (url, d) in enumerate(docs.items()))
-    llm_request.contents.append(types.Content(role="user", parts=[types.Part(text=f"Sources:\n\n{blocks}\n\nReturn a verdict for every claim.")]))
-
+# --- Sources for a whole video (cheap model; claims arrive through state) ----------------
 
 def batch_triage_agent(s: Settings) -> LlmAgent:
     return LlmAgent(name="batch_triage", model=_model(s.lite_model, s), instruction=prompts.TRIAGE_BATCH,
@@ -137,13 +108,7 @@ def batch_triage_agent(s: Settings) -> LlmAgent:
                     generate_content_config=_cfg(0.0))
 
 
-def knowledge_agent(s: Settings) -> LlmAgent:
-    return LlmAgent(name="knowledge", model=_model(s.lite_model, s), instruction=prompts.KNOWLEDGE,
-                    include_contents="none", output_schema=KnowledgeResult, output_key="knowledge",
-                    generate_content_config=_cfg(0.0))
-
-
-def batch_judge_agent(s: Settings, name: str = "batch_judge") -> LlmAgent:
-    return LlmAgent(name=name, model=_model(s.auto_judge_model, s), instruction=prompts.JUDGE_BATCH,
-                    include_contents="none", output_schema=BatchJudgeOutput, output_key="batch_judge",
-                    generate_content_config=_cfg(0.0), before_model_callback=inject_group_sources)
+def batch_picker_agent(s: Settings, name: str = "batch_picker") -> LlmAgent:
+    return LlmAgent(name=name, model=_model(s.lite_model, s), instruction=prompts.PICK_BATCH,
+                    include_contents="none", output_schema=BatchPick, output_key="batch_picked",
+                    generate_content_config=_cfg(0.0), before_model_callback=inject_sources)

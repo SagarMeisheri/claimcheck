@@ -1,74 +1,53 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import type { PreviewClaim, StatementType, VerdictName } from "@/lib/types";
+import { useCallback, useState } from "react";
+import type { PreviewClaim, StatementType } from "@/lib/types";
 import { TopicTags } from "@/components/TopicTags";
-import { InlineVerify, type InlineResult } from "./InlineVerify";
+import { CheckSources } from "@/components/CheckSources";
+import { SourceList } from "@/components/SourceList";
 import { STATEMENT_TYPES, TYPE_ORDER, totalStatements, typeOf } from "@/lib/statements";
-import { VERDICTS, clock, domain, scoreLabel, topicHue, topicLabel } from "@/lib/verdicts";
+import { clock, topicHue, topicLabel } from "@/lib/format";
 
 type Counts = Partial<Record<StatementType, number>>;
 type Tab = "all" | StatementType;
 
-function Card({ videoId, c, videoPending, active, topic, onTopic, onPlay }: {
-  videoId: string; c: PreviewClaim; videoPending: boolean; active: boolean; topic: string | null; onTopic(t: string): void;
-  onPlay(c: PreviewClaim): void;
+function Card({ videoId, c, active, topic, onTopic, onPlay }: {
+  videoId: string; c: PreviewClaim; active: boolean; topic: string | null; onTopic(t: string): void; onPlay(c: PreviewClaim): void;
 }) {
-  // A verdict can arrive while the page is open (the Verify button below), so the card keeps its own copy.
-  const [result, setResult] = useState<InlineResult | null>(null);
   const [busy, setBusy] = useState(false);
   const onBusy = useCallback((b: boolean) => setBusy(b), []);
-  const onDone = useCallback((r: InlineResult) => setResult(r), []);
-
-  const verdict = c.verdict ?? result?.outcome?.verdict ?? null;
-  const v = verdict ? VERDICTS[verdict] : null;
-  const score = scoreLabel(result?.outcome?.score);
-  const src = result?.outcome?.sources[0];
-  const sourceLine = c.source_line ?? (src ? `${src.title ?? domain(src.url)}: ${src.quote}` : null);
-  const awaiting = c.awaiting_review || result?.status === "awaiting_review";
   const t = STATEMENT_TYPES[typeOf(c.statement_type)];
-  const factual = typeOf(c.statement_type) === "factual_claim";
-  const verifiable = factual && !v && !awaiting;
-  const cls = `ccard${active ? " is-active" : ""}${v ? " is-verdict" : " ccard-statement"}${busy ? " is-verifying" : ""}`;
+  const isClaim = typeOf(c.statement_type) === "factual_claim";
+  const cls = `ccard ccard-statement${active ? " is-active" : ""}${busy ? " is-verifying" : ""}`;
   return (
-    <article className={cls} role="listitem"
-             style={{ ["--stype" as string]: t.cssVar, ["--vc" as string]: v ? v.cssVar : undefined }}>
+    <article className={cls} role="listitem" style={{ ["--stype" as string]: t.cssVar }}>
       {/* Clicking a statement plays the video from its timestamp, right here on the home page. */}
-      <button type="button" className="ccard-main ccard-playbtn" disabled={videoPending} onClick={() => onPlay(c)}
+      <button type="button" className="ccard-main ccard-playbtn" onClick={() => onPlay(c)}
               aria-label={`Play the video from ${clock(c.start_s)}: ${c.claim_text}`}>
         <span className="ccard-head">
           <span className="ts">▶ {clock(c.start_s)}</span>
           <span className="stype-tag"><span className="bd-dot" style={{ background: t.cssVar }} aria-hidden="true" />{t.label}</span>
           {active && <span className="cc-playing">Playing</span>}
         </span>
-        {v && (
-          <span className="ccard-verdict">
-            <span className="vbadge" style={{ background: v.cssVar }}>{v.label.toUpperCase()}</span>
-            {score && <span className="vscore">{score}</span>}
-            {c.basis === "model_knowledge" && <span className="basis-note" title="Answered from general knowledge; no source was searched">General knowledge</span>}
-          </span>
-        )}
         <span className="ccard-text">{c.claim_text}</span>
-        {v && sourceLine && <span className="ccard-src" style={{ borderColor: v.cssVar }}>{sourceLine}</span>}
-        {awaiting && <span className="meta">Verified, with a reviewer</span>}
       </button>
       <TopicTags topics={c.topics} active={topic} onPick={onTopic} />
-      {verifiable && !videoPending ? (
+      {isClaim && (
         <div className="ccard-foot">
-          <InlineVerify claimId={c.id} status={c.verification_status} onBusy={onBusy} onDone={onDone} />
+          {c.sources_status === "done"
+            ? <SourceList sources={c.first_source ? [c.first_source] : []} compact />
+            : (c.sources_status === "not_requested" || c.sources_status === "failed" || c.sources_status === "queued" || c.sources_status === "searching")
+              && <CheckSources claimId={c.id} status={c.sources_status} error={null} compact onBusy={onBusy} />}
+          <Link href={`/v/${videoId}#claim-${c.id}`} className="ccard-play">Open in the video page</Link>
         </div>
-      ) : (v || factual) && (
-        <Link href={`/v/${videoId}#claim-${c.id}`} className="ccard-play">
-          {v ? "Sources and details" : "Open in the video page"}
-        </Link>
       )}
     </article>
   );
 }
 
 /** Tabs for the carousel: every statement type this video has, with counts. */
-function TypeTabs({ counts, tab, onTab, verified }: { counts: Counts; tab: Tab; onTab(t: Tab): void; verified: number }) {
+function TypeTabs({ counts, tab, onTab, withSources }: { counts: Counts; tab: Tab; onTab(t: Tab): void; withSources: number }) {
   const types = TYPE_ORDER.filter((t) => counts[t]);
   const total = totalStatements(counts);
   return (
@@ -83,7 +62,7 @@ function TypeTabs({ counts, tab, onTab, verified }: { counts: Counts; tab: Tab; 
           {STATEMENT_TYPES[t].label} <span className="meta">{counts[t]}</span>
         </button>
       ))}
-      <span className="meta stmt-tabs-note">{verified} verified</span>
+      <span className="meta stmt-tabs-note">{withSources} with sources</span>
     </div>
   );
 }
@@ -100,18 +79,15 @@ function pageList(page: number, pages: number): (number | "gap")[] {
 }
 
 /** Row under a video: tabs by statement type, subject chips, then that selection's statements, a page at a time. */
-export function StatementCarousel({ videoId, statements, verifiedCount, counts, verdictFilter = null, videoPending = false, activeId = null, onPlay }: {
-  videoId: string; statements: PreviewClaim[]; verifiedCount: number; counts: Counts; verdictFilter?: VerdictName | null;
-  videoPending?: boolean; activeId?: string | null; onPlay(c: PreviewClaim): void;
+export function StatementCarousel({ videoId, statements, withSources, counts, activeId = null, onPlay }: {
+  videoId: string; statements: PreviewClaim[]; withSources: number; counts: Counts; activeId?: string | null; onPlay(c: PreviewClaim): void;
 }) {
   const [tab, setTab] = useState<Tab>("all");
   const [topic, setTopic] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  useEffect(() => setPage(1), [verdictFilter]);
   const total = totalStatements(counts);
   if (!total && !statements.length) return null;
-  const byVerdict = verdictFilter ? statements.filter((c) => c.verdict === verdictFilter) : statements;
-  const inTab = tab === "all" ? byVerdict : byVerdict.filter((c) => typeOf(c.statement_type) === tab);
+  const inTab = tab === "all" ? statements : statements.filter((c) => typeOf(c.statement_type) === tab);
   const topicCounts = new Map<string, number>();
   for (const c of inTab) for (const t of c.topics ?? []) topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
   const chips = [...topicCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -123,7 +99,7 @@ export function StatementCarousel({ videoId, statements, verifiedCount, counts, 
   const changeTab = (t: Tab) => { setTab(t); setTopic(null); setPage(1); };
   return (
     <div className="stmt-carousel">
-      <TypeTabs counts={counts} tab={tab} onTab={changeTab} verified={verifiedCount} />
+      <TypeTabs counts={counts} tab={tab} onTab={changeTab} withSources={withSources} />
       {chips.length > 1 && (
         <div className="topic-filters stmt-topics" role="group" aria-label="Filter by subject">
           {chips.map(([t, n]) => (
@@ -136,7 +112,7 @@ export function StatementCarousel({ videoId, statements, verifiedCount, counts, 
         </div>
       )}
       <div className="carousel" role="list" aria-label="Statements in this video">
-        {shown.map((c) => <Card key={c.id} videoId={videoId} c={c} videoPending={videoPending} active={activeId === c.id} topic={topic} onTopic={pick} onPlay={onPlay} />)}
+        {shown.map((c) => <Card key={c.id} videoId={videoId} c={c} active={activeId === c.id} topic={topic} onTopic={pick} onPlay={onPlay} />)}
         {shown.length === 0 && <p className="meta ccard-empty">No statements match.</p>}
       </div>
       {pages > 1 && (

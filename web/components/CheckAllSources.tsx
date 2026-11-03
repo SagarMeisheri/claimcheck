@@ -2,9 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { requestVerifyAll } from "@/app/actions";
+import { requestAllSources } from "@/app/actions";
 
-type Live = { auto_verify: string | null; verified: number; verifying: number; label: string | null; pct: number };
+type Live = { batch: string | null; looked_up: number; searching: number; label: string | null; pct: number };
 
 /** A circular progress ring: fills with pct, or spins when the progress isn't known yet. */
 function Ring({ pct }: { pct: number | null }) {
@@ -18,11 +18,10 @@ function Ring({ pct }: { pct: number | null }) {
 }
 
 /**
- * "Verify all claims": starts the whole-video verifier. While it runs the button turns into a ring with
- * "Verifying 3 of 10", polls the video, and refreshes the page whenever another claim has a verdict, so every
- * result shows up the moment it exists.
+ * "Check sources for all claims": starts the whole-video lookup. While it runs the button turns into a ring with
+ * "Checking sources: 3 of 10", polls the video, and refreshes the page whenever another claim has its sources.
  */
-export function VerifyAllButton({ videoId, running: initialRunning, eligible, compact = false }: {
+export function CheckAllSources({ videoId, running: initialRunning, eligible, compact = false }: {
   videoId: string; running: boolean; eligible: boolean; compact?: boolean;
 }) {
   const router = useRouter();
@@ -43,9 +42,9 @@ export function VerifyAllButton({ videoId, running: initialRunning, eligible, co
         if (!r.ok || stop) return;
         const j = (await r.json()) as Live;
         setLive(j);
-        if (seen.current !== null && j.verified !== seen.current) router.refresh();
-        seen.current = j.verified;
-        if (j.auto_verify !== "running" && j.verifying === 0) { stop = true; window.clearInterval(id); setRunning(false); router.refresh(); }
+        if (seen.current !== null && j.looked_up !== seen.current) router.refresh();
+        seen.current = j.looked_up;
+        if (j.batch !== "running" && j.searching === 0) { stop = true; window.clearInterval(id); setRunning(false); router.refresh(); }
       } catch { /* try again next tick */ }
     }
     const id = window.setInterval(tick, 2500);
@@ -54,7 +53,7 @@ export function VerifyAllButton({ videoId, running: initialRunning, eligible, co
   }, [running, videoId, router]);
 
   const go = () => start(async () => {
-    const r = await requestVerifyAll(videoId);
+    const r = await requestAllSources(videoId);
     setMessage(r.ok ? null : r.message);
     if (r.ok) { setRunning(true); router.refresh(); }
   });
@@ -65,7 +64,7 @@ export function VerifyAllButton({ videoId, running: initialRunning, eligible, co
       <p className={`verify-all${compact ? " compact" : ""}`} role="status" aria-live="polite">
         <button type="button" className="btn secondary small verify-all-btn is-running" disabled>
           <Ring pct={live && live.pct > 0 ? pct : null} />
-          {live?.label ? live.label.replace("Verifying claims: ", "Verifying ") : "Starting…"}
+          {live?.label ?? "Starting…"}
         </button>
       </p>
     );
@@ -73,7 +72,7 @@ export function VerifyAllButton({ videoId, running: initialRunning, eligible, co
   if (!eligible) return null;
   return (
     <p className={`verify-all${compact ? " compact" : ""}`}>
-      <button type="button" className="btn small verify-all-btn" onClick={go}>Verify all claims</button>
+      <button type="button" className="btn small verify-all-btn" onClick={go}>Check sources for all claims</button>
       {message && <span className="meta verify-all-msg" role="status">{message}</span>}
     </p>
   );

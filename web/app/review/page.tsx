@@ -1,62 +1,59 @@
 import type { Metadata } from "next";
-import { cancelEpisode, deleteEpisode, reviewVerdict } from "@/app/actions";
-import { getAllEpisodes, getPendingReviews } from "@/lib/data";
-import { TIER_LABEL, VERDICTS, clock, domain, ytLink } from "@/lib/verdicts";
+import { cancelEpisode, deleteEpisode, hideStatement, resolveReport } from "@/app/actions";
+import { getAllEpisodes, getOpenReports } from "@/lib/data";
+import { STATEMENT_TYPES } from "@/lib/statements";
+import { clock, ytLink } from "@/lib/format";
+import type { ReportKind } from "@/lib/types";
 
-export const metadata: Metadata = { title: "Review queue", robots: { index: false } };
+export const metadata: Metadata = { title: "Reviewer", robots: { index: false } };
 export const dynamic = "force-dynamic";
 
+const KIND_LABEL: Record<ReportKind, string> = {
+  wrong_quote: "Words aren't what was said", wrong_speaker: "Wrong speaker", wrong_tag: "Wrong tag",
+  wrong_time: "Wrong timestamp", bad_source: "Wrong or irrelevant source", other: "Other",
+};
+
 export default async function ReviewPage() {
-  const items = await getPendingReviews();
-  const episodes = await getAllEpisodes();
+  const [reports, episodes] = await Promise.all([getOpenReports(), getAllEpisodes()]);
   return (
     <>
-      <h1>Review queue</h1>
+      <h1>Reports</h1>
       <p className="lede">
-        {items.length === 0
-          ? "Nothing waiting. New False verdicts and political Misleading or Disputed verdicts will appear here."
-          : `${items.length} ${items.length === 1 ? "verdict needs" : "verdicts need"} a decision before publishing.`}
+        {reports.length === 0
+          ? "No open reports."
+          : `${reports.length} open ${reports.length === 1 ? "report" : "reports"}. Under the IT Rules, acknowledge within 24 hours and resolve within 15 days.`}
       </p>
-      {items.map(({ verdict: v, claim: c, episode: e }) => (
-        <div key={v.id} className="review-card">
-          <p className="meta">{e.channel_name}: {e.title}</p>
-          <h3>{c.claim_text}</h3>
+      {reports.map((r) => (
+        <div key={r.id} className="review-card">
+          <p className="meta">{r.episode.channel_name}: {r.episode.title} · {new Date(r.created_at).toLocaleString()}</p>
+          <p><strong>{KIND_LABEL[r.kind] ?? r.kind}</strong>: {r.note}</p>
+          <h3>{r.claim.claim_text}</h3>
           <p className="meta">
-            {c.speaker} at <a href={ytLink(e.youtube_video_id, c.start_s)} target="_blank" rel="noopener noreferrer">{clock(c.start_s)}</a>
-            {c.context_quote && <>: “{c.context_quote}”</>}
+            {STATEMENT_TYPES[r.claim.statement_type].label}, {r.claim.speaker ?? "unknown speaker"} at{" "}
+            <a href={ytLink(r.episode.youtube_video_id, r.claim.start_s)} target="_blank" rel="noopener noreferrer">{clock(r.claim.start_s)}</a>
+            {r.claim.context_quote && <>: “{r.claim.context_quote}”</>}
           </p>
-          <p>
-            Proposed: <span className="vword" style={{ color: VERDICTS[v.verdict].cssVar }}>{VERDICTS[v.verdict].label}</span>{" "}
-            at {Math.round(v.confidence * 100)}% confidence. {v.reasoning}
-          </p>
-          {v.citations.map((s) => (
-            <blockquote key={s.url} style={{ borderLeft: "3px solid var(--rule)", margin: "0.5rem 0", paddingLeft: "0.8rem" }}>
-              “{s.quote}”
-              <div className="meta"><a href={s.url} target="_blank" rel="noopener noreferrer">{s.title || domain(s.url)}</a>. {TIER_LABEL[s.tier]}</div>
-            </blockquote>
-          ))}
-          {v.downgrades && v.downgrades.length > 0 && (
-            <p className="meta">Guardrail notes: {v.downgrades.join("; ")}</p>
-          )}
-          <form action={reviewVerdict}>
-            <input type="hidden" name="verdict_id" value={v.id} />
-            <div className="field">
-              <label htmlFor={`note-${v.id}`}>Note (optional, kept internally)</label>
-              <input id={`note-${v.id}`} name="note" />
-            </div>
-            <div className="row">
-              <button className="btn" name="decision" value="approve">Publish as {VERDICTS[v.verdict].label}</button>
-              <select name="new_verdict" defaultValue="unverifiable" aria-label="Change verdict to">
-                {Object.entries(VERDICTS).map(([k, x]) => <option key={k} value={k}>{x.label}</option>)}
-              </select>
-              <button className="btn secondary" name="decision" value="change">Change and publish</button>
-            </div>
-          </form>
+          <div className="row">
+            <form action={hideStatement}>
+              <input type="hidden" name="claim_id" value={r.claim.id} />
+              <button className="btn secondary">Hide this statement</button>
+            </form>
+            <form action={resolveReport}>
+              <input type="hidden" name="report_id" value={r.id} />
+              <input type="hidden" name="status" value="accepted" />
+              <button className="btn secondary">Mark fixed</button>
+            </form>
+            <form action={resolveReport}>
+              <input type="hidden" name="report_id" value={r.id} />
+              <input type="hidden" name="status" value="rejected" />
+              <button className="btn secondary">Nothing wrong</button>
+            </form>
+          </div>
         </div>
       ))}
 
       <h2 id="videos">Videos</h2>
-      <p className="lede">Stop a check that is queued or stuck, or remove a video and its claims.</p>
+      <p className="lede">Stop an analysis that is queued or stuck, or remove a video and everything shown for it.</p>
       {episodes.length === 0 && <p className="meta">No videos yet.</p>}
       {episodes.map((e) => (
         <div key={e.id} className="review-card">
@@ -72,7 +69,7 @@ export default async function ReviewPage() {
             {["queued", "processing"].includes(e.status) && (
               <form action={cancelEpisode}>
                 <input type="hidden" name="episode_id" value={e.id} />
-                <button className="btn secondary">Stop checking</button>
+                <button className="btn secondary">Stop</button>
               </form>
             )}
             <form action={deleteEpisode}>

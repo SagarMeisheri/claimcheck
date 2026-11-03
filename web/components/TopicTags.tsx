@@ -1,6 +1,6 @@
 "use client";
 
-import { topicHue, topicLabel } from "@/lib/verdicts";
+import { topicHue, topicLabel } from "@/lib/format";
 
 /** A statement's subject tags (1-2). Each one is a button: pressing it filters the list to that subject. */
 export function TopicTags({ topics, active, onPick }: { topics?: string[]; active?: string | null; onPick(t: string): void }) {

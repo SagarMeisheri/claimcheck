@@ -1,8 +1,7 @@
-"""Per-episode run context, carried through asyncio tasks with a ContextVar.
+"""Per-video run context, carried through asyncio tasks with a ContextVar.
 
-ADK session state must stay JSON-serialisable, so live objects (store, budget,
-guardrail log, evidence documents) live here instead. Fan-out tasks created with
-asyncio inherit the context automatically.
+ADK session state must stay JSON-serialisable, so live objects (store, budget, guardrail log, fetched source
+pages) live here instead. Fan-out tasks created with asyncio inherit the context automatically.
 """
 
 from __future__ import annotations
@@ -44,27 +43,23 @@ class Budget:
 
     def check(self) -> None:
         if self.spent_usd >= self.cap_usd:
-            raise BudgetExceeded(f"episode cost ${self.spent_usd:.2f} reached cap ${self.cap_usd:.2f}")
+            raise BudgetExceeded(f"video cost ${self.spent_usd:.2f} reached cap ${self.cap_usd:.2f}")
 
 
 @dataclass
 class EpisodeContext:
     episode_id: str
     video_id: str
-    track: str  # "politics" | "finance_health"
     settings: Settings
     policy: dict[str, Any]
     store: Any
     budget: Budget
     events: list[GuardrailEvent] = field(default_factory=list)
-    # claim_key -> {url: {"title":..., "text":..., "tier":...}}
+    # search key -> {url: {"title":..., "text":..., "tier":..., "publish_date":...}}
     evidence: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
-    # claim index -> embedding / reused verdict id (filled by the fan-out, read by the publisher)
-    embeddings: dict[int, list[float]] = field(default_factory=dict)
-    cached_ids: dict[int, str] = field(default_factory=dict)
     # Returns the plugin list for each ADK runner (budget, Model Armor, ...)
     plugins_factory: Callable[[], list] = field(default=lambda: [])
-    auto: dict[str, Any] = field(default_factory=dict)  # state of the automatic whole-video verifier
+    batch: dict[str, Any] = field(default_factory=dict)  # state of "Check sources for all claims"
     duration_s: int = 0  # video length, used to turn a statement's timestamp into progress
 
     def log(self, stage: str, rule: str, action: str, detail: str = "", claim_index: Optional[int] = None) -> None:

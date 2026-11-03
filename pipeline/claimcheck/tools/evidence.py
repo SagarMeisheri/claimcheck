@@ -1,11 +1,11 @@
-"""One web search for one claim, via Parallel. The verifier workflow runs up to three of these at once.
+"""One web search for one claim, via Parallel. A source lookup runs up to three of these at once.
 
 The model only proposes a query and a scope ("tier1" or "open"); the number of searches, domains, limits and
 blocklists are decided in code. Guardrails in here:
 - domains come from policy.yaml (tier-1 list per PESTLE area, or open web minus blocklist)
 - blocklisted results are dropped even if returned
 - fetched text is screened for prompt injection and wrapped as untrusted data
-- every call is costed against the episode budget
+- every call is costed against the video budget
 """
 
 from __future__ import annotations

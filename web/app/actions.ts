@@ -3,16 +3,16 @@
 import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { reviewerFromHeader } from "@/lib/auth";
 import { serviceDb } from "@/lib/data";
 import { parseVideoId } from "@/lib/youtube";
-import { VERDICTS } from "@/lib/verdicts";
-import type { VerificationStatus } from "@/lib/types";
+import type { ReportKind, SourcesStatus } from "@/lib/types";
 
 export type ActionResult = { ok: boolean; message: string; episodeId?: string; videoId?: string };
 
-export type Preview = { videoId: string; title: string | null; channel: string | null; alreadyChecked: boolean };
+export type Preview = { videoId: string; title: string | null; channel: string | null; alreadyDone: boolean };
 
-/** Link preview for "Check a video": YouTube oEmbed (no API key) plus whether we've checked it. */
+/** Link preview for "Analyse a video": YouTube oEmbed (no API key) plus whether it has been analysed already. */
 export async function previewVideo(url: string): Promise<Preview | null> {
   const videoId = parseVideoId(url);
   if (!videoId) return null;
@@ -23,16 +23,25 @@ export async function previewVideo(url: string): Promise<Preview | null> {
     if (r.ok) { const j = await r.json(); title = j.title ?? null; channel = j.author_name ?? null; }
   } catch { /* preview is best-effort */ }
   const { data } = await serviceDb().from("episodes").select("status").eq("youtube_video_id", videoId).maybeSingle();
-  const alreadyChecked = !!data && ["done", "in_review"].includes(data.status);
-  return { videoId, title, channel, alreadyChecked };
+  const alreadyDone = !!data && ["done", "in_review"].includes(data.status);
+  return { videoId, title, channel, alreadyDone };
 }
 
 const DAILY_LIMIT = Number(process.env.SUBMIT_PER_PERSON_PER_DAY ?? 5);
 
-async function submitterHash(): Promise<string> {
+/** Salted hash of the visitor's IP, used only for rate limits (rows deleted after 30 days by the maintenance cron). */
+async function visitorHash(): Promise<string> {
   const h = await headers();
   const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || h.get("x-real-ip") || "unknown";
   return createHash("sha256").update(`${process.env.SUBMITTER_SALT ?? ""}:${ip}`).digest("hex").slice(0, 32);
+}
+
+function pipeline(path: string, body?: unknown): Promise<Response | null> {
+  return fetch(`${process.env.PIPELINE_URL}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-pipeline-secret": process.env.PIPELINE_SHARED_SECRET ?? "" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }).catch(() => null);
 }
 
 export async function submitVideo(_prev: ActionResult | null, form: FormData): Promise<ActionResult> {
@@ -43,193 +52,172 @@ export async function submitVideo(_prev: ActionResult | null, form: FormData): P
   const db = serviceDb();
   const existing = await db.from("episodes").select("id, status").eq("youtube_video_id", videoId).maybeSingle();
   if (existing.data && ["done", "in_review", "processing", "queued"].includes(existing.data.status)) {
-    return { ok: true, message: "This video is already checked or in progress.", episodeId: existing.data.id, videoId };
+    return { ok: true, message: "This video is already analysed or in progress.", episodeId: existing.data.id, videoId };
   }
 
-  // Guardrail: 5 submissions per person per day (hashed IP; no raw IPs stored).
-  const who = await submitterHash();
+  const who = await visitorHash();
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   const { count } = await db.from("submissions").select("id", { count: "exact", head: true })
     .eq("submitter", who).gte("created_at", since);
-  if ((count ?? 0) >= DAILY_LIMIT) {
+  if (DAILY_LIMIT > 0 && (count ?? 0) >= DAILY_LIMIT) {
     return { ok: false, message: `You've reached today's limit of ${DAILY_LIMIT} videos. Try again tomorrow.` };
   }
   await db.from("submissions").insert({ submitter: who, youtube_video_id: videoId });
-  // Best-effort title from YouTube's oEmbed, so the home page shows the video straight away; the pipeline
-  // fills in the rest (length, channel, publish date) as soon as its metadata call returns.
+  // Best-effort title from YouTube's oEmbed, so the home page shows the video straight away.
   const known = await previewVideo(url).catch(() => null);
   const ep = await db.from("episodes").upsert({ youtube_video_id: videoId, status: "queued", submitted_by: who,
     ...(known?.title ? { title: known.title } : {}) }, { onConflict: "youtube_video_id" }).select("id").single();
   if (ep.error) return { ok: false, message: "Couldn't queue the video. Try again in a minute." };
 
-  const res = await fetch(`${process.env.PIPELINE_URL}/episodes`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-pipeline-secret": process.env.PIPELINE_SHARED_SECRET ?? "" },
-    body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoId}`, episode_id: ep.data.id, submitted_by: who }),
-  }).catch(() => null);
+  const res = await pipeline("/episodes", { url: `https://www.youtube.com/watch?v=${videoId}`, episode_id: ep.data.id, submitted_by: who });
   revalidatePath("/");
   if (!res || !res.ok) {
-    return { ok: false, message: "The checking service didn't respond. The video is saved and will be retried." };
+    return { ok: false, message: "The analysis service didn't respond. Try again in a few minutes." };
   }
-  return { ok: true, message: "Queued. Most videos take 10 to 30 minutes; political verdicts may wait for a reviewer.", episodeId: ep.data.id, videoId };
+  return { ok: true, message: "Queued. Statements start appearing within a few minutes; long videos take longer.", episodeId: ep.data.id, videoId };
 }
 
-export async function sendFeedback(_prev: ActionResult | null, form: FormData): Promise<ActionResult> {
+// --- Reports ("Report a problem") ---------------------------------------------------------------
+
+const REPORT_KINDS: ReportKind[] = ["wrong_quote", "wrong_speaker", "wrong_tag", "wrong_time", "bad_source", "other"];
+
+export async function sendReport(_prev: ActionResult | null, form: FormData): Promise<ActionResult> {
   const claimId = String(form.get("claim_id") ?? "");
+  const kind = String(form.get("kind") ?? "other") as ReportKind;
   const note = String(form.get("note") ?? "").trim().slice(0, 2000);
-  const suggested = String(form.get("suggested_verdict") ?? "");
-  if (!note) return { ok: false, message: "Add a short reason so the reviewer knows what to check." };
-  if (suggested && !(suggested in VERDICTS)) return { ok: false, message: "Pick a verdict from the list." };
-  const { error } = await serviceDb().from("feedback").insert({
-    claim_id: claimId, note, suggested_verdict: suggested || null, submitter: await submitterHash(),
-  });
+  if (!/^[0-9a-f-]{36}$/i.test(claimId)) return { ok: false, message: "Unknown statement." };
+  if (!REPORT_KINDS.includes(kind)) return { ok: false, message: "Pick what's wrong from the list." };
+  if (!note) return { ok: false, message: "Add a short description so we know what to fix." };
+  const { error } = await serviceDb().from("feedback").insert({ claim_id: claimId, kind, note, submitter: await visitorHash() });
   return error ? { ok: false, message: "Couldn't send that. Try again." } : { ok: true, message: "ok" };
 }
 
-// --- On-demand verification -------------------------------------------------------------------
+// --- Sources -----------------------------------------------------------------------------------
 
-export type VerifyResult = { ok: boolean; status: VerificationStatus | null; message: string };
+export type SourcesResult = { ok: boolean; status: SourcesStatus | null; message: string };
 
-// Guardrails on the public Verify button. The per-video cost cap is enforced by the pipeline.
-const VERIFY_PER_PERSON_PER_DAY = Number(process.env.VERIFY_PER_PERSON_PER_DAY ?? 10);
-const VERIFY_SITE_PER_HOUR = Number(process.env.VERIFY_SITE_PER_HOUR ?? 120);
+// Limits on the public buttons. The per-video cost cap is enforced by the pipeline. Set a limit to 0 to turn it off.
+const ONE_PER_PERSON_PER_DAY = Number(process.env.SOURCES_PER_PERSON_PER_DAY ?? 10);
+const ONE_SITE_PER_HOUR = Number(process.env.SOURCES_SITE_PER_HOUR ?? 120);
+const ALL_PER_PERSON_PER_DAY = Number(process.env.SOURCES_ALL_PER_PERSON_PER_DAY ?? 3);
+const ALL_SITE_PER_HOUR = Number(process.env.SOURCES_ALL_SITE_PER_HOUR ?? 20);
 const STALE_MS = 30 * 60 * 1000; // a request stuck this long (e.g. service restarted) can be retried
 
-/** Verify button: verifies one factual claim, once for everyone. False verdicts still wait for a reviewer. */
-export async function requestVerification(claimId: string): Promise<VerifyResult> {
-  if (!/^[0-9a-f-]{36}$/i.test(claimId)) return { ok: false, status: null, message: "Unknown claim." };
+/** How many "queued" requests of this kind this person made today, and the whole site made in the last hour. */
+async function requestCounts(kind: "one" | "all", who: string): Promise<{ mine: number; site: number }> {
+  const db = serviceDb();
+  const dayAgo = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const hourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
+  const [{ count: mine }, { count: site }] = await Promise.all([
+    db.from("source_requests").select("id", { count: "exact", head: true }).eq("kind", kind).eq("requester", who).eq("outcome", "queued").gte("created_at", dayAgo),
+    db.from("source_requests").select("id", { count: "exact", head: true }).eq("kind", kind).eq("outcome", "queued").gte("created_at", hourAgo),
+  ]);
+  return { mine: mine ?? 0, site: site ?? 0 };
+}
+
+/** "Check sources": looks up sources for one factual claim, once for everyone. */
+export async function requestSources(claimId: string): Promise<SourcesResult> {
+  if (!/^[0-9a-f-]{36}$/i.test(claimId)) return { ok: false, status: null, message: "Unknown statement." };
   const db = serviceDb();
   const { data: c } = await db.from("claims")
-    .select("id, episode_id, statement_type, policy_tier, not_checked_reason, verification_status, verify_requested_at, episodes(youtube_video_id, status)")
+    .select("id, episode_id, statement_type, policy_tier, not_checked_reason, sources_status, sources_requested_at, episodes(youtube_video_id, status)")
     .eq("id", claimId).maybeSingle();
-  if (!c) return { ok: false, status: null, message: "Unknown claim." };
-  const status = c.verification_status as VerificationStatus;
+  if (!c) return { ok: false, status: null, message: "Unknown statement." };
+  const status = c.sources_status as SourcesStatus;
   const videoId = (c as any).episodes?.youtube_video_id as string | undefined;
 
-  if (status === "verified") return { ok: true, status, message: "Already verified." };
-  if (status === "awaiting_review") return { ok: true, status, message: "Verified; a reviewer is checking the verdict before it's shown." };
-  const stale = !!c.verify_requested_at && Date.now() - Date.parse(c.verify_requested_at) > STALE_MS;
-  if ((status === "queued" || status === "verifying") && !stale) return { ok: true, status, message: "Already being verified." };
-  if (c.statement_type !== "factual_claim" || c.policy_tier === "never" || c.not_checked_reason === "outside_policy"
-      || status === "not_eligible") {
-    return { ok: false, status, message: "Only claims can be verified. Opinions, forecasts and rhetoric are tagged instead." };
+  if (status === "done") return { ok: true, status, message: "Sources have already been looked up." };
+  const stale = !!c.sources_requested_at && Date.now() - Date.parse(c.sources_requested_at) > STALE_MS;
+  if ((status === "queued" || status === "searching") && !stale) return { ok: true, status, message: "Already searching." };
+  if (c.statement_type !== "factual_claim" || c.policy_tier === "never" || c.not_checked_reason === "outside_policy" || status === "not_eligible") {
+    return { ok: false, status, message: "Sources can only be looked up for claims, not opinions or forecasts." };
   }
   if (!["done", "in_review"].includes((c as any).episodes?.status)) {
     return { ok: false, status, message: "This video is still being analysed. Try again when it's finished." };
   }
 
-  // Rate limits: per person per day (hashed IP, like submissions) and for the whole site per hour.
-  const who = await submitterHash();
-  const dayAgo = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const hourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
-  const [{ count: mine }, { count: site }] = await Promise.all([
-    db.from("verify_requests").select("id", { count: "exact", head: true }).eq("requester", who).eq("outcome", "queued").gte("created_at", dayAgo),
-    db.from("verify_requests").select("id", { count: "exact", head: true }).eq("outcome", "queued").gte("created_at", hourAgo),
-  ]);
-  if ((mine ?? 0) >= VERIFY_PER_PERSON_PER_DAY) {
-    return { ok: false, status, message: `You've verified ${VERIFY_PER_PERSON_PER_DAY} claims today, the daily limit. Try again tomorrow.` };
+  const who = await visitorHash();
+  const { mine, site } = await requestCounts("one", who);
+  if (ONE_PER_PERSON_PER_DAY > 0 && mine >= ONE_PER_PERSON_PER_DAY) {
+    return { ok: false, status, message: `You've checked sources ${ONE_PER_PERSON_PER_DAY} times today, the daily limit. Try again tomorrow.` };
   }
-  if ((site ?? 0) >= VERIFY_SITE_PER_HOUR) {
-    return { ok: false, status, message: "Lots of people are verifying claims right now. Try again in a few minutes." };
+  if (ONE_SITE_PER_HOUR > 0 && site >= ONE_SITE_PER_HOUR) {
+    return { ok: false, status, message: "Lots of people are checking sources right now. Try again in a few minutes." };
   }
 
   // Take the claim only if nobody else did in the meantime.
   const { data: taken } = await db.from("claims")
-    .update({ verification_status: "queued", verify_requested_at: new Date().toISOString(), verify_error: null })
-    .eq("id", claimId).eq("verification_status", status).select("id");
-  if (!taken?.length) return { ok: true, status: "queued", message: "Already being verified." };
-  const { data: reqRow } = await db.from("verify_requests")
-    .insert({ claim_id: claimId, episode_id: c.episode_id, requester: who, outcome: "queued" }).select("id").single();
+    .update({ sources_status: "queued", sources_requested_at: new Date().toISOString(), sources_error: null })
+    .eq("id", claimId).eq("sources_status", status).select("id");
+  if (!taken?.length) return { ok: true, status: "queued", message: "Already searching." };
+  const { data: reqRow } = await db.from("source_requests")
+    .insert({ claim_id: claimId, episode_id: c.episode_id, requester: who, kind: "one" }).select("id").single();
 
-  const revertTo: VerificationStatus = status === "queued" || status === "verifying" ? "failed" : status;
-  const res = await fetch(`${process.env.PIPELINE_URL}/claims/${encodeURIComponent(claimId)}/verify`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-pipeline-secret": process.env.PIPELINE_SHARED_SECRET ?? "" },
-    body: JSON.stringify({}),
-  }).catch(() => null);
+  const revertTo: SourcesStatus = status === "queued" || status === "searching" ? "failed" : status;
+  const res = await pipeline(`/claims/${encodeURIComponent(claimId)}/sources`, {});
   if (!res || !res.ok) {
     const refused = !!res && (res.status === 409 || res.status === 404);
     const detail = refused ? String((await res.json().catch(() => ({})))?.detail ?? "") : "";
-    const message = detail || "The checking service didn't respond. Try again in a few minutes.";
-    await db.from("claims").update({ verification_status: refused ? revertTo : "failed", verify_error: message })
-      .eq("id", claimId).eq("verification_status", "queued");
-    if (reqRow) await db.from("verify_requests").update({ outcome: refused ? "rejected" : "failed" }).eq("id", reqRow.id);
+    const message = detail || "The service didn't respond. Try again in a few minutes.";
+    await db.from("claims").update({ sources_status: refused ? revertTo : "failed", sources_error: message })
+      .eq("id", claimId).eq("sources_status", "queued");
+    if (reqRow) await db.from("source_requests").update({ outcome: refused ? "rejected" : "failed" }).eq("id", reqRow.id);
     if (videoId) revalidatePath(`/v/${videoId}`);
     return { ok: false, status: refused ? revertTo : "failed", message };
   }
   if (videoId) revalidatePath(`/v/${videoId}`);
-  return { ok: true, status: "verifying", message: "Verifying. This usually takes a minute or two." };
+  return { ok: true, status: "searching", message: "Searching. This usually takes under a minute." };
 }
 
-// "Verify all claims": one press runs the whole-video verifier. Limited per person and for the site (the pipeline
-// adds its own claim, search and cost caps). Rows go into verify_requests with ":all" on the requester, so they are
-// counted apart from single-claim Verify presses. Set a limit to 0 to turn it off (e.g. in .env.local).
-const VERIFY_ALL_PER_PERSON_PER_DAY = Number(process.env.VERIFY_ALL_PER_PERSON_PER_DAY ?? 3);
-const VERIFY_ALL_SITE_PER_HOUR = Number(process.env.VERIFY_ALL_SITE_PER_HOUR ?? 20);
-
-export async function requestVerifyAll(videoId: string): Promise<{ ok: boolean; message: string }> {
+/** "Check sources for all claims": one press looks up sources for every claim of a video (up to the pipeline's limits). */
+export async function requestAllSources(videoId: string): Promise<{ ok: boolean; message: string }> {
   if (!/^[\w-]{6,20}$/.test(videoId)) return { ok: false, message: "Unknown video." };
   const db = serviceDb();
-  const { data: ep } = await db.from("episodes").select("id, status, auto_verify_status").eq("youtube_video_id", videoId).maybeSingle();
+  const { data: ep } = await db.from("episodes").select("id, status, sources_batch_status").eq("youtube_video_id", videoId).maybeSingle();
   if (!ep) return { ok: false, message: "Unknown video." };
   if (!["done", "in_review"].includes(ep.status)) return { ok: false, message: "This video is still being analysed. Try again when it's finished." };
-  if (ep.auto_verify_status === "running") return { ok: true, message: "Already verifying this video." };
+  if (ep.sources_batch_status === "running") return { ok: true, message: "Already checking sources for this video." };
 
   const { data: eligible } = await db.from("claims").select("id").eq("episode_id", ep.id).eq("statement_type", "factual_claim")
-    .is("verdict_id", null).in("verification_status", ["not_requested", "failed"]).neq("policy_tier", "never").limit(1);
-  if (!eligible?.length) return { ok: false, message: "Every claim in this video has already been checked." };
+    .in("sources_status", ["not_requested", "failed"]).limit(1);
+  if (!eligible?.length) return { ok: false, message: "Sources have already been looked up for every claim in this video." };
 
-  const who = `${await submitterHash()}:all`;
-  const dayAgo = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const hourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
-  const [{ count: mine }, { count: site }] = await Promise.all([
-    db.from("verify_requests").select("id", { count: "exact", head: true }).eq("requester", who).eq("outcome", "queued").gte("created_at", dayAgo),
-    db.from("verify_requests").select("id", { count: "exact", head: true }).like("requester", "%:all").eq("outcome", "queued").gte("created_at", hourAgo),
-  ]);
-  if (VERIFY_ALL_PER_PERSON_PER_DAY > 0 && (mine ?? 0) >= VERIFY_ALL_PER_PERSON_PER_DAY) return { ok: false, message: `You've used "Verify all claims" ${VERIFY_ALL_PER_PERSON_PER_DAY} times today, the daily limit. Try again tomorrow.` };
-  if (VERIFY_ALL_SITE_PER_HOUR > 0 && (site ?? 0) >= VERIFY_ALL_SITE_PER_HOUR) return { ok: false, message: "Lots of people are verifying videos right now. Try again in a few minutes." };
+  const who = await visitorHash();
+  const { mine, site } = await requestCounts("all", who);
+  if (ALL_PER_PERSON_PER_DAY > 0 && mine >= ALL_PER_PERSON_PER_DAY) return { ok: false, message: `You've used "Check sources for all claims" ${ALL_PER_PERSON_PER_DAY} times today, the daily limit. Try again tomorrow.` };
+  if (ALL_SITE_PER_HOUR > 0 && site >= ALL_SITE_PER_HOUR) return { ok: false, message: "Lots of people are checking sources right now. Try again in a few minutes." };
 
-  const { data: reqRow } = await db.from("verify_requests")
-    .insert({ claim_id: eligible[0].id, episode_id: ep.id, requester: who, outcome: "queued" }).select("id").single();
-  await db.from("episodes").update({ auto_verify_status: "running" }).eq("id", ep.id); // the button shows progress straight away
+  const { data: reqRow } = await db.from("source_requests")
+    .insert({ episode_id: ep.id, requester: who, kind: "all" }).select("id").single();
+  await db.from("episodes").update({ sources_batch_status: "running" }).eq("id", ep.id); // the button shows progress straight away
 
-  const res = await fetch(`${process.env.PIPELINE_URL}/episodes/${encodeURIComponent(ep.id)}/verify-all`, {
-    method: "POST", headers: { "x-pipeline-secret": process.env.PIPELINE_SHARED_SECRET ?? "" },
-  }).catch(() => null);
+  const res = await pipeline(`/episodes/${encodeURIComponent(ep.id)}/sources-all`);
   if (!res || !res.ok) {
     const detail = res ? String((await res.json().catch(() => ({})))?.detail ?? "") : "";
-    if (res?.status === 409) return { ok: true, message: detail || "Already verifying this video." }; // it is running: keep the state
-    await db.from("episodes").update({ auto_verify_status: null }).eq("id", ep.id);
-    if (reqRow) await db.from("verify_requests").update({ outcome: "failed" }).eq("id", reqRow.id);
-    return { ok: false, message: detail || "The checking service didn't respond. Try again in a few minutes." };
+    if (res?.status === 409) return { ok: true, message: detail || "Already checking sources for this video." }; // it is running: keep the state
+    await db.from("episodes").update({ sources_batch_status: null }).eq("id", ep.id);
+    if (reqRow) await db.from("source_requests").update({ outcome: "failed" }).eq("id", reqRow.id);
+    return { ok: false, message: detail || "The service didn't respond. Try again in a few minutes." };
   }
   revalidatePath("/");
   revalidatePath(`/v/${videoId}`);
-  return { ok: true, message: "Verifying all claims. Each result appears as soon as it is ready." };
+  return { ok: true, message: "Checking sources for all claims. Each result appears as soon as it is ready." };
 }
+
+// --- Reviewer ----------------------------------------------------------------------------------
 
 async function assertReviewer(): Promise<string> {
-  const h = await headers();
-  const auth = h.get("authorization") ?? "";
-  const [user, pass] = Buffer.from(auth.replace(/^Basic /, ""), "base64").toString().split(":");
-  if (!process.env.REVIEW_PASSWORD || user !== process.env.REVIEW_USER || pass !== process.env.REVIEW_PASSWORD) {
-    throw new Error("Not authorised");
-  }
-  return user;
+  const who = reviewerFromHeader((await headers()).get("authorization"));
+  if (!who) throw new Error("Not authorised");
+  return who;
 }
 
-async function pipelineCancel(episodeId: string): Promise<boolean> {
-  const res = await fetch(`${process.env.PIPELINE_URL}/episodes/${encodeURIComponent(episodeId)}/cancel`, {
-    method: "POST", headers: { "x-pipeline-secret": process.env.PIPELINE_SHARED_SECRET ?? "" },
-  }).catch(() => null);
-  return !!res?.ok;
-}
-
-/** Stops a queued or running check. Falls back to marking it skipped if the pipeline service is unreachable. */
+/** Stops a queued or running analysis. Falls back to marking it skipped if the pipeline service is unreachable. */
 export async function cancelEpisode(form: FormData): Promise<void> {
   await assertReviewer();
   const id = String(form.get("episode_id"));
-  if (!(await pipelineCancel(id))) {
+  const res = await pipeline(`/episodes/${encodeURIComponent(id)}/cancel`);
+  if (!res?.ok) {
     await serviceDb().from("episodes").update({ status: "skipped", skip_reason: "Cancelled." })
       .eq("id", id).in("status", ["queued", "processing"]);
   }
@@ -237,48 +225,39 @@ export async function cancelEpisode(form: FormData): Promise<void> {
   revalidatePath("/");
 }
 
-/** Removes a video and its claims. Verdicts that no other claim uses are removed too. */
+/** Removes a video, its statements and their sources (cascade). Old verdict rows stay hidden in the database. */
 export async function deleteEpisode(form: FormData): Promise<void> {
   await assertReviewer();
   const id = String(form.get("episode_id"));
-  const db = serviceDb();
-  await pipelineCancel(id);
-  const { data: rows } = await db.from("claims").select("verdict_id").eq("episode_id", id);
-  const verdictIds = [...new Set((rows ?? []).map((r) => r.verdict_id as string | null).filter(Boolean) as string[])];
-  await db.from("episodes").delete().eq("id", id);
-  if (verdictIds.length) {
-    const { data: stillUsed } = await db.from("claims").select("verdict_id").in("verdict_id", verdictIds);
-    const used = new Set((stillUsed ?? []).map((r) => r.verdict_id as string));
-    const orphans = verdictIds.filter((v) => !used.has(v));
-    if (orphans.length) await db.from("verdicts").delete().in("id", orphans);
-  }
+  await pipeline(`/episodes/${encodeURIComponent(id)}/cancel`);
+  await serviceDb().from("episodes").delete().eq("id", id);
   revalidatePath("/review");
   revalidatePath("/");
 }
 
-export async function reviewVerdict(form: FormData): Promise<void> {
-  const reviewer = await assertReviewer();
-  const verdictId = String(form.get("verdict_id"));
-  const decision = String(form.get("decision")); // approve | change
-  const note = String(form.get("note") ?? "").slice(0, 2000) || null;
-  const patch: Record<string, unknown> = { reviewer, reviewer_note: note, reviewed_at: new Date().toISOString() };
-  if (decision === "approve") patch.review_status = "approved";
-  else {
-    const newVerdict = String(form.get("new_verdict"));
-    if (!(newVerdict in VERDICTS)) throw new Error("Unknown verdict");
-    patch.review_status = "changed";
-    patch.verdict = newVerdict;
-  }
+/** Closes a report: "accepted" once the problem is fixed (or the statement removed), "rejected" if nothing was wrong. */
+export async function resolveReport(form: FormData): Promise<void> {
+  await assertReviewer();
+  const id = Number(form.get("report_id"));
+  const status = String(form.get("status"));
+  if (!Number.isInteger(id) || !["accepted", "rejected"].includes(status)) throw new Error("Bad request");
+  await serviceDb().from("feedback").update({ status }).eq("id", id).eq("status", "open");
+  revalidatePath("/review");
+}
+
+/** Hides one statement for everyone (e.g. a wrong quote or speaker that was reported). */
+export async function hideStatement(form: FormData): Promise<void> {
+  await assertReviewer();
+  const claimId = String(form.get("claim_id"));
+  if (!/^[0-9a-f-]{36}$/i.test(claimId)) throw new Error("Bad request");
   const db = serviceDb();
-  await db.from("verdicts").update(patch).eq("id", verdictId).eq("review_status", "pending");
-  // Claims waiting on this verdict (verified on demand or during the run) are now public.
-  await db.from("claims").update({ verification_status: "verified" }).eq("verdict_id", verdictId).eq("verification_status", "awaiting_review");
-  // Recompute public tallies for affected episodes, then close episodes with nothing left to review.
-  const { data: rows } = await db.from("claims").select("episode_id").eq("verdict_id", verdictId);
-  for (const epId of new Set((rows ?? []).map((r) => r.episode_id as string))) {
-    await db.rpc("recompute_episode_tally", { p_episode_id: epId });
-  }
-  await db.rpc("refresh_episode_review_status");
+  const { data } = await db.from("claims").update({
+    not_checked_reason: "outside_policy", claim_text: "[Not shown: removed after a report]", context_quote: null, speaker: null,
+    topics: [], sources_status: "not_eligible",
+  }).eq("id", claimId).select("episodes(youtube_video_id)").maybeSingle();
+  await db.from("claim_sources").delete().eq("claim_id", claimId);
+  const videoId = (data as any)?.episodes?.youtube_video_id;
+  if (videoId) revalidatePath(`/v/${videoId}`);
   revalidatePath("/review");
   revalidatePath("/");
 }

@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import functools
 import os
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-
-import re
 
 import yaml
 
@@ -32,7 +31,7 @@ def _matches(host: str, domain: str) -> bool:
 
 
 def source_tier(url: str, policy: dict[str, Any] | None = None) -> int:
-    """1 = official / peer-reviewed, 2 = major press, 3 = everything else. 9 = blocked."""
+    """1 = official / peer-reviewed, 2 = established news or research, 3 = everything else. 9 = blocked."""
     pol = policy or load_policy()
     src = pol["sources"]
     host = domain_of(url)
@@ -47,20 +46,10 @@ def source_tier(url: str, policy: dict[str, Any] | None = None) -> int:
     return 3
 
 
-def effective_tier(model_tier: str, topic: str, claim_type: str, policy: dict[str, Any] | None = None) -> str:
-    """Re-applies the content policy in code. The model's tier can only be made stricter."""
+def is_never(model_tier: str, topics: list[str], policy: dict[str, Any] | None = None) -> bool:
+    """Re-applies the never-show policy in code. The model can mark a statement 'never'; code can only add to that."""
     pol = policy or load_policy()
-    topic = (topic or "").lower().strip()
-    if claim_type not in pol["claim_types_checked"]:
-        return "never"
-    if topic in pol["never_topics"] or model_tier == "never":
-        return "never"
-    if topic in pol["stricter_topics"] or model_tier == "stricter":
-        return "stricter"
-    return "normal"
-
-
-_TIER_ORDER = {"normal": 0, "stricter": 1, "never": 2}
+    return model_tier == "never" or any((t or "").lower().strip() in pol["never_topics"] for t in topics or [])
 
 
 def normalize_topics(values: Any, policy: dict[str, Any] | None = None, limit: int = 2) -> list[str]:
@@ -78,12 +67,6 @@ def normalize_topics(values: Any, policy: dict[str, Any] | None = None, limit: i
     return out[:limit] or ["general"]
 
 
-def strictest_tier(model_tier: str, topics: list[str], claim_type: str, policy: dict[str, Any] | None = None) -> str:
-    """effective_tier over every topic tag; the strictest one wins."""
-    tiers = [effective_tier(model_tier, t, claim_type, policy) for t in (topics or [""])]
-    return max(tiers, key=_TIER_ORDER.__getitem__)
-
-
 def tier1_domains_for(area: str, policy: dict[str, Any] | None = None) -> list[str]:
     pol = policy or load_policy()
     return list(pol["sources"]["tier1_by_area"].get(area, pol["sources"]["tier1_by_area"]["economic"]))[:10]
@@ -92,14 +75,3 @@ def tier1_domains_for(area: str, policy: dict[str, Any] | None = None) -> list[s
 def blocklist(policy: dict[str, Any] | None = None) -> list[str]:
     pol = policy or load_policy()
     return list(pol["sources"]["blocklist"])[:10]
-
-
-def needs_review(verdict: str, tier: str, track: str, policy: dict[str, Any] | None = None) -> bool:
-    pol = policy or load_policy()
-    if verdict in pol["review"]["always"]:
-        return True
-    if track == "politics" and verdict in pol["review"]["politics_track"]:
-        return True
-    if tier == "stricter" and verdict in pol["tiers"]["stricter"]["review_verdicts"]:
-        return True
-    return False

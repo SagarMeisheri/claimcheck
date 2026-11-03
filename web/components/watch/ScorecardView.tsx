@@ -3,21 +3,18 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { VerdictStrip } from "@/components/MiniBar";
 import { Avatar, Thumb } from "@/components/Thumb";
-import type { Claim, EpisodeDetail, StatementType, VerdictName } from "@/lib/types";
-import { CORE_TYPES, STATEMENT_TYPES, TYPE_ORDER, VERIFYING, breakdownParts, canRequestVerify, typeOf } from "@/lib/statements";
-import { VERDICTS, clock, topicHue, topicLabel } from "@/lib/verdicts";
+import type { Claim, EpisodeDetail, StatementType } from "@/lib/types";
+import { STATEMENT_TYPES, SEARCHING, TYPE_ORDER, breakdownParts, canCheckSources, typeOf } from "@/lib/statements";
+import { clock, topicHue, topicLabel } from "@/lib/format";
 import { CheckProgress } from "@/components/CheckProgress";
-import { VerifyAllButton } from "@/components/VerifyAllButton";
-import { VerdictFilter } from "@/components/VerdictFilter";
-import { ClaimCard, StatementCard, type CardPhase } from "./ClaimCard";
+import { CheckAllSources } from "@/components/CheckAllSources";
+import { StatementCard, type CardPhase } from "./ClaimCard";
 import { ClaimTrack } from "./ClaimTrack";
 import { YouTubePlayer, type PlayerHandle } from "./YouTubePlayer";
 
-/** Filter chips: every statement, one statement type, or verified claims only. */
-export type View = "all" | "verified" | StatementType;
-const FLAGGED: VerdictName[] = ["false", "misleading", "disputed", "outdated"];
+/** Filter chips: every statement, one statement type, or claims that have sources. */
+export type View = "all" | "with_sources" | StatementType;
 const CLIP_S = 20;
 const LEAD_S = 3;
 const CUE_LEAD_S = 5;
@@ -28,42 +25,34 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
 }) {
   const router = useRouter();
   const player = useRef<PlayerHandle>(null);
-  // "listed" = verified claims (public verdict or with a reviewer); everything else is a tagged statement.
-  const listed = useMemo(() => ep.claims.filter((c) => c.verdict || c.awaiting_review).sort((a, b) => a.start_s - b.start_s), [ep.claims]);
   const everything = useMemo(() => [...ep.claims].sort((a, b) => a.start_s - b.start_s), [ep.claims]);
+  const visible = useMemo(() => everything.filter((c) => c.not_checked_reason !== "outside_policy"), [everything]);
+  const withSources = useMemo(() => visible.filter((c) => c.sources.length > 0), [visible]);
   const typeCounts = useMemo(() => {
     const t: Partial<Record<StatementType, number>> = {};
     for (const c of ep.claims) { const k = typeOf(c.statement_type); t[k] = (t[k] ?? 0) + 1; }
     return t;
   }, [ep.claims]);
-  const verifyingCount = ep.claims.filter((c) => VERIFYING.includes(c.verification_status)).length;
+  const searchingCount = ep.claims.filter((c) => SEARCHING.includes(c.sources_status)).length;
   const checking = ep.status === "processing" || ep.status === "queued";
 
   const [view, setView] = useState<View>(initialView ?? "all");
   const [topic, setTopic] = useState<string | null>(initialTopic ?? null);
-  const [verdictFilter, setVerdictFilter] = useState<VerdictName | null>(null);
-  const verdictCounts = useMemo(() => {
-    const m: Partial<Record<VerdictName, number>> = {};
-    for (const c of ep.claims) if (c.verdict) m[c.verdict.verdict] = (m[c.verdict.verdict] ?? 0) + 1;
-    return m;
-  }, [ep.claims]);
   const [playerOn, setPlayerOn] = useState(false);
   const [startPlaying, setStartPlaying] = useState(false);
   const [cue, setCue] = useState(initialT ?? 0);
   const [time, setTime] = useState(initialT ?? 0);
   const [playing, setPlaying] = useState(false);
   const [playerError, setPlayerError] = useState<number | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [clip, setClip] = useState<{ id: string; end: number; phase: CardPhase } | null>(null);
-  const [following, setFollowing] = useState(false); // "Keep watching": highlight claims as the video passes them
+  const [following, setFollowing] = useState(false); // "Keep watching": highlight statements as the video passes them
   const [scrollFollow, setScrollFollow] = useState(true);
-  const [autoAll, setAutoAll] = useState(false); // "Play flagged in order"
+  const [autoAll, setAutoAll] = useState(false); // "Play in order"
   const [countdown, setCountdown] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  const typed = view === "all" ? everything : view === "verified" ? listed : everything.filter((c) => typeOf(c.statement_type) === view);
-  const byView = verdictFilter ? typed.filter((c) => c.verdict?.verdict === verdictFilter) : typed;
-  // Subject chips: tags in the current type view, most common first. A chosen tag stays visible even at zero.
+  const byView = view === "all" ? everything : view === "with_sources" ? withSources : everything.filter((c) => typeOf(c.statement_type) === view);
+  // Subject chips: tags in the current view, most common first. A chosen tag stays visible even at zero.
   const topicCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const c of byView) for (const t of c.topics ?? []) m.set(t, (m.get(t) ?? 0) + 1);
@@ -71,11 +60,12 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   }, [byView]);
   const allTopicCount = useMemo(() => new Set(ep.claims.flatMap((c) => c.topics ?? [])).size, [ep.claims]);
   const viewList = topic ? byView.filter((c) => c.topics?.includes(topic)) : byView;
+  const playable = viewList.filter((c) => c.not_checked_reason !== "outside_policy");
   const current = useMemo(() => {
     let cur: Claim | null = null;
-    for (const c of listed) if (c.start_s <= time + 0.5) cur = c;
+    for (const c of visible) if (c.start_s <= time + 0.5) cur = c;
     return cur;
-  }, [listed, time]);
+  }, [visible, time]);
   const activeId = clip?.id ?? (following && playing ? current?.id ?? null : null);
 
   const flash = (msg: string) => { setToast(msg); window.setTimeout(() => setToast(null), 2500); };
@@ -89,7 +79,6 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
       for (const sel of [".player-band.is-on", ".track-holder.is-on"]) {
         const n = document.querySelector(sel);
         const cs = n ? getComputedStyle(n) : null;
-        // Where it will sit once stuck: its sticky offset plus its height.
         if (n && cs && cs.position === "sticky") pinned = Math.max(pinned, (parseFloat(cs.top) || 0) + (n as HTMLElement).offsetHeight);
       }
       const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -108,33 +97,30 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
 
   // A timestamp click: leave any 20 s clip mode and play from exactly that second.
   const playFrom = useCallback((s: number) => {
-    if (ep.video_pending) { flash("The YouTube link for this video hasn't been added yet."); return; }
     setClip(null);
     setCountdown(null);
     setAutoAll(false);
     seek(s, true);
-  }, [ep.video_pending, seek]);
+  }, [seek]);
 
   const playMoment = useCallback((c: Claim) => {
-    if (ep.video_pending) { flash("The YouTube link for this video hasn't been added yet."); return; }
     setFollowing(false);
     setCountdown(null);
     setClip({ id: c.id, end: c.start_s + CLIP_S, phase: "playing" });
     seek(Math.max(0, c.start_s - LEAD_S), true);
-  }, [ep.video_pending, seek]);
+  }, [seek]);
 
   const nextIn = (c: Claim) => {
-    const i = viewList.findIndex((x) => x.id === c.id);
-    return i >= 0 ? viewList.slice(i + 1).find((x) => x.verdict) ?? null : null;
+    const i = playable.findIndex((x) => x.id === c.id);
+    return i >= 0 ? playable[i + 1] ?? null : null;
   };
 
-  // --- Deep links: #claim-ID opens and cues that claim; ?moment=ID plays it; ?play=1 plays from the cue.
+  // --- Deep links: #claim-ID cues that statement; ?moment=ID plays it; ?play=1 plays from the cue.
   useEffect(() => {
     const id = window.location.hash.match(/^#claim-(.+)$/)?.[1];
     const target = id ? ep.claims.find((c) => c.id === id) : null;
     if (target) {
       setView("all");
-      setExpanded(new Set([target.id]));
       setCue(Math.max(0, target.start_s - CUE_LEAD_S));
       setTime(target.start_s);
       window.setTimeout(() => scrollToCard(target.id), 60);
@@ -144,7 +130,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
       setView("all");
       playMoment(m);
       window.setTimeout(() => scrollToCard(m.id), 60);
-    } else if (autoplay && !ep.video_pending) {
+    } else if (autoplay) {
       setStartPlaying(true);
       setPlayerOn(true);
     }
@@ -163,7 +149,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
     return () => window.clearInterval(id);
   }, [playing, playerOn]);
 
-  // End of a 20 s clip: pause and offer Keep watching / Next claim.
+  // End of a 20 s clip: pause and offer Keep watching / Next.
   useEffect(() => {
     if (clip?.phase === "playing" && time >= clip.end) {
       player.current?.pause();
@@ -172,14 +158,14 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
     }
   }, [time, clip, autoAll]);
 
-  // "Play flagged in order": count down, then play the next claim.
+  // "Play in order": count down, then play the next statement in the current view.
   useEffect(() => {
     if (countdown === null || !clip) return;
     if (countdown <= 0) {
-      const c = listed.find((x) => x.id === clip.id);
+      const c = ep.claims.find((x) => x.id === clip.id);
       const n = c ? nextIn(c) : null;
       setCountdown(null);
-      if (n) { playMoment(n); scrollToCard(n.id); } else { setAutoAll(false); flash("That was the last claim."); }
+      if (n) { playMoment(n); scrollToCard(n.id); } else { setAutoAll(false); flash("That was the last one."); }
       return;
     }
     const id = window.setTimeout(() => setCountdown((x) => (x === null ? null : x - 1)), 1000);
@@ -187,7 +173,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [countdown]);
 
-  // Keep watching: follow the current claim; manual scrolling pauses the auto-scroll.
+  // Keep watching: follow the current statement; manual scrolling pauses the auto-scroll.
   useEffect(() => {
     const stop = () => { if (following && playing) setScrollFollow(false); };
     window.addEventListener("wheel", stop, { passive: true });
@@ -199,28 +185,27 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, following, playing, scrollFollow]);
 
-  // While the first pass runs, or someone's Verify request is in flight, keep the page fresh.
+  // While the analysis runs, or a source lookup is in flight, keep the page fresh.
   useEffect(() => {
-    if (!checking && !verifyingCount) return;
+    if (!checking && !searchingCount) return;
     const id = window.setInterval(() => router.refresh(), 20000);
     return () => window.clearInterval(id);
-  }, [checking, verifyingCount, router]);
+  }, [checking, searchingCount, router]);
 
-  // Keyboard: J / K previous / next claim in the current view.
+  // Keyboard: J / K previous / next statement in the current view.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.closest("input, textarea, select")) return;
       if (e.key !== "j" && e.key !== "k") return;
-      const ref = clip ? listed.find((c) => c.id === clip.id)?.start_s ?? time : time;
-      const list = viewList.filter((c) => c.verdict);
-      const t = e.key === "k" ? list.find((c) => c.start_s > ref + 0.5) : [...list].reverse().find((c) => c.start_s < ref - 0.5);
+      const ref = clip ? ep.claims.find((c) => c.id === clip.id)?.start_s ?? time : time;
+      const t = e.key === "k" ? playable.find((c) => c.start_s > ref + 0.5) : [...playable].reverse().find((c) => c.start_s < ref - 0.5);
       if (t) { playMoment(t); scrollToCard(t.id); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // --- Share and copy -------------------------------------------------------------------------
+  // --- Share ----------------------------------------------------------------------------------
   const share = async (url: string, text: string) => {
     try {
       if (navigator.share) { await navigator.share({ title: ep.title, text, url }); return; }
@@ -228,48 +213,26 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
       flash("Link copied");
     } catch { /* cancelled */ }
   };
-  const shareClaim = (c: Claim) => share(`${window.location.origin}/v/${ep.youtube_video_id}#claim-${c.id}`,
-    c.verdict ? `${VERDICTS[c.verdict.verdict].label}: “${c.claim_text}”` : c.claim_text);
-  const copySource = async (c: Claim) => {
-    const s = c.verdict?.citations[0];
-    if (!s) return;
-    try {
-      await navigator.clipboard.writeText(`${s.summary ? s.quote : `“${s.quote}”`} (${s.title ?? s.url})${s.url ? ` ${s.url}` : ""}`);
-      flash("Source copied");
-    } catch { flash("Couldn't copy. Select the text and copy it instead."); }
-  };
+  // A link to the moment only: the text is the video title, never a characterisation of what was said.
+  const shareClaim = (c: Claim) => share(`${window.location.origin}/v/${ep.youtube_video_id}#claim-${c.id}`, `${ep.title} at ${clock(c.start_s)}`);
 
   // --- Rendering helpers ----------------------------------------------------------------------
   const pickTopic = (t: string) => setTopic((cur) => (cur === t ? null : t));
-  const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const card = (c: Claim) => {
     const isActive = activeId === c.id;
-    const n = nextIn(c);
-    if (!c.verdict && !c.awaiting_review) {
-      return (
-        <StatementCard key={c.id} claim={c} videoId={ep.youtube_video_id} active={isActive}
-          phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"} canWatch={!ep.video_pending}
-          canVerify={!checking} activeTopic={topic} onTopic={pickTopic} onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
-          onKeepWatching={() => { setClip(null); setCountdown(null); setAutoAll(false); setFollowing(true); setScrollFollow(true); player.current?.play(); }} />
-      );
-    }
     return (
-      <ClaimCard key={c.id} claim={c} videoId={ep.youtube_video_id} activeTopic={topic} onTopic={pickTopic} expanded={expanded.has(c.id)} active={isActive}
-        phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"}
-        countdown={isActive && autoAll ? countdown : null} hasNext={!!n} canWatch={!ep.video_pending}
-        onToggle={() => toggle(c.id)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
+      <StatementCard key={c.id} claim={c} videoId={ep.youtube_video_id} active={isActive}
+        phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"} canWatch
+        canLookUp={!checking} hasNext={!!nextIn(c)} countdown={isActive && autoAll ? countdown : null}
+        activeTopic={topic} onTopic={pickTopic} onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
         onKeepWatching={() => { setClip(null); setCountdown(null); setAutoAll(false); setFollowing(true); setScrollFollow(true); player.current?.play(); }}
-        onNext={() => { if (n) { setCountdown(null); playMoment(n); scrollToCard(n.id); } }}
-        onSeek={() => playFrom(c.start_s)}
-        onShare={() => shareClaim(c)} onCopySource={() => copySource(c)} />
+        onNext={() => { const n = nextIn(c); if (n) { setCountdown(null); playMoment(n); scrollToCard(n.id); } }}
+        onShare={() => shareClaim(c)} />
     );
   };
 
-  const supported = ep.tally.supported ?? 0;
-  const checkedCount = listed.filter((c) => c.verdict).length;
-  const reviewingCount = listed.filter((c) => c.awaiting_review).length;
-  const flagParts = FLAGGED.filter((v) => ep.tally[v]).map((v) => `${ep.tally[v]} ${VERDICTS[v].label.toLowerCase()}`);
-  const chipTypes = TYPE_ORDER.filter((t) => CORE_TYPES.includes(t) || typeCounts[t]);
+  const chipTypes = TYPE_ORDER.filter((t) => t === "factual_claim" || typeCounts[t]);
+  const lookupEligible = ep.claims.some((c) => canCheckSources(c));
 
   return (
     <div className="score">
@@ -279,23 +242,20 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
             {playerError !== null ? (
               <div className="player-error">
                 <p>This video isn&apos;t available on YouTube any more.</p>
-                <p className="meta">The claims and sources are still readable.</p>
               </div>
             ) : playerOn ? (
               <YouTubePlayer ref={player} videoId={ep.youtube_video_id} start={cue} autoplay={startPlaying}
                              onPlayingChange={setPlaying} onError={setPlayerError} />
             ) : (
-              <button className="facade" onClick={() => { if (ep.video_pending) return; setStartPlaying(true); setPlayerOn(true); }}
-                      aria-label={ep.video_pending ? "YouTube link not added yet" : `Play video from ${clock(cue)}`} disabled={ep.video_pending}>
-                <Thumb videoId={ep.video_pending ? "" : ep.youtube_video_id} title={ep.title} eager
-                       duration={ep.duration_s ? clock(ep.duration_s) : undefined} />
-                {!ep.video_pending && <span className="facade-play" aria-hidden="true">▶</span>}
-                {!ep.video_pending && cue > 0 && <span className="facade-cue">Starts at {clock(cue)}</span>}
+              <button className="facade" onClick={() => { setStartPlaying(true); setPlayerOn(true); }} aria-label={`Play video from ${clock(cue)}`}>
+                <Thumb videoId={ep.youtube_video_id} title={ep.title} eager duration={ep.duration_s ? clock(ep.duration_s) : undefined} />
+                <span className="facade-play" aria-hidden="true">▶</span>
+                {cue > 0 && <span className="facade-cue">Starts at {clock(cue)}</span>}
               </button>
             )}
           </div>
         </div>
-        {!ep.video_pending && playerOn && (
+        {playerOn && (
           <p className="vcard-under">
             <a className="vcard-yt" href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}`} target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a>
           </p>
@@ -304,30 +264,30 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         {ep.claims.length > 0 && (
           <div className={`track-holder${playerOn ? " is-on" : ""}`}>
             <ClaimTrack claims={ep.claims} duration={ep.duration_s} time={time} currentId={activeId}
-                        onSeekClaim={(c) => { setExpanded((s) => new Set(s).add(c.id)); if (!viewList.includes(c)) setView("all"); window.setTimeout(() => scrollToCard(c.id), 60); playFrom(c.start_s); }} />
+                        onSeekClaim={(c) => { if (!viewList.includes(c)) setView("all"); window.setTimeout(() => scrollToCard(c.id), 60); playFrom(c.start_s); }} />
           </div>
         )}
 
         <header className="score-head">
           <h1>{ep.title}</h1>
           <div className="watch-channel">
-            <Avatar src={ep.channel_avatar} name={ep.channel_name} />
+            <Avatar name={ep.channel_name} />
             {ep.channel_id ? <Link href={`/c/${ep.channel_id}`}>{ep.channel_name}</Link> : <span>{ep.channel_name}</span>}
             <button className="btn secondary small share-ep" onClick={() => share(window.location.href.split("#")[0], ep.title)}>Share</button>
           </div>
-          {ep.guest && <p className="meta">Guest: {ep.guest}</p>}
         </header>
 
-        {ep.import_note && <p className="notice import-note">{ep.import_note}</p>}
         {checking && <CheckProgress videoId={ep.youtube_video_id} />}
-        {!checking && (
-          <VerifyAllButton videoId={ep.youtube_video_id} running={ep.auto_verify === "running"}
-                           eligible={ep.claims.some((c) => canRequestVerify(c))} />
+
+        {ep.summary && (
+          <section className="ai-summary" aria-label="AI summary">
+            <p className="ai-note">AI summary</p>
+            <p>{ep.summary}</p>
+          </section>
         )}
-        {!checking && <VerdictFilter counts={verdictCounts} active={verdictFilter} onPick={setVerdictFilter} />}
 
         {ep.claims.length > 0 && (
-          <section className="score-summary" aria-label="Summary">
+          <section className="score-summary" aria-label="Breakdown">
             <p className="score-big">{ep.claims.length} statements</p>
             <p className="type-bar" aria-hidden="true">
               {TYPE_ORDER.filter((t) => typeCounts[t]).map((t) => (
@@ -336,13 +296,12 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
             </p>
             <p className="meta">{breakdownParts(typeCounts).join(", ")}</p>
             <p className="meta">
-              {checkedCount} verified{checkedCount ? `, ${supported} supported` : ""}{flagParts.length ? `, ${flagParts.join(", ")}` : ""}
-              {reviewingCount > 0 && `. ${reviewingCount} with a reviewer`}
-              {verifyingCount > 0 && `. ${verifyingCount} being verified now`}
+              {withSources.length} {withSources.length === 1 ? "claim has" : "claims have"} sources
+              {searchingCount > 0 && `. Searching sources for ${searchingCount} now`}
             </p>
-            {checkedCount > 0 && <VerdictStrip tally={ep.tally} />}
           </section>
         )}
+        {!checking && <CheckAllSources videoId={ep.youtube_video_id} running={ep.sources_batch === "running"} eligible={lookupEligible} />}
       </div>
 
       <div className="score-side">
@@ -356,7 +315,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
                   {STATEMENT_TYPES[t].label} {typeCounts[t] ?? 0}
                 </button>
               ))}
-              <button className="chip" aria-pressed={view === "verified"} onClick={() => setView("verified")}>Verified {listed.length}</button>
+              <button className="chip" aria-pressed={view === "with_sources"} onClick={() => setView("with_sources")}>With sources {withSources.length}</button>
             </div>
             {allTopicCount > 1 && (
               <div className="filters topic-filters" role="group" aria-label="Show statements by subject">
@@ -369,11 +328,13 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
                 ))}
               </div>
             )}
-            {view !== "all" && view !== "verified" && <p className="meta stmt-legend">{STATEMENT_TYPES[view].meaning}{view === "factual_claim" ? " Press Verify on any of them to check it against official sources." : ""}</p>}
-            {viewList.some((c) => c.verdict) && !ep.video_pending && (
+            {view !== "all" && view !== "with_sources" && (
+              <p className="meta stmt-legend">{STATEMENT_TYPES[view].meaning}{view === "factual_claim" ? " Press Check sources to see what official and news sources say about it." : ""}</p>
+            )}
+            {playable.length > 1 && (
               <p className="play-all">
-                <button className="btn secondary small" onClick={() => { const first = viewList.find((c) => c.verdict); if (first) { setAutoAll(true); playMoment(first); scrollToCard(first.id); } }}>
-                  ▶ Play verified claims in order
+                <button className="btn secondary small" onClick={() => { const first = playable[0]; setAutoAll(true); playMoment(first); scrollToCard(first.id); }}>
+                  ▶ Play in order
                 </button>
                 {autoAll && <button className="btn secondary small" onClick={() => { setAutoAll(false); setCountdown(null); }}>Stop</button>}
               </p>
@@ -383,19 +344,20 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
 
         <div className="cards">
           {viewList.length === 0
-            ? <p className="meta pad">{view === "verified" ? "No claims verified yet. Pick a claim and press Verify."
+            ? <p className="meta pad">{view === "with_sources" ? "No sources looked up yet. Press Check sources on any claim."
                 : view !== "all" ? `No ${STATEMENT_TYPES[view].plural} in this video.`
                 : checking ? "Statements appear here as they are found." : "No statements for this video."}</p>
             : viewList.map(card)}
         </div>
 
         <details className="fold">
-          <summary>How this video was checked</summary>
+          <summary>How this video was analysed</summary>
           <ul className="nclist">
-            <li>{ep.claims.length} statements found and tagged by type. Nothing is verified automatically: press Verify on any claim to check it against sources, and the result is shown to everyone.</li>
-            <li>{listed.filter((c) => c.verdict?.review_status === "approved" || c.verdict?.review_status === "changed").length} verdicts reviewed by a person; {listed.filter((c) => c.awaiting_review).length} still with a reviewer.</li>
-            <li><Link href="/method">How we check</Link></li>
-            {!ep.video_pending && <li><a href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}&t=${Math.floor(time)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube from {clock(time)}</a></li>}
+            <li>An AI watched the video, listed {ep.claims.length} statements with their timestamps, and tagged each one as a claim, opinion, forecast or other.</li>
+            <li>The wording of each statement, the transcript, the speaker names and the tags are AI output and can be wrong. Use &quot;Watch 20 s&quot; to hear the original, and &quot;Report a problem&quot; if something is off.</li>
+            <li>Nothing is judged true or false. For a claim, &quot;Check sources&quot; shows sentences copied from official and established news sources about the same subject.</li>
+            <li><Link href="/method">How it works</Link></li>
+            <li><a href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}&t=${Math.floor(time)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube from {clock(time)}</a></li>
           </ul>
         </details>
       </div>

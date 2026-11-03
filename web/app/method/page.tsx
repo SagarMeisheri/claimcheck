@@ -1,26 +1,25 @@
 import type { Metadata } from "next";
 import { STATEMENT_TYPES, TYPE_ORDER } from "@/lib/statements";
-import { VERDICTS } from "@/lib/verdicts";
+import { SOURCES_NOTE } from "@/components/SourceList";
 
-export const metadata: Metadata = { title: "How we check" };
+export const metadata: Metadata = { title: "How it works" };
 
 export default function Method() {
+  const contact = process.env.NEXT_PUBLIC_CONTACT_EMAIL;
   return (
     <div className="prose">
-      <h1>How we check a video</h1>
+      <h1>How it works</h1>
       <p className="lede">
-        An AI system finds the claims and the evidence. Rules written in code decide what can be published, and a person
-        reviews the verdicts that matter most.
+        ClaimCheck breaks a YouTube video into what was said, so you can skim a long podcast or interview in minutes. It
+        is not a fact-check: nothing is judged true or false.
       </p>
 
       <h2>The steps</h2>
       <ol>
-        <li>We decide whether a video is worth analysing: how much substantive public-interest content it has, and who is speaking.</li>
-        <li>The AI breaks the video into statements, each with the moment it was said, and tags each one: claim, opinion, forecast, hearsay, analogy or loaded language. Only claims can be checked against sources; the other tags help you see how an argument is built.</li>
-        <li>Nothing is verified automatically. Press Verify on any claim to check it against sources. A verified claim is saved and shown to everyone, so it&apos;s only checked once.</li>
-        <li>Verification searches official sources first: RBI, MoSPI, PIB, the Election Commission, PubMed and others. A second AI model compares the claim with the sources and must quote the exact sentence it relied on.</li>
-        <li>Code then checks the work: the quote must really appear in the source, the numbers must match, and a False verdict needs a strong source, high confidence and a second independent check.</li>
-        <li>A person reviews every False verdict, and every Misleading or Disputed verdict on a political claim, before it appears, including ones that viewers asked for.</li>
+        <li>Anyone can paste a link to a public, finished YouTube video.</li>
+        <li>An AI watches the video and lists its statements, each with the moment it was said, a short summary of the video, and one tag per statement.</li>
+        <li>For a claim, you can press &quot;Check sources&quot;. The AI searches the web, and for each relevant page copies one sentence about the same subject. Code then checks that the page really was fetched, that the sentence really is on it word for word, and that the site is an official body or an established news or research organisation. Social media is never used.</li>
+        <li>Results are saved and shown to everyone, so each claim only needs looking up once.</li>
       </ol>
 
       <h2>What the tags mean</h2>
@@ -29,49 +28,37 @@ export default function Method() {
           <li key={k}><span className="stype" style={{ ["--stype" as string]: STATEMENT_TYPES[k].cssVar }}>{STATEMENT_TYPES[k].label}</span> {STATEMENT_TYPES[k].meaning}</li>
         ))}
       </ul>
+      <p>A tag describes the kind of statement, not the speaker. It is a reading aid, not a judgement.</p>
+
+      <h2>About sources</h2>
+      <p>{SOURCES_NOTE} A source may agree with a statement, give a different figure, or cover a different period: read it and decide for yourself. &quot;No relevant source found&quot; says nothing about whether a statement is right.</p>
+
+      <h2>What the AI can get wrong</h2>
       <p>
-        A tag describes the statement, not the speaker. It is a reading aid, not a verdict: an opinion or forecast can be
-        perfectly reasonable.
+        Everything on a video page is AI output: the wording of each statement, the transcript under &quot;What was
+        said&quot;, the speaker names, the tags, the timestamps and the summary. They can be wrong. Use &quot;Watch
+        20 s&quot; to hear the original before relying on anything, and report mistakes.
       </p>
 
-      <h2>Limits on verification</h2>
+      <h2 id="policy">What we don&apos;t show</h2>
       <p>
-        Each person can verify up to 10 claims a day, and each video has a fixed budget for verification. When a video
-        reaches it, no more of its claims can be verified.
+        Statements about religious or spiritual beliefs; claims about whole communities, castes or religions; private
+        individuals and children; the merits of court cases still being heard; attacks and disasters in their first 48
+        hours; and satire are not shown at all.
       </p>
 
-      <h2>What the verdicts mean</h2>
-      <ul>
-        {Object.entries(VERDICTS).map(([k, v]) => (
-          <li key={k}><span className="vword" style={{ color: v.cssVar }}>{v.label}</span>: {v.meaning}</li>
-        ))}
-      </ul>
-
-      <h2 id="policy">What we don&apos;t check</h2>
+      <h2>Limits</h2>
       <p>
-        Religious or spiritual beliefs; claims about whole communities, castes or religions; private individuals and
-        children; the merits of court cases still being heard; attacks and disasters in their first 48 hours; satire.
-        Statements on these topics aren&apos;t shown at all. Opinions and predictions are tagged but not verified. For religion and caste, we only check numbers and documented events, such as census
-        figures or election results.
+        Each person can submit up to 5 videos and check sources up to 10 times a day. Each video has a fixed budget for
+        AI and search costs; when it is used up, no more sources can be looked up for it.
       </p>
 
-      <h2>Sources</h2>
+      <h2 id="report">Report a problem</h2>
       <p>
-        Government statistics, regulators, courts and peer-reviewed research count as official sources. Major news
-        organisations come next. Social media posts are never used as evidence. When official and independent figures
-        disagree, as with unemployment, we show both and mark the claim Disputed data.
-      </p>
-
-      <h2>Balance</h2>
-      <p>
-        We check the same number of political videos each week from channels that tend to support the government and
-        channels that tend to criticise it. <a href="/balance">See the numbers</a>.
-      </p>
-
-      <h2>Mistakes</h2>
-      <p>
-        Every claim has a “Wrong verdict?” button. A reviewer reads each report, and corrected verdicts are marked as
-        changed after review.
+        Every statement has &quot;Report a problem&quot;: a wrong quote, speaker, tag, time or source, or any other
+        concern, including legal ones. Reports are acknowledged within 24 hours and resolved within 15 days; statements
+        that are wrong are corrected or removed.
+        {contact && <> You can also write to <a href={`mailto:${contact}`}>{contact}</a>.</>}
       </p>
     </div>
   );

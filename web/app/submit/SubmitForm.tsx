@@ -39,7 +39,7 @@ export function SubmitForm({ inline = false }: { inline?: boolean }) {
       <div className="notice ok">
         <p>{state.message}</p>
         <CheckProgress videoId={state.videoId} />
-        <p><Link href={`/v/${state.videoId}`}>Open the video and its claims</Link></p>
+        <p><Link href={`/v/${state.videoId}`}>Open the video and its statements</Link></p>
       </div>
     );
   }
@@ -50,8 +50,8 @@ export function SubmitForm({ inline = false }: { inline?: boolean }) {
       <div className="field">
         <label htmlFor="url" className={inline ? "visually-hidden" : undefined}>YouTube link</label>
         <input id="url" name="url" type="url" required inputMode="url" value={url} onChange={(e) => setUrl(e.target.value)}
-               placeholder={inline ? "Paste a YouTube link to check a video" : "https://www.youtube.com/watch?v=…"} aria-describedby="url-help" />
-        {!inline && <span id="url-help" className="meta">Public videos, at least 5 minutes long and not live.</span>}
+               placeholder={inline ? "Paste a YouTube link to analyse a video" : "https://www.youtube.com/watch?v=…"} aria-describedby="url-help" />
+        {!inline && <span id="url-help" className="meta">Any public video that has finished (not live).</span>}
       </div>
       {/* Only when the link really isn't a YouTube video link, and only after the person has stopped typing or pasting. */}
       {url.trim() && !valid && settled === url && <p className="notice err" role="status">That isn&apos;t a YouTube video link. Paste a link like youtube.com/watch?v=… or youtu.be/…</p>}
@@ -61,13 +61,13 @@ export function SubmitForm({ inline = false }: { inline?: boolean }) {
           <div>
             <p className="preview-title">{preview.title ?? "YouTube video"}</p>
             {preview.channel && <p className="meta">{preview.channel}</p>}
-            {preview.alreadyChecked && <p><Link href={`/v/${preview.videoId}`}>Already checked: open its claims</Link></p>}
+            {preview.alreadyDone && <p><Link href={`/v/${preview.videoId}`}>Already analysed: open its statements</Link></p>}
           </div>
         </div>
       )}
       {state && !state.ok && <p className="notice err">{state.message}</p>}
-      <button className="btn" disabled={pending || !preview || preview.alreadyChecked}>
-        {pending ? <><span className="spinner" aria-hidden="true" /> Queuing…</> : "Check this video"}
+      <button className="btn" disabled={pending || !preview || preview.alreadyDone}>
+        {pending ? <><span className="spinner" aria-hidden="true" /> Queuing…</> : "Analyse this video"}
       </button>
     </form>
   );

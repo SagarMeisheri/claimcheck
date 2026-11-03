@@ -1,4 +1,7 @@
-"""Structured outputs for every LLM step (ADK output_schema) plus internal records."""
+"""Structured outputs for every LLM step (ADK output_schema) plus internal records.
+
+ClaimCheck tags statements and, on request, finds sources for a claim. It never judges a claim true or false.
+"""
 
 from __future__ import annotations
 
@@ -7,36 +10,21 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 PestleArea = Literal["political", "economic", "social", "technological", "legal", "environmental"]
-PolicyTier = Literal["normal", "stricter", "never"]
+PolicyTier = Literal["normal", "never"]
 ClaimType = Literal["fact", "opinion", "prediction", "anecdote"]
-# What kind of statement it is. Only factual_claim can be verified; the rest are tagged and shown.
-StatementType = Literal["factual_claim", "opinion", "forecast", "analogy", "loaded_language", "hearsay", "other"]
-VerificationStatus = Literal["not_eligible", "not_requested", "queued", "verifying", "verified", "awaiting_review", "failed"]
-# Legacy claim_type stored alongside statement_type (claims.claim_type check constraint, effective_tier()).
-_LEGACY_TYPE: dict[str, str] = {"factual_claim": "fact", "forecast": "prediction"}
-_FROM_LEGACY: dict[str, str] = {"fact": "factual_claim", "opinion": "opinion", "prediction": "forecast", "anecdote": "other"}
-Verdict = Literal["supported", "misleading", "false", "outdated", "disputed", "unverifiable"]
+# What kind of statement it is. Only factual_claim can have sources looked up; the rest are tagged and shown.
+StatementType = Literal["factual_claim", "opinion", "forecast", "other"]
+SourcesStatus = Literal["not_eligible", "not_requested", "queued", "searching", "done", "failed"]
+
+# Tags used before the four-tag set; they read as criticism of a named speaker, so they are folded into "other".
+LEGACY_TYPES: dict[str, str] = {"hearsay": "other", "analogy": "other", "loaded_language": "other"}
+# Legacy claim_type stored alongside statement_type (claims.claim_type is NOT NULL with a check constraint).
+_LEGACY_CLAIM_TYPE: dict[str, str] = {"factual_claim": "fact", "opinion": "opinion", "forecast": "prediction", "other": "anecdote"}
+_FROM_CLAIM_TYPE: dict[str, str] = {"fact": "factual_claim", "opinion": "opinion", "prediction": "forecast", "anecdote": "other"}
 
 
-# --- Triage -------------------------------------------------------------------
-class PestleMix(BaseModel):
-    """Share of the video's content per PESTLE area (values sum to about 1)."""
-
-    political: float = 0
-    economic: float = 0
-    social: float = 0
-    technological: float = 0
-    legal: float = 0
-    environmental: float = 0
-
-
-class TriageResult(BaseModel):
-    worthiness: float = Field(ge=0, le=1, description="0-1: how worth fact-checking this video is")
-    factual_density: Literal["low", "medium", "high"]
-    speaker_type: Literal["minister_or_official", "party_spokesperson", "journalist", "commentator", "expert", "other"]
-    pestle_mix: PestleMix
-    never_share: float = Field(ge=0, le=1, description="Share of content falling in the never-check tier")
-    reason: str = Field(description="One sentence explaining the score")
+def _fold_type(value: object) -> object:
+    return LEGACY_TYPES.get(value, value) if isinstance(value, str) else value
 
 
 # --- Extraction -----------------------------------------------------------------
@@ -46,43 +34,47 @@ class ExtractedClaim(BaseModel):
     start_ts: str = Field(description="HH:MM:SS or MM:SS where the statement starts")
     speaker: str
     claim: str = Field(description="The statement, self-contained, speaker's numbers kept exactly")
-    context_quote: str = Field(description="The words actually spoken, verbatim, up to ~40 words")
+    context_quote: str = Field(description="The spoken words as heard, up to ~40 words")
     pestle_area: PestleArea
-    topic: str = Field(description="First subject tag (kept for the policy checks); same as topics[0]")
+    topic: str = Field(description="First subject tag; same as topics[0]")
     topics: list[str] = Field(default_factory=list, description="1-2 free-form subject tags")
-    statement_type: Optional[StatementType] = Field(
-        default=None, description="factual_claim, opinion, forecast, analogy, loaded_language, hearsay or other")
-    tag_note: str = Field(default="", description="Up to 15 words on why it has this tag; empty for plain factual claims")
-    claim_type: Optional[ClaimType] = None  # legacy; derived from statement_type when missing
+    statement_type: Optional[StatementType] = None
+    claim_type: Optional[ClaimType] = None  # legacy; derived from statement_type
     policy_tier: PolicyTier
     refers_to_visual: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fold_legacy(cls, data: object) -> object:
+        if isinstance(data, dict):
+            data = {**data, "statement_type": _fold_type(data.get("statement_type"))}
+            if data.get("policy_tier") == "stricter":
+                data["policy_tier"] = "normal"
+        return data
 
     @model_validator(mode="after")
     def _fill_types(self) -> "ExtractedClaim":
         if not self.topics and self.topic:
             self.topics = [self.topic]
         if self.statement_type is None:
-            self.statement_type = _FROM_LEGACY.get(self.claim_type or "fact", "other")  # type: ignore[assignment]
-        if self.claim_type is None or (self.claim_type == "fact") != (self.statement_type == "factual_claim"):
-            self.claim_type = _LEGACY_TYPE.get(self.statement_type, "opinion")  # type: ignore[assignment]
+            self.statement_type = _FROM_CLAIM_TYPE.get(self.claim_type or "fact", "other")  # type: ignore[assignment]
+        self.claim_type = _LEGACY_CLAIM_TYPE[self.statement_type]  # type: ignore[assignment,index]
         return self
 
     @property
-    def verifiable(self) -> bool:
+    def sourceable(self) -> bool:
+        """Whether sources can be looked up for it."""
         return self.statement_type == "factual_claim"
 
 
 class ExtractedStatement(BaseModel):
-    """What the extractor model returns. statement_type is required and the legacy claim_type is absent,
-    so the model can't skip the tag (an optional field was being left out and defaulted to factual_claim)."""
+    """What the extractor model returns. statement_type is required so the model can't skip the tag."""
 
     start_ts: str = Field(description="HH:MM:SS or MM:SS where the statement starts")
-    speaker: str
+    speaker: str = Field(description="Name only if it is said or shown on screen in the video, otherwise a role (Host, Guest 1)")
     claim: str = Field(description="The statement, self-contained, speaker's numbers kept exactly")
-    context_quote: str = Field(description="The words actually spoken, verbatim, up to ~40 words")
-    statement_type: StatementType = Field(
-        description="Required tag: factual_claim, opinion, forecast, analogy, loaded_language, hearsay or other")
-    tag_note: str = Field(default="", description="Up to 15 words on why it has this tag; empty for plain factual claims")
+    context_quote: str = Field(description="The spoken words as you heard them (Hindi or English as spoken), up to ~40 words")
+    statement_type: StatementType = Field(description="Required tag: factual_claim, opinion, forecast or other")
     pestle_area: PestleArea
     topics: list[str] = Field(description="1-2 short subject names (plain words) saying what the statement is about, most relevant first")
     policy_tier: PolicyTier
@@ -91,123 +83,74 @@ class ExtractedStatement(BaseModel):
 
 class ExtractionResult(BaseModel):
     claims: list[ExtractedStatement]
-    summary: str = Field(default="", description="2-3 plain sentences on what the video covers, written after the statements")
+    summary: str = Field(default="", description="2-3 plain, neutral sentences on what the video covers, written after the statements")
 
 
-# --- Verification -----------------------------------------------------------------
+# --- Sources for one claim ---------------------------------------------------------
 class PlannedSearch(BaseModel):
     query: str = Field(description="Self-contained search query: entity, metric, period, geography")
     scope: Literal["tier1", "open"] = Field(description="tier1 = official sources for this topic only; open = the wider web")
-    purpose: Literal["official", "corroborate", "counter"] = Field(
-        description="official = primary source; corroborate = independent confirmation; counter = look for evidence against the claim")
+    purpose: Literal["original", "independent", "other_figures"] = Field(
+        description="original = the report or release the statement refers to; independent = another source on the same "
+                    "subject; other_figures = sources giving other or newer figures on the same subject")
 
 
 class SearchPlan(BaseModel):
     searches: list[PlannedSearch] = Field(description="Exactly 3 searches, one per purpose")
 
 
-class JudgeCitation(BaseModel):
+class PickedSource(BaseModel):
     url: str
     title: str = ""
-    quote: str = Field(description="Exact sentence copied character-for-character from the source text")
+    quote: str = Field(description="One sentence copied character-for-character from that source's text")
 
 
-FinalTag = Literal["TRUE", "FALSE", "UNVERIFIABLE"]
-_TAG_TO_VERDICT: dict[str, str] = {"TRUE": "supported", "FALSE": "false", "UNVERIFIABLE": "unverifiable"}
+class SourcePick(BaseModel):
+    """What the picker returns: the most relevant sentences, or an empty list. Never an assessment of the claim."""
+
+    sources: list[PickedSource] = Field(default_factory=list, description="At most 3, one per source URL")
 
 
-class JudgeOutput(BaseModel):
-    """What the judge model returns: one of three final tags, an explanation and the sources."""
-
-    tag: FinalTag = Field(description="TRUE, FALSE or UNVERIFIABLE")
-    confidence: float = Field(ge=0, le=1)
-    explanation: str = Field(description="2-3 neutral sentences. For FALSE: what exactly is wrong. For UNVERIFIABLE: why it can't be verified")
-    correction: str = Field(default="", description="FALSE only: the correct fact according to the sources, in one sentence. Otherwise empty")
-    evidence_grade: Optional[Literal["rct_or_review", "observational", "animal_or_lab", "expert_opinion", "not_applicable"]] = "not_applicable"
-    citations: list["JudgeCitation"] = Field(default_factory=list)
-
-    def to_result(self) -> "JudgeResult":
-        return JudgeResult(verdict=_TAG_TO_VERDICT[self.tag], confidence=self.confidence, reasoning=self.explanation,  # type: ignore[arg-type]
-                           correction=self.correction if self.tag == "FALSE" else "", evidence_grade=self.evidence_grade,
-                           citations=self.citations)
-
-
-class JudgeResult(BaseModel):
-    verdict: Verdict
-    confidence: float = Field(ge=0, le=1)
-    reasoning: str = Field(description="2-3 neutral sentences describing what the sources state")
-    correction: str = ""
-    evidence_grade: Optional[Literal["rct_or_review", "observational", "animal_or_lab", "expert_opinion", "not_applicable"]] = "not_applicable"
-    citations: list[JudgeCitation] = Field(default_factory=list)
-
-
-# --- Automatic whole-video verification (agents/video_verifier.py) -------------------------
+# --- Sources for a whole video (agents/video_sources.py) -------------------------------
 class TriageItem(BaseModel):
     n: int = Field(description="The claim's number from the list")
-    route: Literal["knowledge", "search", "skip"] = Field(
-        description="knowledge = a stable, well-known fact; search = needs a source (numbers, recent or specific facts); skip = too vague or trivial")
-    priority: int = Field(default=2, ge=1, le=3, description="1 = most important and most checkable, 3 = least")
-    group: str = Field(default="", description="Short label shared by claims that one web search can settle together, e.g. 'mp land purchases'")
-    query: str = Field(default="", description="For search: one self-contained web search query (entity, metric, period, geography)")
+    route: Literal["search", "skip"] = Field(description="search = look for sources; skip = too vague or trivial to look up")
+    priority: int = Field(default=2, ge=1, le=3, description="1 = most specific and most worth looking up, 3 = least")
+    group: str = Field(default="", description="Short label shared by claims that one web search can cover together, e.g. 'mp land purchases'")
+    query: str = Field(default="", description="One self-contained web search query for the group (entity, metric, period, geography)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _knowledge_is_search(cls, data: object) -> object:
+        # The removed "knowledge" route (answers from model memory) is always treated as a search.
+        if isinstance(data, dict) and data.get("route") not in ("search", "skip"):
+            data = {**data, "route": "search"}
+        return data
 
 
 class BatchTriage(BaseModel):
     items: list[TriageItem]
 
 
-class KnowledgeItem(BaseModel):
-    n: int
-    tag: Literal["TRUE", "FALSE", "UNSURE"]
-    confidence: float = Field(ge=0, le=1)
-    explanation: str = Field(description="One or two neutral sentences")
-
-
-class KnowledgeResult(BaseModel):
-    items: list[KnowledgeItem]
-
-
-class BatchVerdict(BaseModel):
+class BatchPickItem(BaseModel):
     n: int = Field(description="The claim's number from the list")
-    tag: FinalTag
-    confidence: float = Field(ge=0, le=1)
-    explanation: str
-    correction: str = ""
-    evidence_grade: Optional[Literal["rct_or_review", "observational", "animal_or_lab", "expert_opinion", "not_applicable"]] = "not_applicable"
-    citations: list[JudgeCitation] = Field(default_factory=list)
-    follow_up_query: str = Field(default="", description="UNVERIFIABLE only: one better web search that could settle it, else empty")
-
-    def to_result(self) -> "JudgeResult":
-        return JudgeResult(verdict=_TAG_TO_VERDICT[self.tag], confidence=self.confidence, reasoning=self.explanation,  # type: ignore[arg-type]
-                           correction=self.correction if self.tag == "FALSE" else "", evidence_grade=self.evidence_grade,
-                           citations=self.citations)
+    sources: list[PickedSource] = Field(default_factory=list, description="At most 3")
+    follow_up_query: str = Field(default="", description="Only when nothing relevant was found: one better web search, else empty")
 
 
-class BatchJudgeOutput(BaseModel):
-    verdicts: list[BatchVerdict]
+class BatchPick(BaseModel):
+    items: list[BatchPickItem]
 
 
 # --- Internal records (not LLM output) ------------------------------------------
-class Citation(BaseModel):
+class CheckedSource(BaseModel):
+    """A source that passed the checks in code: its URL was fetched, its quote is on the page, its tier is allowed."""
+
     url: str
     title: str = ""
     tier: int
     quote: str
-    quote_check_passed: bool
-
-
-class FinalVerdict(BaseModel):
-    verdict: Verdict
-    confidence: float
-    reasoning: str
-    correction: str = ""
-    score: Optional[int] = None  # 0-100 truthfulness; None when unverifiable
-    evidence_grade: str = "not_applicable"
-    citations: list[Citation] = Field(default_factory=list)
-    escalated: bool = False
-    from_cache: bool = False
-    basis: Literal["sources", "model_knowledge"] = "sources"  # model_knowledge = answered from general knowledge, no source
-    review_status: Literal["not_needed", "pending", "approved", "changed"] = "not_needed"
-    downgrades: list[str] = Field(default_factory=list)
+    publish_date: Optional[str] = None
 
 
 class ClaimRecord(BaseModel):
@@ -215,20 +158,12 @@ class ClaimRecord(BaseModel):
     start_s: int
     claim: ExtractedClaim
     effective_tier: PolicyTier
-    checkworthiness: Optional[float] = None
     not_checked_reason: Optional[str] = None
-    verdict: Optional[FinalVerdict] = None
 
 
-def verification_status(rec: ClaimRecord) -> str:
-    """The claims.verification_status value for a record leaving the pipeline."""
-    if rec.verdict is not None:
-        return "awaiting_review" if rec.verdict.review_status == "pending" else "verified"
-    if rec.not_checked_reason in ("budget", "error") and rec.claim.verifiable:
-        return "failed"  # auto-verify was attempted and didn't finish: a viewer can retry
-    if not rec.claim.verifiable or rec.not_checked_reason:
-        return "not_eligible"
-    return "not_requested"
+def sources_status(rec: ClaimRecord) -> str:
+    """The claims.sources_status value for a statement leaving the first pass."""
+    return "not_requested" if rec.claim.sourceable and not rec.not_checked_reason else "not_eligible"
 
 
 class GuardrailEvent(BaseModel):

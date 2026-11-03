@@ -1,7 +1,7 @@
-"""Global guardrail plugin: per-episode cost cap and token accounting.
+"""Global guardrail plugin: per-video cost cap and token accounting.
 
 Registered once on every runner, so it applies to every agent and model call
-(including each claim's isolated verifier session).
+(including each source lookup's isolated session).
 """
 
 from __future__ import annotations
@@ -42,7 +42,8 @@ class BudgetPlugin(BasePlugin):
             return None
         model = self._models.get((callback_context.invocation_id, callback_context.agent_name)) or llm_response.model_version or ""
         price_in, price_out = _price_for(model, ctx.settings.prices)
-        tin = usage.prompt_token_count or 0
+        # Agentic video bills the frames, audio and transcript it loads as tool-use tokens, so they count as input.
+        tin = (usage.prompt_token_count or 0) + (getattr(usage, "tool_use_prompt_token_count", None) or 0)
         tout = (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0)
         ctx.budget.add(tin / 1e6 * price_in + tout / 1e6 * price_out, tin, tout)
         return None
@@ -52,5 +53,5 @@ def _price_for(model: str, prices: dict) -> tuple[float, float]:
     for name, p in prices.items():
         if name and name in model:
             return p
-    # Unknown model: assume the judge price so the cap errs on the safe side.
+    # Unknown model: assume the highest known price so the cap errs on the safe side.
     return max(prices.values(), key=lambda p: p[1])
