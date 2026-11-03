@@ -3,13 +3,14 @@ export type StatementType = "factual_claim" | "opinion" | "forecast" | "other";
 export type SourcesStatus = "not_eligible" | "not_requested" | "queued" | "searching" | "done" | "failed";
 export type Pestle = "political" | "economic" | "social" | "technological" | "legal" | "environmental";
 
-/** One sentence copied word for word from an official or established news page, checked by code. */
+/** One web search result for a claim, as the search returned it: shown for context, not checked or judged. */
 export interface Source {
   url: string;
   title: string | null;
-  tier: number; // 1 = official / peer-reviewed, 2 = established news or research
-  quote: string;
+  tier: number; // display label only: 1 = official / peer-reviewed, 2 = established news or research, 3 = other
+  excerpt: string; // text the search took from the page (may be empty)
   publish_date: string | null;
+  rank: number; // the search engine's order, most relevant first
 }
 
 export interface Claim {

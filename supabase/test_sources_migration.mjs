@@ -1,4 +1,5 @@
-// Tests 0012_sources_only.sql in PGlite: old verdicts hidden, tags merged, sources public, private tables private.
+// Tests 0012 and 0013 in PGlite: old verdicts hidden, tags merged, sources public (any site, in search order),
+// empty lookups reopened, private tables private.
 // cd somewhere && npm i @electric-sql/pglite @electric-sql/pglite-pgvector
 // node supabase/test_sources_migration.mjs supabase/migrations   (run from a folder where those packages resolve)
 import { PGlite } from '@electric-sql/pglite'
@@ -11,7 +12,8 @@ const vector = pgv.vector ?? pgv.default ?? pgv.pgvector
 const dir = process.argv[2] ?? 'supabase/migrations'
 const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()
 const before = files.filter((f) => f < '0012')
-const after = files.filter((f) => f >= '0012')
+const v12 = files.filter((f) => f >= '0012' && f < '0013')
+const after = files.filter((f) => f >= '0013')
 const db = new PGlite({ extensions: { vector } })
 await db.exec(`create schema extensions; create role anon; create role authenticated; create role service_role;`)
 for (const f of before) await db.exec(fs.readFileSync(path.join(dir, f), 'utf8'))
@@ -33,12 +35,17 @@ insert into claims (episode_id, idx, claim_text, pestle_area, claim_type, policy
   ('${EP}',6,'opinion','economic','opinion','normal',null,'opinion',null,'opinion');
 update episodes e set statement_counts = (select jsonb_object_agg(statement_type, n) from (select statement_type, count(*) n from claims group by 1) t);
 `)
+for (const f of v12) await db.exec(fs.readFileSync(path.join(dir, f), 'utf8'))
+
+// Lookups as the 0012-era pipeline saved them: claim 1 found one checked quote, claim 0 found nothing.
+await db.exec(`insert into claim_sources (claim_id, url, title, tier, quote) select id, 'https://mospi.gov.in/a', 'MoSPI', 1, 'GDP grew 7.2 per cent in 2023-24.' from claims where idx = 1`)
+await db.exec(`update claims set sources_status = 'done' where idx in (0, 1)`)
 for (const f of after) await db.exec(fs.readFileSync(path.join(dir, f), 'utf8'))
 
 // Tags merged, counts recomputed, sources status backfilled.
 const rows = (await db.query(`select idx, statement_type, sources_status from claims order by idx`)).rows
 assert.deepEqual(rows.map((r) => [r.idx, r.statement_type, r.sources_status]), [
-  [0, 'factual_claim', 'not_requested'], [1, 'factual_claim', 'not_requested'], [2, 'factual_claim', 'not_eligible'],
+  [0, 'factual_claim', 'not_requested'], [1, 'factual_claim', 'done'], [2, 'factual_claim', 'not_eligible'],
   [3, 'other', 'not_eligible'], [4, 'other', 'not_eligible'], [5, 'other', 'not_eligible'], [6, 'opinion', 'not_eligible'],
 ])
 assert.deepEqual((await db.query(`select statement_counts from episodes`)).rows[0].statement_counts,
@@ -47,12 +54,14 @@ assert.equal((await db.query(`select avatar_url from channels`)).rows[0].avatar_
 
 // Constraints
 await assert.rejects(db.exec(`update claims set sources_status = 'verified' where idx = 0`))
-await assert.rejects(db.exec(`insert into claim_sources (claim_id, url, tier, quote) select id, 'u', 3, 'q' from claims where idx = 1`))
+await assert.rejects(db.exec(`insert into claim_sources (claim_id, url, tier, excerpt) select id, 'u', 4, 'q' from claims where idx = 1`))
 await db.exec(`update episodes set status = 'removed' where id = '${EP}'`)
 await db.exec(`update episodes set status = 'done' where id = '${EP}'`)
 
 // Data the service writes.
-await db.exec(`insert into claim_sources (claim_id, url, title, tier, quote) select id, 'https://mospi.gov.in/a', 'MoSPI', 1, 'GDP grew 7.2 per cent in 2023-24.' from claims where idx = 1`)
+// The old quote became the excerpt; any site tier is allowed now, in search order.
+assert.equal((await db.query(`select excerpt from claim_sources`)).rows[0].excerpt, 'GDP grew 7.2 per cent in 2023-24.')
+await db.exec(`insert into claim_sources (claim_id, url, title, tier, excerpt, rank) select id, 'https://en.wikipedia.org/wiki/GDP', 'Wikipedia', 3, 'Other source.', 1 from claims where idx = 1`)
 await db.exec(`insert into source_requests (claim_id, episode_id, requester, kind) select id, episode_id, 'h', 'one' from claims where idx = 1`)
 await db.exec(`insert into feedback (claim_id, note, kind) select id, 'wrong speaker', 'wrong_speaker' from claims where idx = 1`)
 
@@ -68,7 +77,7 @@ await assert.rejects(db.query(`select * from citations`))
 await assert.rejects(db.query(`select tally from episodes`))
 await assert.rejects(db.query(`select count(*) from source_requests`))
 await assert.rejects(db.query(`select count(*) from feedback`))
-assert.equal((await db.query(`select quote from claim_sources`)).rows.length, 1)
+assert.deepEqual((await db.query(`select tier from claim_sources order by rank`)).rows.map((r) => r.tier), [1, 3])
 assert.equal((await db.query(`select sources_batch_status, statement_counts from episodes`)).rows.length, 1)
 await db.exec(`reset role`)
 
@@ -78,4 +87,4 @@ await db.exec(`set role anon`)
 assert.equal((await db.query(`select * from claim_sources`)).rows.length, 0)
 assert.equal((await db.query(`select id from episodes`)).rows.length, 0)
 await db.exec(`reset role`)
-console.log(`ok: ${before.length + after.length} migrations; verdicts hidden, tags merged, sources public, private tables private`)
+console.log(`ok: ${before.length + v12.length + after.length} migrations; verdicts hidden, tags merged, sources public, private tables private`)

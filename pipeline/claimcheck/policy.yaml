@@ -1,6 +1,6 @@
 # ClaimCheck content policy and source policy.
 # Changing this file changes behaviour without touching prompts.
-# Loaded by claimcheck/policy.py. ClaimCheck tags statements and, on request, shows sources for a claim.
+# Loaded by claimcheck/policy.py. ClaimCheck tags statements and, on request, shows web sources for a claim.
 # It never judges a claim true or false.
 
 version: 2
@@ -15,14 +15,9 @@ never_topics: [religious_belief, community_generalisation, private_individual, m
 
 pestle_areas: [political, economic, social, technological, legal, environmental]
 
-# --- Showing sources -----------------------------------------------------------------
-sources_rules:
-  min_quote_chars: 25          # a quote shorter than this can't be checked meaningfully
-  max_per_claim: 3
-  allowed_tiers: [1, 2]        # official / peer-reviewed, or established news and research organisations
-
-# --- Source tiers -------------------------------------------------------------
-# Tier is computed in code from the URL; the model's own view of a source is ignored.
+# --- Sources --------------------------------------------------------------------
+# Whatever the web search returns is shown. Tiers below are only a display label ("Official source",
+# "News or research organisation"); they never hide a result. The blocklist is sent to Parallel with the search.
 sources:
   tier1_suffixes: [".gov.in", ".nic.in", ".gov"]
   tier1_domains:
@@ -79,7 +74,7 @@ sources:
     - bmj.com
     - jamanetwork.com
     - cmie.com
-  # Never used as a source (Parallel allows at most 10 domains per policy).
+  # Never returned as a source: posts and videos aren't sources (Parallel allows at most 10 domains per policy).
   blocklist:
     - x.com
     - twitter.com
@@ -92,11 +87,3 @@ sources:
     - sharechat.com
     - koo.in
 
-  # Searches with scope "tier1" are restricted to these per PESTLE area (max 10 each).
-  tier1_by_area:
-    political: [eci.gov.in, pib.gov.in, sansad.in, prsindia.org, indiabudget.gov.in, mea.gov.in, data.gov.in, mospi.gov.in, pmayg.dord.gov.in, pmay-urban.gov.in]
-    economic: [mospi.gov.in, rbi.org.in, indiabudget.gov.in, commerce.gov.in, pib.gov.in, sebi.gov.in, incometaxindia.gov.in, worldbank.org, imf.org, data.gov.in]
-    social: [ncrb.gov.in, censusindia.gov.in, rchiips.org, icmr.gov.in, pubmed.ncbi.nlm.nih.gov, who.int, udiseplus.gov.in, mospi.gov.in, fssai.gov.in, pib.gov.in]
-    technological: [npci.org.in, trai.gov.in, meity.gov.in, isro.gov.in, dpiit.gov.in, pib.gov.in, data.gov.in, mospi.gov.in, sansad.in, rbi.org.in]
-    legal: [indiacode.nic.in, egazette.gov.in, sci.gov.in, incometaxindia.gov.in, sebi.gov.in, rbi.org.in, prsindia.org, sansad.in, epfindia.gov.in, labour.gov.in]
-    environmental: [cpcb.nic.in, imd.gov.in, mnre.gov.in, cea.nic.in, fsi.nic.in, cwc.gov.in, moef.gov.in, pib.gov.in, data.gov.in, sansad.in]

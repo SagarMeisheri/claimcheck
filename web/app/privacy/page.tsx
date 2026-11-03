@@ -34,8 +34,8 @@ export default function Privacy() {
 
       <h2>Other services</h2>
       <p>
-        Videos are analysed with Google Gemini, and sources are searched with Parallel. Only the public video and
-        public web pages are sent to them, never anything about you. The site is hosted on Vercel, the analysis
+        Videos are analysed with Google Gemini, and sources are searched with Parallel. Only the public video and the
+        statement being searched are sent to them, never anything about you. The site is hosted on Vercel, the analysis
         service on Google Cloud, and the database on Supabase.
       </p>
 

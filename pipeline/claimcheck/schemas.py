@@ -1,6 +1,7 @@
 """Structured outputs for every LLM step (ADK output_schema) plus internal records.
 
-ClaimCheck tags statements and, on request, finds sources for a claim. It never judges a claim true or false.
+ClaimCheck tags statements and, on request, finds sources for a claim with one web search. It never judges a claim
+true or false.
 """
 
 from __future__ import annotations
@@ -86,71 +87,16 @@ class ExtractionResult(BaseModel):
     summary: str = Field(default="", description="2-3 plain, neutral sentences on what the video covers, written after the statements")
 
 
-# --- Sources for one claim ---------------------------------------------------------
-class PlannedSearch(BaseModel):
-    query: str = Field(description="Self-contained search query: entity, metric, period, geography")
-    scope: Literal["tier1", "open"] = Field(description="tier1 = official sources for this topic only; open = the wider web")
-    purpose: Literal["original", "independent", "other_figures"] = Field(
-        description="original = the report or release the statement refers to; independent = another source on the same "
-                    "subject; other_figures = sources giving other or newer figures on the same subject")
-
-
-class SearchPlan(BaseModel):
-    searches: list[PlannedSearch] = Field(description="Exactly 3 searches, one per purpose")
-
-
-class PickedSource(BaseModel):
-    url: str
-    title: str = ""
-    quote: str = Field(description="One sentence copied character-for-character from that source's text")
-
-
-class SourcePick(BaseModel):
-    """What the picker returns: the most relevant sentences, or an empty list. Never an assessment of the claim."""
-
-    sources: list[PickedSource] = Field(default_factory=list, description="At most 3, one per source URL")
-
-
-# --- Sources for a whole video (agents/video_sources.py) -------------------------------
-class TriageItem(BaseModel):
-    n: int = Field(description="The claim's number from the list")
-    route: Literal["search", "skip"] = Field(description="search = look for sources; skip = too vague or trivial to look up")
-    priority: int = Field(default=2, ge=1, le=3, description="1 = most specific and most worth looking up, 3 = least")
-    group: str = Field(default="", description="Short label shared by claims that one web search can cover together, e.g. 'mp land purchases'")
-    query: str = Field(default="", description="One self-contained web search query for the group (entity, metric, period, geography)")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _knowledge_is_search(cls, data: object) -> object:
-        # The removed "knowledge" route (answers from model memory) is always treated as a search.
-        if isinstance(data, dict) and data.get("route") not in ("search", "skip"):
-            data = {**data, "route": "search"}
-        return data
-
-
-class BatchTriage(BaseModel):
-    items: list[TriageItem]
-
-
-class BatchPickItem(BaseModel):
-    n: int = Field(description="The claim's number from the list")
-    sources: list[PickedSource] = Field(default_factory=list, description="At most 3")
-    follow_up_query: str = Field(default="", description="Only when nothing relevant was found: one better web search, else empty")
-
-
-class BatchPick(BaseModel):
-    items: list[BatchPickItem]
-
-
-# --- Internal records (not LLM output) ------------------------------------------
-class CheckedSource(BaseModel):
-    """A source that passed the checks in code: its URL was fetched, its quote is on the page, its tier is allowed."""
+# --- Sources (tools/evidence.py) ------------------------------------------------------------
+class Source(BaseModel):
+    """One web search result for a claim, as Parallel returned it. Not checked or judged: shown for context."""
 
     url: str
     title: str = ""
-    tier: int
-    quote: str
+    excerpt: str = ""                 # text Parallel took from the page, cleaned to one short line
     publish_date: Optional[str] = None
+    tier: int = 3                     # display label only: 1 official, 2 established news/research, 3 other
+    rank: int = 0                     # Parallel's order, most relevant first
 
 
 class ClaimRecord(BaseModel):

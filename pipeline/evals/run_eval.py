@@ -29,7 +29,7 @@ logging.getLogger("google_adk").setLevel(logging.ERROR)
 
 async def main(path: str) -> None:
     from claimcheck.agents.pipeline import run_episode
-    from claimcheck.agents.sources_on_demand import run_claim_sources
+    from claimcheck.agents.sources import run_claim_sources
     from claimcheck.config import get_settings
     from claimcheck.policy import domain_of
     from claimcheck.store import make_store

@@ -166,10 +166,10 @@ export async function requestSources(claimId: string): Promise<SourcesResult> {
     return { ok: false, status: refused ? revertTo : "failed", message };
   }
   if (videoId) revalidatePath(`/v/${videoId}`);
-  return { ok: true, status: "searching", message: "Searching. This usually takes under a minute." };
+  return { ok: true, status: "searching", message: "Searching the web. This usually takes a few seconds." };
 }
 
-/** "Check sources for all claims": one press looks up sources for every claim of a video (up to the pipeline's limits). */
+/** "Check sources for all claims": one press runs a web search for each claim of a video (up to 25 per press; press again for more). */
 export async function requestAllSources(videoId: string): Promise<{ ok: boolean; message: string }> {
   if (!/^[\w-]{6,20}$/.test(videoId)) return { ok: false, message: "Unknown video." };
   const db = serviceDb();
@@ -201,7 +201,7 @@ export async function requestAllSources(videoId: string): Promise<{ ok: boolean;
   }
   revalidatePath("/");
   revalidatePath(`/v/${videoId}`);
-  return { ok: true, message: "Checking sources for all claims. Each result appears as soon as it is ready." };
+  return { ok: true, message: "Searching sources for the claims. Each result appears as soon as it is ready." };
 }
 
 // --- Reviewer ----------------------------------------------------------------------------------

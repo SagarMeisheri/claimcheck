@@ -29,7 +29,7 @@ type EpisodeRow = {
 };
 
 const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, statement_counts, summary, sources_batch_status, created_at, channel_id, channels(name)";
-const SOURCE_COLS = "claim_sources(url, title, tier, quote, publish_date)";
+const SOURCE_COLS = "claim_sources(url, title, tier, excerpt, publish_date, rank)";
 const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, ${SOURCE_COLS}`;
 const PUBLIC_STATUSES = ["done", "in_review", "processing", "queued"];
 
@@ -43,8 +43,9 @@ function toEpisode(r: EpisodeRow): Episode {
   };
 }
 
-function bestFirst(sources: Source[] | null | undefined): Source[] {
-  return [...(sources ?? [])].sort((a, b) => a.tier - b.tier);
+/** Sources in the search engine's own order (most relevant first). */
+function inSearchOrder(sources: Source[] | null | undefined): Source[] {
+  return [...(sources ?? [])].sort((a, b) => a.rank - b.rank);
 }
 
 function toClaim(c: any): Claim {
@@ -53,7 +54,7 @@ function toClaim(c: any): Claim {
     topics: (c.topics?.length ? c.topics : c.topic ? [c.topic] : []) as string[],
     statement_type: typeOf(c.statement_type),
     sources_status: (c.sources_status as SourcesStatus) ?? "not_eligible",
-    sources: bestFirst(c.claim_sources),
+    sources: inSearchOrder(c.claim_sources),
     claim_sources: undefined,
   };
 }
@@ -166,5 +167,5 @@ export async function getClaimSources(id: string): Promise<ClaimSources | null> 
   if (!data) return null;
   const d = data as any;
   return { id: d.id, sources_status: d.sources_status, sources_error: d.sources_error,
-           video_id: d.episodes?.youtube_video_id ?? null, sources: bestFirst(d.claim_sources) };
+           video_id: d.episodes?.youtube_video_id ?? null, sources: inSearchOrder(d.claim_sources) };
 }

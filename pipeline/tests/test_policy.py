@@ -1,4 +1,4 @@
-from claimcheck.policy import is_never, load_policy, source_tier, tier1_domains_for
+from claimcheck.policy import blocklist, is_never, load_policy, source_tier
 
 POLICY = load_policy()
 
@@ -19,12 +19,9 @@ def test_model_can_add_never_but_code_also_applies_it():
 
 
 def test_policy_has_no_verdict_rules_left():
-    for gone in ("verdicts", "review", "on_demand", "triage", "stricter_topics", "claim_types_checked"):
+    for gone in ("verdicts", "review", "on_demand", "triage", "stricter_topics", "claim_types_checked", "sources_rules"):
         assert gone not in POLICY
-    assert POLICY["sources_rules"]["allowed_tiers"] == [1, 2]
 
 
 def test_parallel_domain_limit_respected():
-    for area in POLICY["pestle_areas"]:
-        assert 0 < len(tier1_domains_for(area, POLICY)) <= 10
-    assert len(POLICY["sources"]["blocklist"]) <= 10
+    assert 0 < len(blocklist(POLICY)) <= 10 and len(POLICY["sources"]["blocklist"]) <= 10

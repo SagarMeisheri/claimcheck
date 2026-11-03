@@ -26,7 +26,6 @@ def _env(name: str, default: str = "") -> str:
 # 31 Dec 2026 and $1.50/$7.50 from 1 Jan 2027: the later price is used so the cost cap never undercounts.
 # Override with CLAIMCHECK_PRICES_JSON='{"gemini-3.8-flash": [0.75, 3.75]}'.
 _DEFAULT_PRICES: dict[str, tuple[float, float]] = {
-    "flash-lite": (0.30, 2.50),        # gemini-3.5-flash-lite
     "gemini-3.8-flash": (1.50, 7.50),
 }
 
@@ -43,8 +42,6 @@ def _prices() -> dict[str, tuple[float, float]]:
 class Settings:
     # Models
     fast_model: str = field(default_factory=lambda: _env("CLAIMCHECK_FAST_MODEL", "gemini-3.8-flash"))
-    # The cheap model used to group a whole video's claims into a few searches and pick their quotes.
-    lite_model: str = field(default_factory=lambda: _env("CLAIMCHECK_LITE_MODEL", "gemini-3.5-flash-lite"))
     # "agentic" (default): model reads the transcript first and loads frames on demand. "static": fixed low-fps fallback.
     video_processing: str = field(default_factory=lambda: _env("CLAIMCHECK_VIDEO_PROCESSING", "agentic"))
     # How long the extractor thinks before it starts writing statements: minimal, low, medium, high, or "default".
@@ -64,21 +61,23 @@ class Settings:
     model_armor_tool_template: str = field(default_factory=lambda: _env("MODEL_ARMOR_TOOL_TEMPLATE"))
 
     # Limits
-    # Covers the first pass plus every source lookup for the same video.
+    # Covers the first pass plus every source search for the same video.
     max_cost_usd_per_episode: float = float(_env("CLAIMCHECK_MAX_COST_USD", "3.0"))
-    # Hard cap on web searches per "Check sources" press. The planner proposes; code truncates (never above 3).
-    max_searches_per_claim: int = min(3, int(_env("CLAIMCHECK_MAX_SEARCHES_PER_CLAIM", "3")))
-    # "Check sources for all claims" (agents/video_sources.py). auto_sources = run it right after extraction.
-    auto_sources: bool = _env("CLAIMCHECK_AUTO_SOURCES", "0") == "1"
-    sources_all_max_claims: int = int(_env("CLAIMCHECK_SOURCES_ALL_MAX_CLAIMS", "40"))
-    sources_all_max_searches: int = int(_env("CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES", "15"))
+    # Sources: one Parallel search per claim, whatever it returns is shown (tools/evidence.py).
+    sources_per_claim: int = int(_env("CLAIMCHECK_SOURCES_PER_CLAIM", "5"))
+    sources_search_mode: str = field(default_factory=lambda: _env("CLAIMCHECK_SOURCES_SEARCH_MODE", "fast"))  # turbo | fast | basic | advanced
+    excerpt_chars: int = int(_env("CLAIMCHECK_EXCERPT_CHARS", "320"))
+    # "Check sources for all claims" (agents/sources.py): the same search for every claim, a few at a time.
+    # Searches per press (earliest claims first; press again for the rest). Claims with the same wording share one.
+    sources_all_max_searches: int = int(_env("CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES", "25"))
+    sources_concurrency: int = int(_env("CLAIMCHECK_SOURCES_CONCURRENCY", "5"))
+    auto_sources: bool = _env("CLAIMCHECK_AUTO_SOURCES", "0") == "1"  # run it right after extraction
     tool_timeout_s: float = float(_env("CLAIMCHECK_TOOL_TIMEOUT_S", "60"))
     # YouTube API data older than this is refreshed (YouTube allows at most 30 days).
     youtube_refresh_days: int = int(_env("CLAIMCHECK_YOUTUBE_REFRESH_DAYS", "25"))
 
     prices: dict = field(default_factory=_prices)
-    search_cost_usd: float = 0.005
-    extract_cost_usd: float = 0.001
+    search_cost_usd: float = float(_env("CLAIMCHECK_SEARCH_COST_USD", "0.005"))
 
 
 def get_settings() -> Settings:

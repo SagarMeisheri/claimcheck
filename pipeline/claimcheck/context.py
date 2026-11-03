@@ -1,7 +1,6 @@
 """Per-video run context, carried through asyncio tasks with a ContextVar.
 
-ADK session state must stay JSON-serialisable, so live objects (store, budget, guardrail log, fetched source
-pages) live here instead. Fan-out tasks created with asyncio inherit the context automatically.
+ADK session state must stay JSON-serialisable, so live objects (store, budget, guardrail log) live here instead. Fan-out tasks created with asyncio inherit the context automatically.
 """
 
 from __future__ import annotations
@@ -55,11 +54,8 @@ class EpisodeContext:
     store: Any
     budget: Budget
     events: list[GuardrailEvent] = field(default_factory=list)
-    # search key -> {url: {"title":..., "text":..., "tier":..., "publish_date":...}}
-    evidence: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
     # Returns the plugin list for each ADK runner (budget, Model Armor, ...)
     plugins_factory: Callable[[], list] = field(default=lambda: [])
-    batch: dict[str, Any] = field(default_factory=dict)  # state of "Check sources for all claims"
     duration_s: int = 0  # video length, used to turn a statement's timestamp into progress
 
     def log(self, stage: str, rule: str, action: str, detail: str = "", claim_index: Optional[int] = None) -> None:

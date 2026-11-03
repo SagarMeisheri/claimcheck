@@ -1,4 +1,4 @@
-"""LlmAgent definitions. Each has an output schema and no tools: web searches run in code (tools/evidence.py)."""
+"""The extractor LlmAgent: reads the video and returns tagged statements. Source lookups use no model (tools/evidence.py)."""
 
 from __future__ import annotations
 
@@ -13,8 +13,7 @@ from google.genai import types
 from .. import prompts
 from ..config import Settings
 from ..context import get_context
-from ..guardrails.injection import wrap_untrusted
-from ..schemas import BatchPick, BatchTriage, ExtractionResult, SearchPlan, SourcePick
+from ..schemas import ExtractionResult
 
 
 def _model(name: str, settings: Settings) -> Any:
@@ -53,26 +52,6 @@ def inject_video(callback_context: CallbackContext, llm_request: LlmRequest) -> 
     llm_request.contents.append(types.Content(role="user", parts=[part, types.Part(text="Tag the statements in this video.")]))
 
 
-def _source_blocks(key: str) -> str:
-    """The fetched pages for one search key, as delimited, untrusted blocks.
-
-    The picker sees exactly the text the quote check will later search, so a quote that passes the check really
-    is on the page the picker read.
-    """
-    docs = get_context().evidence.get(key, {})
-    if not docs:
-        return "No sources were found."
-    return "\n\n".join(
-        wrap_untrusted(f"SOURCE {i + 1}", f"URL: {url}\nTitle: {d.get('title', '')}\nPublished: {d.get('publish_date') or 'unknown'}\n\n{d['text']}")
-        for i, (url, d) in enumerate(docs.items()))
-
-
-def inject_sources(callback_context: CallbackContext, llm_request: LlmRequest) -> None:
-    """before_model_callback on both pickers: adds the fetched pages as untrusted data."""
-    blocks = _source_blocks(callback_context.state["claim_key"])
-    llm_request.contents.append(types.Content(role="user", parts=[types.Part(text=f"Sources:\n\n{blocks}\n\nReturn the sentences.")]))
-
-
 # --- First pass -----------------------------------------------------------------------
 
 def extractor_agent(s: Settings) -> LlmAgent:
@@ -84,31 +63,3 @@ def extractor_agent(s: Settings) -> LlmAgent:
                     include_contents="none", output_schema=ExtractionResult, output_key="extraction",
                     generate_content_config=cfg, before_agent_callback=skip_if_gated,
                     before_model_callback=inject_video)
-
-
-# --- Sources for one claim ------------------------------------------------------------
-
-def planner_agent(s: Settings) -> LlmAgent:
-    return LlmAgent(name="planner", model=_model(s.fast_model, s), instruction=prompts.PLAN,
-                    include_contents="none", output_schema=SearchPlan, output_key="plan",
-                    generate_content_config=_cfg(0.0))
-
-
-def picker_agent(s: Settings) -> LlmAgent:
-    return LlmAgent(name="picker", model=_model(s.fast_model, s), instruction=prompts.PICK,
-                    include_contents="none", output_schema=SourcePick, output_key="picked",
-                    generate_content_config=_cfg(0.0), before_model_callback=inject_sources)
-
-
-# --- Sources for a whole video (cheap model; claims arrive through state) ----------------
-
-def batch_triage_agent(s: Settings) -> LlmAgent:
-    return LlmAgent(name="batch_triage", model=_model(s.lite_model, s), instruction=prompts.TRIAGE_BATCH,
-                    include_contents="none", output_schema=BatchTriage, output_key="batch_triage",
-                    generate_content_config=_cfg(0.0))
-
-
-def batch_picker_agent(s: Settings, name: str = "batch_picker") -> LlmAgent:
-    return LlmAgent(name=name, model=_model(s.lite_model, s), instruction=prompts.PICK_BATCH,
-                    include_contents="none", output_schema=BatchPick, output_key="batch_picked",
-                    generate_content_config=_cfg(0.0), before_model_callback=inject_sources)

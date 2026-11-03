@@ -34,7 +34,7 @@ def main() -> None:
     settings = get_settings()
     store = make_store(settings)
     if args.sources:
-        from .agents.sources_on_demand import precheck, run_claim_sources
+        from .agents.sources import precheck, run_claim_sources
 
         ok, reason, _ = precheck(asyncio.run(store.get_claim_for_sources(args.sources)), settings)
         if not ok:
@@ -44,7 +44,7 @@ def main() -> None:
         print(json.dumps(asyncio.run(run_claim_sources(args.sources, settings=settings, store=store)), indent=2))
         return
     if args.sources_all:
-        from .agents.video_sources import run_video_sources
+        from .agents.sources import run_video_sources
 
         print(json.dumps(asyncio.run(run_video_sources(args.sources_all, settings=settings, store=store)), indent=2))
         return

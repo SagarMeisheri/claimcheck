@@ -31,7 +31,7 @@ def _matches(host: str, domain: str) -> bool:
 
 
 def source_tier(url: str, policy: dict[str, Any] | None = None) -> int:
-    """1 = official / peer-reviewed, 2 = established news or research, 3 = everything else. 9 = blocked."""
+    """Display label for a source: 1 = official / peer-reviewed, 2 = established news or research, 3 = other, 9 = blocklisted."""
     pol = policy or load_policy()
     src = pol["sources"]
     host = domain_of(url)
@@ -65,11 +65,6 @@ def normalize_topics(values: Any, policy: dict[str, Any] | None = None, limit: i
         if t and t not in out:
             out.append(t)
     return out[:limit] or ["general"]
-
-
-def tier1_domains_for(area: str, policy: dict[str, Any] | None = None) -> list[str]:
-    pol = policy or load_policy()
-    return list(pol["sources"]["tier1_by_area"].get(area, pol["sources"]["tier1_by_area"]["economic"]))[:10]
 
 
 def blocklist(policy: dict[str, Any] | None = None) -> list[str]:

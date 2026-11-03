@@ -1,91 +1,103 @@
-"""One web search for one claim, via Parallel. A source lookup runs up to three of these at once.
+"""Sources for one claim: one Parallel web search on the claim's own words.
 
-The model only proposes a query and a scope ("tier1" or "open"); the number of searches, domains, limits and
-blocklists are decided in code. Guardrails in here:
-- domains come from policy.yaml (tier-1 list per PESTLE area, or open web minus blocklist)
-- blocklisted results are dropped even if returned
-- fetched text is screened for prompt injection and wrapped as untrusted data
-- every call is costed against the video budget
+Whatever Parallel returns is used, in Parallel's order (most relevant first): title, link, date and the excerpt
+Parallel took from the page. No model reads the pages and nothing is filtered afterwards. The only rule is in the
+request itself: social media and video sites are excluded (policy.yaml sources.blocklist), because a post is not
+a source.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
-from ..context import get_context
-from ..guardrails.injection import screen_text
-from ..policy import blocklist, source_tier, tier1_domains_for
+from ..policy import blocklist, source_tier
+from ..schemas import Source
 
-MAX_DOC_CHARS = 15000
-TOP_EXTRACT = 3
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")   # [text](url) -> text
+_MD_MARKS = re.compile(r"[#*_`>]+")              # emphasis, headings, code, quotes: dropped
+_WS = re.compile(r"[\s|]+")                       # whitespace and table pipes: one space
+_SPACE_BEFORE_PUNCT = re.compile(r"\s+([.,;:!?)])")
 
 
-def _client(settings):
+def clean_excerpt(text: str, limit: int) -> str:
+    """Parallel's excerpts are page text with some markdown; make one readable line of at most `limit` characters."""
+    t = _MD_LINK.sub(r"\1", text or "")
+    t = _SPACE_BEFORE_PUNCT.sub(r"\1", _WS.sub(" ", _MD_MARKS.sub("", t))).strip()
+    if len(t) <= limit:
+        return t
+    cut = t[:limit].rsplit(" ", 1)[0]
+    return cut + "…"
+
+
+_SEGMENT = re.compile(r"(?<=[.!?])\s+|\s*\n+\s*|\s+\.\.\.\s+|\s+…\s+")
+_WORD = re.compile(r"[a-z]+|\d+(?:[.,]\d+)*")
+_STOP = set("a an and are as at be by for from has have in is it its of on or that the this to was were will with".split())
+
+
+def _terms(text: str) -> set[str]:
+    return {w for w in _WORD.findall(text.lower()) if w not in _STOP and (len(w) > 2 or w[0].isdigit())}
+
+
+def best_excerpt(excerpts: list[str], claim_text: str, limit: int) -> str:
+    """The part of the page text that shares the most words and numbers with the claim, so the excerpt shows the
+    relevant passage rather than the page's menu. Plain word overlap (numbers count double); no model. Always returns
+    something when there is text: this picks a passage, it never hides a source."""
+    wanted = _terms(claim_text)
+    segments = [seg for e in excerpts for seg in _SEGMENT.split(clean_excerpt(e, 100_000).replace(" …", ".")) if len(seg) > 20]
+    if not segments:
+        return clean_excerpt(excerpts[0], limit) if excerpts else ""
+
+    def score(i: int) -> float:
+        terms = _terms(segments[i])
+        return sum(2 if t[0].isdigit() else 1 for t in terms & wanted) - 0.001 * i  # ties: earlier passage
+    best = max(range(len(segments)), key=score)
+    text = segments[best]
+    if best + 1 < len(segments) and len(text) < limit * 0.6:  # short hit: add the next sentence for context
+        text = f"{text} {segments[best + 1]}"
+    return clean_excerpt(text, limit)
+
+
+def _client(settings: Any):
     from parallel import Parallel
 
     return Parallel(api_key=settings.parallel_api_key)
 
 
-async def run_search(item: dict[str, Any]) -> dict[str, Any]:
-    """Searches the web for evidence about one claim and fetches the top sources into ctx.evidence.
-
-    item: {claim_key, claim_index, claim_text, pestle_area, query, scope, purpose}.
-    Never raises: a failed search comes back as {"error": ...} so the other searches still count.
-    """
-    ctx = get_context()
-    claim_key, claim_index = item["claim_key"], item.get("claim_index")
-    scope, query = item["scope"], item["query"]
-    if scope == "tier1":
-        source_policy = {"include_domains": tier1_domains_for(item.get("pestle_area", "economic"), ctx.policy)}
-    else:
-        source_policy = {"exclude_domains": blocklist(ctx.policy)}
-
-    already = ctx.evidence.setdefault(claim_key, {})
-    try:
-        docs = await asyncio.wait_for(
-            _search_extract_live(query, item.get("claim_text", ""), source_policy, set(already)),
-            timeout=ctx.settings.tool_timeout_s,
-        )
-    except Exception as e:  # timeout, API error: record it and let the other searches carry on
-        ctx.log("evidence", "search_failed", "skipped", f"{type(e).__name__}: {e}"[:200], claim_index)
-        return {"scope": scope, "purpose": item.get("purpose"), "sources_found": 0, "error": type(e).__name__}
-    ctx.budget.add(ctx.settings.search_cost_usd + ctx.settings.extract_cost_usd * len(docs))
-
-    found = 0
-    for d in docs:
-        tier = source_tier(d["url"], ctx.policy)
-        if tier == 9:
-            ctx.log("evidence", "blocklisted_source", "blocked", d["url"], claim_index)
+def to_sources(results: list[Any], policy: dict[str, Any], limit: int, excerpt_chars: int, claim_text: str = "") -> list[Source]:
+    """Parallel results -> Sources, in Parallel's order, one per URL, at most `limit`."""
+    out: list[Source] = []
+    seen: set[str] = set()
+    for r in results:
+        url = getattr(r, "url", "") or ""
+        if not url or url in seen:
             continue
-        text, hits = screen_text(d.get("text", ""))
-        if hits:
-            ctx.log("evidence", "prompt_injection_in_source", "flagged", f"{d['url']}: {hits[0]}", claim_index)
-        already[d["url"]] = {"title": d.get("title", ""), "text": text[:MAX_DOC_CHARS], "tier": tier,
-                             "publish_date": d.get("publish_date")}
-        found += 1
-    return {"scope": scope, "purpose": item.get("purpose"), "sources_found": found}
+        seen.add(url)
+        excerpts = [e for e in (getattr(r, "excerpts", None) or []) if e and e.strip()]
+        out.append(Source(url=url, title=(getattr(r, "title", None) or "").strip()[:300],
+                          excerpt=best_excerpt(excerpts, claim_text, excerpt_chars),
+                          publish_date=getattr(r, "publish_date", None), tier=source_tier(url, policy), rank=len(out)))
+        if len(out) >= limit:
+            break
+    return out
 
 
-async def _search_extract_live(query: str, objective: str, source_policy: dict, skip: set[str]) -> list[dict[str, Any]]:
-    ctx = get_context()
-    client = _client(ctx.settings)
+async def search_sources(claim_text: str, settings: Any, policy: dict[str, Any]) -> list[Source]:
+    """One search. Raises on API errors or timeout (the caller marks the claim 'failed' so it can be retried)."""
+    query = claim_text.strip()[:300]
+    client = _client(settings)
 
-    def _run() -> list[dict[str, Any]]:
+    def _run() -> list[Any]:
         res = client.search(
             search_queries=[query],
-            objective=f"Find primary-source evidence that confirms or contradicts this claim: {objective}",
-            mode="fast",
-            advanced_settings={"max_results": 6, "source_policy": source_policy, "location": "in"},
+            objective=f"Find reports, data, official releases or news coverage about this statement: {query}",
+            mode=settings.sources_search_mode,
+            advanced_settings={"max_results": settings.sources_per_claim + 3, "location": "in",
+                               "source_policy": {"exclude_domains": blocklist(policy)},
+                               "excerpt_settings": {"max_chars_per_result": 1500}},
         )
-        urls = [r.url for r in res.results if r.url not in skip and source_tier(r.url, ctx.policy) != 9][:TOP_EXTRACT]
-        if not urls:
-            return []
-        ext = client.extract(urls=urls, objective=objective, advanced_settings={"full_content": True})
-        out = []
-        for r in ext.results:
-            text = r.full_content or "\n".join(r.excerpts)
-            out.append({"url": r.url, "title": r.title or "", "text": text, "publish_date": r.publish_date})
-        return out
+        return list(res.results)
 
-    return await asyncio.to_thread(_run)
+    results = await asyncio.wait_for(asyncio.to_thread(_run), timeout=settings.tool_timeout_s)
+    return to_sources(results, policy, settings.sources_per_claim, settings.excerpt_chars, query)

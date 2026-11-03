@@ -64,7 +64,7 @@ def _busy(key: str) -> bool:
 
 @app.get("/healthz")
 async def healthz() -> dict:
-    return {"ok": True, "fast_model": _settings.fast_model, "lite_model": _settings.lite_model}
+    return {"ok": True, "fast_model": _settings.fast_model, "sources_search_mode": _settings.sources_search_mode}
 
 
 class RunRequest(BaseModel):
@@ -111,7 +111,7 @@ async def cancel(episode_id: str, x_pipeline_secret: Optional[str] = Header(defa
 async def sources_all(episode_id: str, wait: bool = False, x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
     """Looks up sources for every claim of a video that has finished its first pass."""
     _auth(x_pipeline_secret)
-    from .agents.video_sources import run_video_sources
+    from .agents.sources import run_video_sources
 
     key = f"sources-all:{episode_id}"
     if _busy(key):
@@ -137,7 +137,7 @@ async def sources_one(claim_id: str, req: Optional[SourcesRequest] = None,
     so the web app can show it straight away.
     """
     _auth(x_pipeline_secret)
-    from .agents.sources_on_demand import precheck, run_claim_sources
+    from .agents.sources import precheck, run_claim_sources
 
     row = await _store.get_claim_for_sources(claim_id)
     ok, reason, code = precheck(row, _settings)

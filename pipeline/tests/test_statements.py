@@ -1,16 +1,13 @@
-"""Statement tagging, streaming, the cost cap and sources on request (no keys or network needed)."""
+"""Statement tagging, streaming and the cost cap (no keys or network needed). Sources: test_sources.py."""
 
 import asyncio
 
 import pytest
 
-from claimcheck.agents import sources_on_demand
-from claimcheck.agents.sources_on_demand import precheck, record_from_row, run_claim_sources
 from claimcheck.agents.stages import classify_statement
 from claimcheck.config import Settings
-from claimcheck.context import BudgetExceeded, get_context
 from claimcheck.policy import load_policy
-from claimcheck.schemas import CheckedSource, ClaimRecord, ExtractedClaim, sources_status
+from claimcheck.schemas import ClaimRecord, ExtractedClaim, sources_status
 
 POLICY = load_policy()
 
@@ -81,156 +78,6 @@ def test_normalize_topics_is_free_form():
     assert normalize_topics(["  Middle class! "], POLICY) == ["middle_class"]
     assert normalize_topics(["gdp", "GDP"], POLICY) == ["gdp"]
     assert normalize_topics("gdp", POLICY) == ["gdp"] and normalize_topics(None, POLICY) == ["general"]
-
-
-# --- Sources on request: precheck --------------------------------------------------------------
-SETTINGS = Settings(max_cost_usd_per_episode=3.0)  # pinned: a local .env must not change the tests
-
-
-def row(**kw):
-    base = {"id": "c1", "idx": 3, "episode_id": "e1", "start_s": 3725, "speaker": "Guest", "claim_text": "GDP grew 7.4%",
-            "context_quote": None, "pestle_area": "economic", "topic": "gdp", "topics": ["gdp"],
-            "statement_type": "factual_claim", "policy_tier": "normal", "not_checked_reason": None,
-            "refers_to_visual": False, "sources_status": "queued",
-            "episodes": {"id": "e1", "youtube_video_id": "vid", "title": "T", "status": "done", "cost_usd": 0.5}}
-    eps = kw.pop("episodes", {})
-    base.update(kw)
-    base["episodes"] = {**base["episodes"], **eps}
-    return base
-
-
-def test_precheck_allows_queued_factual_claim():
-    assert precheck(row(), SETTINGS) == (True, "", 200)
-    assert precheck(row(sources_status="failed"), SETTINGS)[0]
-    assert precheck(row(sources_status="not_requested"), SETTINGS)[0]
-
-
-@pytest.mark.parametrize("kw, words", [
-    ({"statement_type": "opinion"}, "only be looked up for claims"),
-    ({"policy_tier": "never"}, "content policy"),
-    ({"sources_status": "done"}, "already been looked up"),
-    ({"sources_status": "searching"}, "Already searching"),
-    ({"sources_status": "not_eligible"}, "can't be looked up"),
-    ({"episodes": {"cost_usd": 3.0}}, "budget"),
-    ({"episodes": {"status": "processing"}}, "finished"),
-])
-def test_precheck_rejections(kw, words):
-    ok, msg, code = precheck(row(**kw), SETTINGS)
-    assert not ok and code == 409 and words in msg
-
-
-def test_precheck_missing_claim():
-    assert precheck(None, SETTINGS)[2] == 404
-
-
-def test_record_from_row_round_trips():
-    rec = record_from_row(row())
-    assert rec.claim.start_ts == "01:02:05" and rec.start_s == 3725
-    assert rec.claim.context_quote == "GDP grew 7.4%" and rec.claim.sourceable and rec.effective_tier == "normal"
-
-
-# --- Sources on request: run (fake store, fake lookup) -----------------------------------------
-class FakeStore:
-    def __init__(self, r):
-        self.row = r
-        self.saved = []
-        self.status = []
-        self.cost = []
-
-    async def get_claim_for_sources(self, claim_id):
-        return self.row
-
-    async def set_sources_status(self, claim_id, status, error=None):
-        self.status.append((status, error))
-
-    async def save_claim_sources(self, claim_id, sources):
-        self.saved.append([s.url for s in sources])
-
-    async def add_episode_cost(self, episode_id, usd, tin, tout):
-        self.cost.append(usd)
-        self.row["episodes"]["cost_usd"] += usd
-
-    async def save_guardrail_events(self, episode_id, events):
-        pass
-
-
-SRC = CheckedSource(url="https://mospi.gov.in/a", title="MoSPI", tier=1, quote="GDP grew 7.4 per cent in 2025-26.")
-
-
-def _fake_lookup(monkeypatch, sources=(SRC,), cost=0.2, raises=None):
-    async def fake(rec, meta):
-        ec = get_context()
-        assert meta["video_title"] == "T" and ec.episode_id == "e1"
-        ec.budget.add(cost)
-        if raises:
-            raise raises
-        return list(sources)
-    import claimcheck.agents.sources as sources_mod
-    monkeypatch.setattr(sources_mod, "find_sources", fake)
-
-
-def test_run_saves_sources_and_charges_the_video(monkeypatch):
-    _fake_lookup(monkeypatch)
-    store = FakeStore(row())
-    res = asyncio.run(run_claim_sources("c1", settings=SETTINGS, store=store))
-    assert res["status"] == "done" and res["sources"] == 1 and store.saved == [["https://mospi.gov.in/a"]]
-    assert store.cost == [pytest.approx(0.2)]
-
-
-def test_run_saves_an_empty_result_as_done(monkeypatch):
-    _fake_lookup(monkeypatch, sources=())
-    store = FakeStore(row())
-    res = asyncio.run(run_claim_sources("c1", settings=SETTINGS, store=store))
-    assert res["status"] == "done" and store.saved == [[]]
-
-
-def test_run_stops_at_the_video_cost_cap(monkeypatch):
-    _fake_lookup(monkeypatch)
-    store = FakeStore(row(episodes={"cost_usd": 3.0}))
-    res = asyncio.run(run_claim_sources("c1", settings=SETTINGS, store=store))
-    assert res["status"] == "failed" and "budget" in res["reason"] and not store.saved
-
-
-def test_run_records_errors_and_cost(monkeypatch):
-    _fake_lookup(monkeypatch, cost=0.4, raises=RuntimeError("wrapped"))
-    store = FakeStore(row())
-    res = asyncio.run(run_claim_sources("c1", settings=SETTINGS, store=store))
-    assert res["status"] == "failed" and store.status[-1][0] == "failed" and "Try again" in store.status[-1][1]
-    assert store.cost == [pytest.approx(0.4)]  # spend is recorded even when the lookup fails
-
-    def budget_error():
-        try:
-            raise BudgetExceeded("cap")
-        except BudgetExceeded as e:
-            raise RuntimeError("plugin failed") from e
-    try:
-        budget_error()
-    except RuntimeError as e:
-        err = e
-    _fake_lookup(monkeypatch, raises=err)
-    res = asyncio.run(run_claim_sources("c1", settings=SETTINGS, store=FakeStore(row())))
-    assert "budget" in res["reason"]
-
-
-def test_runs_for_one_video_are_serialised(monkeypatch):
-    active = {"n": 0, "max": 0}
-
-    async def slow(rec, meta):
-        active["n"] += 1
-        active["max"] = max(active["max"], active["n"])
-        await asyncio.sleep(0.01)
-        active["n"] -= 1
-        return []
-    import claimcheck.agents.sources as sources_mod
-    monkeypatch.setattr(sources_mod, "find_sources", slow)
-    sources_on_demand._episode_locks.clear()
-
-    async def both():
-        store = FakeStore(row())
-        await asyncio.gather(run_claim_sources("c1", settings=SETTINGS, store=store),
-                             run_claim_sources("c2", settings=SETTINGS, store=store))
-    asyncio.run(both())
-    assert active["max"] == 1
 
 
 # --- Streaming ------------------------------------------------------------------------------
@@ -326,6 +173,6 @@ def test_budget_counts_agentic_video_tool_use_tokens():
 
 def test_prices_are_conservative_and_can_be_overridden(monkeypatch):
     s = Settings()
-    assert s.prices["gemini-3.8-flash"] == (1.50, 7.50) and s.prices["flash-lite"] == (0.30, 2.50)
+    assert s.prices["gemini-3.8-flash"] == (1.50, 7.50)
     monkeypatch.setenv("CLAIMCHECK_PRICES_JSON", '{"gemini-3.8-flash": [0.75, 3.75]}')
     assert Settings().prices["gemini-3.8-flash"] == (0.75, 3.75)

@@ -5,7 +5,7 @@ import { typeOf } from "@/lib/statements";
 
 type Row = PreviewClaim & { videoId: string; videoTitle: string; channel: string };
 
-/** Claims from every video, grouped by subject, each with the first source found (if any). Nothing is judged. */
+/** Claims from every video, grouped by subject, each with the first source the search found (if any). Nothing is judged. */
 export function TopicsView({ episodes }: { episodes: Episode[] }) {
   const rows: Row[] = episodes.flatMap((e) => (e.preview_claims ?? [])
     .filter((c) => typeOf(c.statement_type) === "factual_claim")

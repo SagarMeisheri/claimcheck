@@ -9,7 +9,7 @@ export const PESTLE: Record<Pestle, string> = {
   environmental: "Environmental",
 };
 
-/** Kinds of site a source comes from. Only these two are ever shown (the pipeline drops everything else). */
+/** Labels for the kind of site a source comes from. Other sites are shown too, just without a label. */
 export const TIER_LABEL: Record<number, string> = {
   1: "Official source",
   2: "News or research organisation",

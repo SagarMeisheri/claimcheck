@@ -2,11 +2,11 @@
 
 Paste a YouTube link (any public, finished video) and ClaimCheck breaks it into what was said: an AI summary and
 every statement with its timestamp, tagged as a **claim, opinion, forecast or other**, filterable by type and
-subject, playable 20 s at a time. For a claim, a viewer can press **Check sources**: up to three sentences copied
-word for word from official or established news pages about the same subject, with links.
+subject, playable 20 s at a time. For a claim, a viewer can press **Check sources**: one web search on the claim's
+wording, showing the top 5 results as the search returned them (title, link, site, date and the relevant passage).
 
-**ClaimCheck is not a fact-checker.** Nothing is judged true or false, there are no scores, and sources are shown for
-context only. Earlier versions published verdicts; that was removed (see `REPORT-adoption-and-legal.md` for why), and
+**ClaimCheck is not a fact-checker.** Nothing is judged true or false, there are no scores, and sources are search
+results shown for context only. Earlier versions published verdicts; that was removed (see `REPORT-adoption-and-legal.md` for why), and
 old verdict data is kept in the database but hidden from the public (migration 0012).
 
 ```
@@ -20,7 +20,7 @@ supabase/   Postgres schema, row-level security and column grants
 Needs Docker, the Supabase CLI, Python 3.11+, Node 20+. There is no demo data: the app shows only videos you submit.
 
 ```bash
-supabase start && supabase db reset        # local Postgres with migrations 0001-0012 (ports 55321-55329)
+supabase start && supabase db reset        # local Postgres with migrations 0001-0013 (ports 55321-55329)
 
 cd pipeline
 python3 -m venv .venv && . .venv/bin/activate
@@ -64,20 +64,22 @@ EpisodePipeline (ADK SequentialAgent)                       POST /episodes
   ClaimFilter     code   150-statement cap; never-show topics redacted in code whatever the model said
   Publisher       code   the only writer; statement counts, summary, cost
 
-Sources for one claim (agents/sources.py)                   POST /claims/{id}/sources
-  web app         rate limits (10 per person per day, 120 per hour site-wide), marks the claim queued
-  precheck        code   a claim, not redacted, no sources yet, video under its cost cap; one lookup per video at a time
-  Workflow        plan (LLM: original source / independent source / other figures) -> clamp (code: at most 3)
-                  -> search (3 Parallel search+extract at once, no retries) -> pick (LLM: one sentence per relevant
-                  source, never an assessment)
-  checks (code)   page was fetched, the sentence is on it word for word (25+ chars), site is tier 1 (official,
-                  peer-reviewed) or tier 2 (established news/research); blocklisted sites never; at most 3
-  save            sources on the claim (shared by everyone), or "no relevant source found"
+Sources (agents/sources.py, tools/evidence.py): no model, nothing filtered after the search
+  One claim                                                   POST /claims/{id}/sources
+    web app       rate limits (10 per person per day, 120 per hour site-wide), marks the claim queued
+    precheck      a claim, not redacted, no sources yet, video under its cost cap; one lookup per video at a time
+    search        one Parallel search ("fast") on the claim's own words; social media and video sites excluded in
+                  the request. Top 5 results kept in Parallel's order: title, link, date, site label (official /
+                  news or research / none) and the passage of the page text that shares the most words and numbers
+                  with the claim. ~$0.005, about a second
+    save          on the claim for everyone, or "no sources found"
+  Every claim of a video                                      POST /episodes/{id}/sources-all
+    the same search for each claim without sources, 5 at a time, each saved as it lands. Up to 25 searches per
+    press (earliest claims first; press again for more), never beyond the video's budget; claims with the same
+    wording share one search
 
-Sources for a whole video (agents/video_sources.py)          POST /episodes/{id}/sources-all
-  one cheap triage call groups claims that one search can cover, then one search + one pick per group, in
-  parallel, then one follow-up search for claims with nothing found. Same checks in code. Leftovers go back to
-  "not requested" so a viewer can still press the button
+  Why not one search for many claims: Parallel takes several queries per request but returns one merged list with
+  no link from a result back to its query, so results can't be attributed to a claim without a model guessing.
 ```
 
 Each claim has a `sources_status`: `not_eligible` (not a claim, or redacted), `not_requested`, `queued`, `searching`,
@@ -87,24 +89,25 @@ Each claim has a `sources_status`: `not_eligible` (not a claim, or redacted), `n
 
 | Where | Rule |
 | --- | --- |
-| Every model call | Per-video cost cap ($3) via an ADK plugin, covering the first pass and every source lookup; counts prompt, output, thinking **and tool-use** tokens (agentic video bills frames and transcript as tool use). Prices in `config.py` use the published 2027 Flash price so the cap never undercounts. Model Armor plugin when templates are configured |
+| Every model call | Per-video cost cap ($3) via an ADK plugin, covering the first pass and every source search ($0.005 each); counts prompt, output, thinking **and tool-use** tokens (agentic video bills frames and transcript as tool use). Prices in `config.py` use the published 2027 Flash price so the cap never undercounts. Model Armor plugin when templates are configured |
 | Prompts | Describe, never evaluate; no prompt asks whether a claim is true or for a view of a speaker. All video text and fetched pages are wrapped as untrusted data; instruction-like lines in pages are removed |
 | Buttons | Claims only; 10 "Check sources" per person per day and 120 per hour site-wide, 3 "Check sources for all" per person per day and 20 per hour (`SOURCES_*` env vars; 0 disables). Submissions: 5 per person per day |
-| Sources | The model picks only queries and sentences. Code decides the number of searches (max 3), the domains (blocklist always), and what is shown (fetched page, exact sentence, tier 1 or 2) |
+| Sources | A plain web search per claim, no model involved; results shown as returned (top 5, Parallel's order), social media and video sites excluded in the request. Site labels (official, news or research) are display only and never hide a result |
 | Content policy | Religious beliefs, claims about whole communities/castes/religions, private individuals and minors, live court cases, disasters in the first 48 h, satire: stored redacted and never shown |
 | Reports | "Report a problem" on every statement goes to `/review`; a reviewer can hide a statement for everyone |
 | YouTube data | Refreshed every 25 days by the daily maintenance cron (YouTube allows 30); videos no longer public are marked `removed` and hidden; no channel avatars stored |
 | Privacy | Salted IP hashes only, for rate limits; deleted after 30 days by the maintenance cron |
 
-All of these are covered by tests in `pipeline/tests/` (61 tests, offline).
+All of these are covered by tests in `pipeline/tests/` (45 tests, offline).
 
 ## Going live
 
 1. **Supabase**: create a project and run every migration in order (`supabase db push`, or the SQL editor):
-   `0001`–`0012`. An existing database only needs the ones it's missing. `0012_sources_only.sql` hides old verdicts,
-   merges hearsay/analogy/loaded-language into "other", adds sources, rate-limit and YouTube-refresh columns. If
-   0006–0011 were applied by hand (not through the CLI), apply 0012 the same way: running `supabase migration up`
-   would re-run 0006's backfill. Deploy order: migration, then pipeline, then web.
+   `0001`–`0013`. An existing database only needs the ones it's missing. `0012_sources_only.sql` hides old verdicts,
+   merges hearsay/analogy/loaded-language into "other", adds sources, rate-limit and YouTube-refresh columns;
+   `0013_plain_search_sources.sql` stores search results as returned (excerpt, rank, any site) and reopens claims
+   that came back empty. If 0006–0011 were applied by hand (not through the CLI), apply 0012 and 0013 the same way:
+   running `supabase migration up` would re-run 0006's backfill. Deploy order: migration, then pipeline, then web.
 2. **Pipeline (Cloud Run)**: `cd pipeline && gcloud run deploy claimcheck-pipeline --source . --set-env-vars ...` with
    `GOOGLE_API_KEY`, `PARALLEL_API_KEY`, `YOUTUBE_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
    `PIPELINE_SHARED_SECRET`, optionally `MODEL_ARMOR_*`. Request timeout 60 min, CPU always allocated, and
@@ -115,18 +118,18 @@ All of these are covered by tests in `pipeline/tests/` (61 tests, offline).
    optionally a site Check sources should find) and run `python -m evals.run_eval your_gold.jsonl`. Gates: extraction
    recall >= 80%, tag agreement >= 80%.
 
-Model names, limits and prices are environment variables (`CLAIMCHECK_FAST_MODEL`, `CLAIMCHECK_LITE_MODEL`,
-`CLAIMCHECK_PRICES_JSON`, `CLAIMCHECK_VIDEO_PROCESSING=static` for the fallback, ...); see `pipeline/claimcheck/config.py`.
+Model names, limits and prices are environment variables (`CLAIMCHECK_FAST_MODEL`,
+`CLAIMCHECK_PRICES_JSON`, `CLAIMCHECK_SOURCES_PER_CLAIM`, `CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES`, `CLAIMCHECK_VIDEO_PROCESSING=static` for the fallback, ...); see `pipeline/claimcheck/config.py`.
 
 ## What has and hasn't been verified
 
-Verified: all pipeline tests; migration 0012 in PGlite (`node supabase/test_sources_migration.mjs`, with
+Verified: all pipeline tests; a live "Check sources" on a real claim (5 sources, $0.005); migrations 0012-0013 in PGlite (`node supabase/test_sources_migration.mjs`, with
 `@electric-sql/pglite` installed) and on a local Supabase; web typecheck and production build; the pages in a real
 browser against local data, including filing and resolving a report.
 
 Not yet run against live services in this version: a full extraction with agentic video on a real URL (check that
-the model doesn't silently fall back to static processing, and that tool-use tokens show up in the cost), and a live
-"Check sources" (Parallel + Gemini). Expect a short shakedown on first live run.
+the model doesn't silently fall back to static processing, and that tool-use tokens show up in the cost). Expect a
+short shakedown on first live run.
 
 Before launch: have a lawyer review the content policy, the reporting process and the IT Rules 2021 obligations
 for digital publishers.

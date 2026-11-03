@@ -4,7 +4,7 @@ EpisodePipeline (SequentialAgent)
   IngestGate      code   metadata + input guardrails (public, finished)
   ExtractorAgent  LLM    agentic video -> tagged statements (claim, opinion, forecast, other) + summary
   ClaimFilter     code   cap, content policy in code, which statements can have sources looked up
-  Publisher       code   the only writer (sources are looked up later, on request: see sources_on_demand.py)
+  Publisher       code   the only writer (sources are looked up later, on request: see sources.py)
 """
 
 from __future__ import annotations
@@ -131,7 +131,7 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
                   "cost_usd": round(ec.budget.spent_usd, 4), "guardrail_events": [e.model_dump() for e in ec.events]}
         if result["status"] == "published" and settings.auto_sources:
             # The statements are already on screen. Now look up sources for the claims, each appearing as it finishes.
-            from .video_sources import run_video_sources
+            from .sources import run_video_sources
             try:
                 result["sources"] = await run_video_sources(episode_id, settings=settings, store=store)
             except Exception:

@@ -64,7 +64,7 @@ export function CheckSources({ claimId, status: initial, error: initialError, so
     return (
       <p className={compact ? "ccard-verifying" : "verify-state"} role="status" aria-live="polite">
         <span className="spinner" aria-hidden="true" /> {status === "queued" || pending ? "Queued…" : "Searching sources…"}
-        {!compact && <span className="meta"> usually under a minute</span>}
+        {!compact && <span className="meta"> usually a few seconds</span>}
       </p>
     );
   }

@@ -404,11 +404,14 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .source-list { display: grid; gap: 0.6rem; margin-top: 0.65rem; }
 .source-list-h { margin: 0; font-size: 0.8rem; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; }
 .source-list .source { border-left-color: var(--rule); }
+.source-title { font-weight: 600; }
+.source-site { margin: 0.1rem 0 0; font-size: 0.82rem; }
+.source-excerpt { margin: 0.25rem 0 0; font-size: 0.92rem; color: var(--ink-soft); }
 .source-note { font-size: 0.8rem; margin: 0; }
 .source-none { font-size: 0.86rem; margin: 0.5rem 0 0; }
 .ccard-foot .source-list { margin-top: 0; }
-.ccard-foot .source blockquote { font-size: 0.86rem; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-.ccard-foot .source figcaption { font-size: 0.78rem; }
+.ccard-foot .source-title { font-size: 0.86rem; }
+.ccard-foot .source-excerpt { font-size: 0.82rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .ccard-foot .ccard-play { border-top: 0; padding: 0.35rem 0 0; }
 .tick-sourced::before { content: ""; position: absolute; top: -0.45rem; left: 50%; width: 5px; height: 5px; border-radius: 50%; background: var(--ink); transform: translateX(-50%); }
 .topic-src { display: block; }

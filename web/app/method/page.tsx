@@ -18,7 +18,7 @@ export default function Method() {
       <ol>
         <li>Anyone can paste a link to a public, finished YouTube video.</li>
         <li>An AI watches the video and lists its statements, each with the moment it was said, a short summary of the video, and one tag per statement.</li>
-        <li>For a claim, you can press &quot;Check sources&quot;. The AI searches the web, and for each relevant page copies one sentence about the same subject. Code then checks that the page really was fetched, that the sentence really is on it word for word, and that the site is an official body or an established news or research organisation. Social media is never used.</li>
+        <li>For a claim, you can press &quot;Check sources&quot;. ClaimCheck runs one web search (with Parallel) on the claim&apos;s wording and shows the top results in the search engine&apos;s order: the page title, the site, the date and a short excerpt from the page. No AI judges or filters them. Social media and video sites are left out of the search. &quot;Check sources for all claims&quot; runs the same search for up to 25 claims at a time.</li>
         <li>Results are saved and shown to everyone, so each claim only needs looking up once.</li>
       </ol>
 
@@ -31,7 +31,7 @@ export default function Method() {
       <p>A tag describes the kind of statement, not the speaker. It is a reading aid, not a judgement.</p>
 
       <h2>About sources</h2>
-      <p>{SOURCES_NOTE} A source may agree with a statement, give a different figure, or cover a different period: read it and decide for yourself. &quot;No relevant source found&quot; says nothing about whether a statement is right.</p>
+      <p>{SOURCES_NOTE} A result may support a statement, give a different figure, cover a different period, or simply be about the same subject: open it and decide for yourself. Sites are labelled when they are official bodies or established news or research organisations; other sites are shown too. Finding no sources says nothing about whether a statement is right.</p>
 
       <h2>What the AI can get wrong</h2>
       <p>
