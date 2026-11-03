@@ -43,6 +43,7 @@ export interface Claim {
   context_quote: string | null;
   pestle_area: Pestle;
   topic: string | null;
+  topics: string[]; // 1-2 subject tags (filter chips)
   claim_type: string;
   statement_type: StatementType;
   tag_note: string | null;
@@ -67,6 +68,7 @@ export interface PreviewClaim {
   source_line: string | null; // "Publisher: what it says", shortened
   pestle_area: Pestle;
   topic: string | null;
+  topics: string[];
   statement_type: StatementType;
   verification_status: VerificationStatus;
 }

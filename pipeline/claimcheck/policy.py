@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import re
+
 import yaml
 
 _DEFAULT_PATH = Path(__file__).with_name("policy.yaml")
@@ -56,6 +58,30 @@ def effective_tier(model_tier: str, topic: str, claim_type: str, policy: dict[st
     if topic in pol["stricter_topics"] or model_tier == "stricter":
         return "stricter"
     return "normal"
+
+
+_TIER_ORDER = {"normal": 0, "stricter": 1, "never": 2}
+
+
+def normalize_topics(values: Any, policy: dict[str, Any] | None = None, limit: int = 2) -> list[str]:
+    """Subject tags the model chose, tidied: snake_case, at most 40 characters, unique, at most `limit`.
+
+    The tags are free-form (anything the statement is about), so there is no fixed list to check against.
+    """
+    if isinstance(values, str):
+        values = [values]
+    out: list[str] = []
+    for v in values or []:
+        t = re.sub(r"[^\w]+", "_", str(v).lower(), flags=re.UNICODE).strip("_")[:40].strip("_")
+        if t and t not in out:
+            out.append(t)
+    return out[:limit] or ["general"]
+
+
+def strictest_tier(model_tier: str, topics: list[str], claim_type: str, policy: dict[str, Any] | None = None) -> str:
+    """effective_tier over every topic tag; the strictest one wins."""
+    tiers = [effective_tier(model_tier, t, claim_type, policy) for t in (topics or [""])]
+    return max(tiers, key=_TIER_ORDER.__getitem__)
 
 
 def tier1_domains_for(area: str, policy: dict[str, Any] | None = None) -> list[str]:

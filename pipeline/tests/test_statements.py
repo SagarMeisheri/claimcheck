@@ -237,7 +237,7 @@ def test_extractor_schema_requires_statement_type():
 def _stmt_json(text, stype="factual_claim", ts="01:00"):
     import json
     return json.dumps({"start_ts": ts, "speaker": "Host", "claim": text, "context_quote": text, "statement_type": stype,
-                       "tag_note": "", "pestle_area": "economic", "topic": "gdp", "policy_tier": "normal", "refers_to_visual": False})
+                       "tag_note": "", "pestle_area": "economic", "topics": ["gdp"], "policy_tier": "normal", "refers_to_visual": False})
 
 
 def test_object_stream_finds_statements_in_any_chunking():
@@ -304,3 +304,24 @@ def test_budget_counts_streamed_usage_once():
         await plugin.after_model_callback(callback_context=cb, llm_response=resp(False, 30))
     asyncio.run(go())
     assert (ec.budget.tokens_in, ec.budget.tokens_out) == (1000, 30)
+
+
+# --- Subject tags ---------------------------------------------------------------------------
+def test_normalize_topics_is_free_form():
+    from claimcheck.policy import normalize_topics
+    assert normalize_topics(["Roman Coins", "Maritime-Trade", "jobs"], POLICY) == ["roman_coins", "maritime_trade"]  # max 2
+    assert normalize_topics(["  Middle class! "], POLICY) == ["middle_class"]
+    assert normalize_topics(["gdp", "GDP"], POLICY) == ["gdp"]
+    assert normalize_topics("gdp", POLICY) == ["gdp"] and normalize_topics(None, POLICY) == ["general"]
+
+
+def test_any_never_topic_redacts_and_any_stricter_topic_raises_tier():
+    c = stmt(topic="gdp", topics=["gdp", "religious_belief"])
+    assert classify_statement(c, POLICY)[1] == "outside_policy"
+    assert classify_statement(stmt(topic="gdp", topics=["gdp", "health"]), POLICY)[0] == "stricter"
+
+
+def test_extractor_schema_asks_for_topics_list():
+    from claimcheck.schemas import ExtractionResult
+    item = ExtractionResult.model_json_schema()["$defs"]["ExtractedStatement"]
+    assert "topics" in item["required"] and "topic" not in item["properties"]

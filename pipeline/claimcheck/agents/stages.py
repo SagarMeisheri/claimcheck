@@ -17,7 +17,7 @@ from google.genai import types
 from ..context import get_context
 from ..guardrails.injection import find_injections, wrap_untrusted
 from ..guardrails.input_checks import validate_metadata
-from ..policy import effective_tier
+from ..policy import normalize_topics, strictest_tier
 from ..schemas import ClaimRecord, ExtractedClaim
 from ..store import ts_to_seconds
 from ..tools.youtube import fetch_metadata
@@ -35,8 +35,8 @@ def classify_statement(claim: ExtractedClaim, policy: dict[str, Any]) -> tuple[s
     Never-check topics are redacted whatever the statement type; other non-factual statements are
     tagged with their type and never verified.
     """
-    tier = effective_tier(claim.policy_tier, claim.topic, claim.claim_type, policy)
-    if claim.policy_tier == "never" or (claim.topic or "").lower().strip() in policy["never_topics"]:
+    tier = strictest_tier(claim.policy_tier, claim.topics, claim.claim_type, policy)
+    if claim.policy_tier == "never" or any(t in policy["never_topics"] for t in claim.topics):
         return tier, "outside_policy"
     if not claim.verifiable:
         return tier, claim.statement_type  # opinion / forecast / analogy / loaded_language / hearsay / other
@@ -50,7 +50,8 @@ def build_record(i: int, raw: dict[str, Any], ec: Any, log: bool = True) -> Opti
     The streamer passes log=False: ClaimFilter logs the guardrail events when it runs over the final list.
     """
     try:
-        claim = ExtractedClaim.model_validate(raw)
+        topics = normalize_topics(raw.get("topics") or raw.get("topic"), ec.policy)
+        claim = ExtractedClaim.model_validate({**raw, "topics": topics, "topic": topics[0]})
     except Exception as e:  # schema guardrail: malformed claims are dropped, not guessed at
         if log:
             ec.log("extract", "claim_schema_invalid", "skipped", str(e)[:200], i)

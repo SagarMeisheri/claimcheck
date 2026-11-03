@@ -7,7 +7,7 @@ import { VerdictStrip } from "@/components/MiniBar";
 import { Avatar, Thumb } from "@/components/Thumb";
 import type { Claim, EpisodeDetail, StatementType, VerdictName } from "@/lib/types";
 import { CORE_TYPES, STATEMENT_TYPES, TYPE_ORDER, VERIFYING, breakdownParts, typeOf } from "@/lib/statements";
-import { VERDICTS, clock } from "@/lib/verdicts";
+import { VERDICTS, clock, topicLabel } from "@/lib/verdicts";
 import { CheckProgress } from "@/components/CheckProgress";
 import { ClaimCard, StatementCard, type CardPhase } from "./ClaimCard";
 import { ClaimTrack } from "./ClaimTrack";
@@ -21,8 +21,8 @@ const LEAD_S = 3;
 const CUE_LEAD_S = 5;
 const AUTO_NEXT_S = 4;
 
-export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }: {
-  ep: EpisodeDetail; initialT: number | null; autoplay: boolean; momentId: string | null; initialView: View | null;
+export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, initialTopic }: {
+  ep: EpisodeDetail; initialT: number | null; autoplay: boolean; momentId: string | null; initialView: View | null; initialTopic?: string | null;
 }) {
   const router = useRouter();
   const player = useRef<PlayerHandle>(null);
@@ -38,6 +38,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
   const checking = ep.status === "processing" || ep.status === "queued";
 
   const [view, setView] = useState<View>(initialView ?? "all");
+  const [topic, setTopic] = useState<string | null>(initialTopic ?? null);
   const [playerOn, setPlayerOn] = useState(false);
   const [startPlaying, setStartPlaying] = useState(false);
   const [cue, setCue] = useState(initialT ?? 0);
@@ -52,7 +53,15 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
   const [countdown, setCountdown] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  const viewList = view === "all" ? everything : view === "verified" ? listed : everything.filter((c) => typeOf(c.statement_type) === view);
+  const byView = view === "all" ? everything : view === "verified" ? listed : everything.filter((c) => typeOf(c.statement_type) === view);
+  // Subject chips: tags in the current type view, most common first. A chosen tag stays visible even at zero.
+  const topicCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of byView) for (const t of c.topics ?? []) m.set(t, (m.get(t) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [byView]);
+  const allTopicCount = useMemo(() => new Set(ep.claims.flatMap((c) => c.topics ?? [])).size, [ep.claims]);
+  const viewList = topic ? byView.filter((c) => c.topics?.includes(topic)) : byView;
   const current = useMemo(() => {
     let cur: Claim | null = null;
     for (const c of listed) if (c.start_s <= time + 0.5) cur = c;
@@ -222,6 +231,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
   };
 
   // --- Rendering helpers ----------------------------------------------------------------------
+  const pickTopic = (t: string) => setTopic((cur) => (cur === t ? null : t));
   const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const card = (c: Claim) => {
     const isActive = activeId === c.id;
@@ -230,12 +240,12 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
       return (
         <StatementCard key={c.id} claim={c} videoId={ep.youtube_video_id} active={isActive}
           phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"} canWatch={!ep.video_pending}
-          canVerify={!checking} onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
+          canVerify={!checking} activeTopic={topic} onTopic={pickTopic} onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
           onKeepWatching={() => { setClip(null); setCountdown(null); setAutoAll(false); setFollowing(true); setScrollFollow(true); player.current?.play(); }} />
       );
     }
     return (
-      <ClaimCard key={c.id} claim={c} videoId={ep.youtube_video_id} expanded={expanded.has(c.id)} active={isActive}
+      <ClaimCard key={c.id} claim={c} videoId={ep.youtube_video_id} activeTopic={topic} onTopic={pickTopic} expanded={expanded.has(c.id)} active={isActive}
         phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"}
         countdown={isActive && autoAll ? countdown : null} hasNext={!!n} canWatch={!ep.video_pending}
         onToggle={() => toggle(c.id)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
@@ -329,6 +339,16 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView }:
               ))}
               <button className="chip" aria-pressed={view === "verified"} onClick={() => setView("verified")}>Verified {listed.length}</button>
             </div>
+            {allTopicCount > 1 && (
+              <div className="filters topic-filters" role="group" aria-label="Show statements by subject">
+                <button className="chip" aria-pressed={topic === null} onClick={() => setTopic(null)}>All subjects</button>
+                {(topic && !topicCounts.some(([t]) => t === topic) ? [...topicCounts, [topic, 0] as [string, number]] : topicCounts).map(([t, n]) => (
+                  <button key={t} className="chip" aria-pressed={topic === t} onClick={() => setTopic(topic === t ? null : t)}>
+                    {topicLabel(t)} {n}
+                  </button>
+                ))}
+              </div>
+            )}
             {view !== "all" && view !== "verified" && <p className="meta stmt-legend">{STATEMENT_TYPES[view].meaning}{view === "factual_claim" ? " Press Verify on any of them to check it against official sources." : ""}</p>}
             {viewList.some((c) => c.verdict) && !ep.video_pending && (
               <p className="play-all">

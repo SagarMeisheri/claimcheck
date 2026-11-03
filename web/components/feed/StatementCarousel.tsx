@@ -3,15 +3,17 @@
 import Link from "next/link";
 import { useCallback, useState } from "react";
 import type { PreviewClaim, StatementType } from "@/lib/types";
+import { TopicTags } from "@/components/TopicTags";
 import { InlineVerify, type InlineResult } from "./InlineVerify";
 import { STATEMENT_TYPES, TYPE_ORDER, totalStatements, typeOf } from "@/lib/statements";
-import { VERDICTS, clock, domain, scoreLabel } from "@/lib/verdicts";
+import { VERDICTS, clock, domain, scoreLabel, topicLabel } from "@/lib/verdicts";
 
 type Counts = Partial<Record<StatementType, number>>;
 type Tab = "all" | StatementType;
 
-function Card({ videoId, c, videoPending, active, onPlay }: {
-  videoId: string; c: PreviewClaim; videoPending: boolean; active: boolean; onPlay(c: PreviewClaim): void;
+function Card({ videoId, c, videoPending, active, topic, onTopic, onPlay }: {
+  videoId: string; c: PreviewClaim; videoPending: boolean; active: boolean; topic: string | null; onTopic(t: string): void;
+  onPlay(c: PreviewClaim): void;
 }) {
   // A verdict can arrive while the page is open (the Verify button below), so the card keeps its own copy.
   const [result, setResult] = useState<InlineResult | null>(null);
@@ -50,6 +52,7 @@ function Card({ videoId, c, videoPending, active, onPlay }: {
         {v && sourceLine && <span className="ccard-src" style={{ borderColor: v.cssVar }}>{sourceLine}</span>}
         {awaiting && <span className="meta">Verified, with a reviewer</span>}
       </button>
+      <TopicTags topics={c.topics} active={topic} onPick={onTopic} />
       {verifiable && !videoPending ? (
         <div className="ccard-foot">
           <InlineVerify claimId={c.id} status={c.verification_status} onBusy={onBusy} onDone={onDone} />
@@ -90,15 +93,32 @@ export function StatementCarousel({ videoId, statements, verifiedCount, counts, 
   videoPending?: boolean; activeId?: string | null; onPlay(c: PreviewClaim): void;
 }) {
   const [tab, setTab] = useState<Tab>("all");
+  const [topic, setTopic] = useState<string | null>(null);
   const total = totalStatements(counts);
   if (!total && !statements.length) return null;
-  const list = tab === "all" ? statements.slice(0, 14) : statements.filter((c) => typeOf(c.statement_type) === tab);
-  const hidden = (tab === "all" ? total : counts[tab] ?? 0) - list.length;
+  const inTab = tab === "all" ? statements : statements.filter((c) => typeOf(c.statement_type) === tab);
+  const topicCounts = new Map<string, number>();
+  for (const c of inTab) for (const t of c.topics ?? []) topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
+  const chips = [...topicCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  // With a subject chosen, show every match; otherwise the first 14 of "All".
+  const list = topic ? inTab.filter((c) => c.topics?.includes(topic)) : tab === "all" ? inTab.slice(0, 14) : inTab;
+  const hidden = topic ? 0 : (tab === "all" ? total : counts[tab] ?? 0) - list.length;
+  const pick = (t: string) => setTopic((cur) => (cur === t ? null : t));
   return (
     <div className="stmt-carousel">
       <TypeTabs counts={counts} tab={tab} onTab={setTab} verified={verifiedCount} />
+      {chips.length > 1 && (
+        <div className="topic-filters stmt-topics" role="group" aria-label="Filter by subject">
+          {chips.map(([t, n]) => (
+            <button key={t} type="button" className="topic-tag" aria-pressed={topic === t} onClick={() => pick(t)}>
+              {topicLabel(t)} <span className="meta">{n}</span>
+            </button>
+          ))}
+          {topic && <button type="button" className="topic-tag topic-clear" onClick={() => setTopic(null)}>Clear ×</button>}
+        </div>
+      )}
       <div className="carousel" role="list" aria-label="Statements in this video">
-        {list.map((c) => <Card key={c.id} videoId={videoId} c={c} videoPending={videoPending} active={activeId === c.id} onPlay={onPlay} />)}
+        {list.map((c) => <Card key={c.id} videoId={videoId} c={c} videoPending={videoPending} active={activeId === c.id} topic={topic} onTopic={pick} onPlay={onPlay} />)}
         <Link href={`/v/${videoId}`} className="ccard ccard-more" role="listitem">
           {hidden > 0 ? `See ${hidden} more` : "Open the video page"}
         </Link>

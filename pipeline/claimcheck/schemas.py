@@ -48,7 +48,8 @@ class ExtractedClaim(BaseModel):
     claim: str = Field(description="The statement, self-contained, speaker's numbers kept exactly")
     context_quote: str = Field(description="The words actually spoken, verbatim, up to ~40 words")
     pestle_area: PestleArea
-    topic: str = Field(description="snake_case topic, e.g. gdp, welfare_schemes, nutrition")
+    topic: str = Field(description="First subject tag (kept for the policy checks); same as topics[0]")
+    topics: list[str] = Field(default_factory=list, description="1-2 free-form subject tags")
     statement_type: Optional[StatementType] = Field(
         default=None, description="factual_claim, opinion, forecast, analogy, loaded_language, hearsay or other")
     tag_note: str = Field(default="", description="Up to 15 words on why it has this tag; empty for plain factual claims")
@@ -58,6 +59,8 @@ class ExtractedClaim(BaseModel):
 
     @model_validator(mode="after")
     def _fill_types(self) -> "ExtractedClaim":
+        if not self.topics and self.topic:
+            self.topics = [self.topic]
         if self.statement_type is None:
             self.statement_type = _FROM_LEGACY.get(self.claim_type or "fact", "other")  # type: ignore[assignment]
         if self.claim_type is None or (self.claim_type == "fact") != (self.statement_type == "factual_claim"):
@@ -81,7 +84,7 @@ class ExtractedStatement(BaseModel):
         description="Required tag: factual_claim, opinion, forecast, analogy, loaded_language, hearsay or other")
     tag_note: str = Field(default="", description="Up to 15 words on why it has this tag; empty for plain factual claims")
     pestle_area: PestleArea
-    topic: str = Field(description="snake_case topic, e.g. gdp, welfare_schemes, nutrition")
+    topics: list[str] = Field(description="1-2 short subject names (plain words) saying what the statement is about, most relevant first")
     policy_tier: PolicyTier
     refers_to_visual: bool = False
 

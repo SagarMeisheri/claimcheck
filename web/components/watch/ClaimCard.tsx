@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FeedbackForm } from "@/components/FeedbackForm";
+import { TopicTags } from "@/components/TopicTags";
 import type { Citation, Claim } from "@/lib/types";
 import { STATEMENT_TYPES, canRequestVerify, typeOf } from "@/lib/statements";
 import { TIER_LABEL, VERDICTS, clock, domain, scoreLabel, ytLink } from "@/lib/verdicts";
@@ -38,9 +39,10 @@ export function TypeTag({ type }: { type: string }) {
  * A tagged statement without a public verdict: an opinion, forecast, hearsay and so on, or a factual
  * claim nobody has verified yet (with a Verify button).
  */
-export function StatementCard({ claim: c, videoId, active, phase, canWatch, canVerify = true, onSeek, onWatch, onKeepWatching }: {
+export function StatementCard({ claim: c, videoId, active, phase, canWatch, canVerify = true, activeTopic, onTopic, onSeek, onWatch, onKeepWatching }: {
   claim: Claim; videoId: string; active: boolean; phase: CardPhase; canWatch: boolean;
   canVerify?: boolean; // false while the video is still being analysed
+  activeTopic?: string | null; onTopic(t: string): void;
   onSeek(): void; onWatch(): void; onKeepWatching(): void;
 }) {
   const hidden = c.not_checked_reason === "outside_policy"; // text and moment stay unpublished
@@ -58,6 +60,7 @@ export function StatementCard({ claim: c, videoId, active, phase, canWatch, canV
       </div>
       <p className="cc-claim">{hidden ? "A statement outside our content policy" : `“${c.claim_text}”`}</p>
       {!hidden && c.tag_note && <p className="meta stmt-note">{c.tag_note}</p>}
+      {!hidden && <TopicTags topics={c.topics} active={activeTopic} onPick={onTopic} />}
       {verifiable && canVerify && (canRequestVerify(c) || c.verification_status === "queued" || c.verification_status === "verifying"
         || c.verification_status === "awaiting_review")
         && <VerifyButton claimId={c.id} status={c.verification_status} error={c.verify_error} />}
@@ -96,8 +99,9 @@ function SourceFull({ s, color }: { s: Citation; color: string }) {
  * A verified claim (or one awaiting review) with its evidence visible up front. "Watch 20 s" plays the moment; after the clip the card
  * offers Keep watching or Next claim. "More" expands in place: what was said, why, all sources, actions.
  */
-export function ClaimCard({ claim: c, videoId, expanded, active, phase, countdown, hasNext, canWatch, onToggle, onWatch, onKeepWatching, onNext, onSeek, onShare, onCopySource }: {
+export function ClaimCard({ claim: c, videoId, expanded, active, phase, countdown, hasNext, canWatch, activeTopic, onTopic, onToggle, onWatch, onKeepWatching, onNext, onSeek, onShare, onCopySource }: {
   claim: Claim; videoId: string; expanded: boolean; active: boolean; phase: CardPhase; countdown: number | null; hasNext: boolean; canWatch: boolean;
+  activeTopic?: string | null; onTopic(t: string): void;
   onToggle(): void; onWatch(): void; onKeepWatching(): void; onNext(): void; onSeek(): void; onShare(): void; onCopySource(): void;
 }) {
   const v = c.verdict;
@@ -122,6 +126,7 @@ export function ClaimCard({ claim: c, videoId, expanded, active, phase, countdow
          : <p className="cc-verdict"><span className="pending-word">With a reviewer</span></p>}
 
       <p className="cc-claim">“{c.claim_text}”</p>
+      <TopicTags topics={c.topics} active={activeTopic} onPick={onTopic} />
       {v?.verdict === "false" && v.correction && <p className="cc-correction"><strong>Correction: </strong>{v.correction}</p>}
 
       {!expanded && visibleSources.length > 0 && (

@@ -62,7 +62,10 @@ For every statement:
 - context_quote: the words actually spoken (verbatim, Hindi or English as spoken, up to ~40 words).
 - start_ts: when it starts (MM:SS or HH:MM:SS).
 - speaker: name if stated, otherwise role (Host, Guest, Minister, Panellist 2).
-- pestle_area and a snake_case topic (gdp, unemployment, welfare_schemes, elections, crime, nutrition, ...).
+- pestle_area, and topics: 1-2 short subject names (1-3 plain words) saying what the statement is actually about,
+  most relevant first: "middle class", "maritime trade", "roman coins", "income tax", "US dollar".
+  Be specific, not generic ("jobs" is fine, "economy" is too broad). Use the same wording whenever statements
+  in this video are about the same subject, so viewers can filter by it. Never tag who said it.
 - tag_note: for non-factual types, up to 15 neutral words on why it got this tag (e.g. "compares AI capex
   to the 1990s telecom bubble"). Describe the statement, never the speaker's motives or honesty. Empty for
   plain factual claims.

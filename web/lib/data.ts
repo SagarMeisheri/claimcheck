@@ -30,7 +30,7 @@ function toPreview(c: Claim): PreviewClaim {
   return {
     id: c.id, start_s: c.start_s, claim_text: c.claim_text, speaker: c.speaker, verdict: c.verdict?.verdict ?? null,
     not_checked_reason: c.not_checked_reason, awaiting_review: c.awaiting_review,
-    source_line: s ? `${s.title ?? "Source"}: ${s.quote}` : null, pestle_area: c.pestle_area, topic: c.topic,
+    source_line: s ? `${s.title ?? "Source"}: ${s.quote}` : null, pestle_area: c.pestle_area, topic: c.topic, topics: c.topics,
     statement_type: c.statement_type, verification_status: c.verification_status,
   };
 }
@@ -92,7 +92,7 @@ type EpisodeRow = {
 };
 
 const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, tally, not_checked, statement_counts, summary, created_at, channel_id, channels(name, track, avatar_url)";
-const CLAIM_COLS = "id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, claim_type, statement_type, tag_note, verification_status, verify_error, policy_tier, checkworthiness, not_checked_reason, verdict_id, episode_id, verdicts(id, verdict, confidence, reasoning, score, correction, evidence_grade, review_status, escalated, citations(url, title, tier, quote))";
+const CLAIM_COLS = "id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, topics, claim_type, statement_type, tag_note, verification_status, verify_error, policy_tier, checkworthiness, not_checked_reason, verdict_id, episode_id, verdicts(id, verdict, confidence, reasoning, score, correction, evidence_grade, review_status, escalated, citations(url, title, tier, quote))";
 
 function toEpisode(r: EpisodeRow): Episode {
   return {
@@ -108,6 +108,7 @@ function toEpisode(r: EpisodeRow): Episode {
 function toClaim(c: any): Claim {
   return {
     ...c,
+    topics: (c.topics?.length ? c.topics : c.topic ? [c.topic] : []) as string[],
     // RLS hides verdicts awaiting review: the claim has a verdict_id but the join comes back empty.
     verdict: (c.verdicts as Verdict | null) ?? null,
     awaiting_review: Boolean(c.verdict_id && !c.verdicts) || c.verification_status === "awaiting_review",
@@ -135,7 +136,7 @@ export async function getFeed(limit = 40): Promise<Episode[]> {
   }
   // The other statements (no verdict yet), without verdict joins, so the carousel can show every type.
   const { data: rest } = await db.from("claims")
-    .select("id, idx, start_s, speaker, claim_text, pestle_area, topic, statement_type, verification_status, policy_tier, not_checked_reason, verdict_id, episode_id")
+    .select("id, idx, start_s, speaker, claim_text, pestle_area, topic, topics, statement_type, verification_status, policy_tier, not_checked_reason, verdict_id, episode_id")
     .in("episode_id", eps.map((e) => e.id)).is("verdict_id", null).order("start_s").limit(3000);
   const restByEp = new Map<string, Claim[]>();
   for (const c of (rest ?? []).map(toClaim)) {

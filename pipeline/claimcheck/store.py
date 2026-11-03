@@ -108,7 +108,7 @@ class SupabaseStore:
             "episode_id": episode_id, "idx": rec.index, "start_s": rec.start_s, "speaker": c.speaker,
             "claim_text": "[Not shown: outside the content policy]" if hidden else c.claim,
             "context_quote": None if hidden else c.context_quote, "pestle_area": c.pestle_area,
-            "topic": c.topic, "claim_type": c.claim_type, "policy_tier": rec.effective_tier,
+            "topic": c.topic, "topics": [] if hidden else c.topics, "claim_type": c.claim_type, "policy_tier": rec.effective_tier,
             "checkworthiness": rec.checkworthiness, "not_checked_reason": rec.not_checked_reason,
             "refers_to_visual": c.refers_to_visual, "embedding": embedding,
             "verdict_id": verdict_id, "statement_type": c.statement_type,

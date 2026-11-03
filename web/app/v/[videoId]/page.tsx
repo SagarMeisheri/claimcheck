@@ -8,7 +8,7 @@ export const revalidate = 30;
 
 type Props = {
   params: Promise<{ videoId: string }>;
-  searchParams: Promise<{ t?: string; play?: string; moment?: string; view?: string }>;
+  searchParams: Promise<{ t?: string; play?: string; moment?: string; view?: string; topic?: string }>;
 };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -32,6 +32,7 @@ export default async function WatchPage({ params, searchParams }: Props) {
       autoplay={sp.play === "1"}
       momentId={sp.moment ?? null}
       initialView={parseView(sp.view)}
+      initialTopic={sp.topic ?? null}
     />
   );
 }

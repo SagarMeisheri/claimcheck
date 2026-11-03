@@ -330,6 +330,15 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .stmt-card.is-active { box-shadow: inset 4px 0 0 var(--focus); }
 .stmt-note { margin: 0.15rem 0 0; font-style: italic; }
 .stmt-filters { margin-bottom: 0.4rem; flex-wrap: wrap; }
+.topic-filters { margin-bottom: 0.5rem; flex-wrap: wrap; }
+.topic-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; padding: 0 0.75rem 0.45rem; }
+.claim-card .topic-tags { padding: 0; margin: 0.35rem 0 0; }
+.topic-tag { font: inherit; font-size: 0.78rem; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid var(--rule); background: transparent; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
+.topic-tag:hover { border-color: var(--ink); color: var(--ink); }
+.topic-tag[aria-pressed="true"] { background: var(--ink); color: var(--paper-raised); border-color: var(--ink); }
+.stmt-topics { display: flex; gap: 0.35rem; overflow-x: auto; padding: 0.35rem 0 0; flex-wrap: nowrap; }
+.topic-clear { border-style: dashed; }
+.topic-filters .chip { font-size: 0.8rem; opacity: 0.9; }
 .chip-type { border-color: var(--stype); }
 .chip-type[aria-pressed="true"] { background: var(--stype); border-color: var(--stype); color: var(--paper); }
 .stmt-legend { margin: 0 0 0.5rem; }
