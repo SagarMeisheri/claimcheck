@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState } from "react";
-import type { PreviewClaim, StatementType } from "@/lib/types";
+import { useCallback, useEffect, useState } from "react";
+import type { PreviewClaim, StatementType, VerdictName } from "@/lib/types";
 import { TopicTags } from "@/components/TopicTags";
 import { InlineVerify, type InlineResult } from "./InlineVerify";
 import { STATEMENT_TYPES, TYPE_ORDER, totalStatements, typeOf } from "@/lib/statements";
@@ -100,16 +100,18 @@ function pageList(page: number, pages: number): (number | "gap")[] {
 }
 
 /** Row under a video: tabs by statement type, subject chips, then that selection's statements, a page at a time. */
-export function StatementCarousel({ videoId, statements, verifiedCount, counts, videoPending = false, activeId = null, onPlay }: {
-  videoId: string; statements: PreviewClaim[]; verifiedCount: number; counts: Counts;
+export function StatementCarousel({ videoId, statements, verifiedCount, counts, verdictFilter = null, videoPending = false, activeId = null, onPlay }: {
+  videoId: string; statements: PreviewClaim[]; verifiedCount: number; counts: Counts; verdictFilter?: VerdictName | null;
   videoPending?: boolean; activeId?: string | null; onPlay(c: PreviewClaim): void;
 }) {
   const [tab, setTab] = useState<Tab>("all");
   const [topic, setTopic] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [verdictFilter]);
   const total = totalStatements(counts);
   if (!total && !statements.length) return null;
-  const inTab = tab === "all" ? statements : statements.filter((c) => typeOf(c.statement_type) === tab);
+  const byVerdict = verdictFilter ? statements.filter((c) => c.verdict === verdictFilter) : statements;
+  const inTab = tab === "all" ? byVerdict : byVerdict.filter((c) => typeOf(c.statement_type) === tab);
   const topicCounts = new Map<string, number>();
   for (const c of inTab) for (const t of c.topics ?? []) topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
   const chips = [...topicCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));

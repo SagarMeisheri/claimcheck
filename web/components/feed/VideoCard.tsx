@@ -5,9 +5,10 @@ import { useRef, useState } from "react";
 import { Avatar, Thumb } from "@/components/Thumb";
 import { CheckProgress } from "@/components/CheckProgress";
 import { VerifyAllButton } from "@/components/VerifyAllButton";
+import { VerdictFilter } from "@/components/VerdictFilter";
 import { VerdictStrip } from "@/components/MiniBar";
 import { YouTubePlayer, type PlayerHandle } from "@/components/watch/YouTubePlayer";
-import type { Episode, PreviewClaim } from "@/lib/types";
+import type { Episode, PreviewClaim, VerdictName } from "@/lib/types";
 import { canRequestVerify, totalStatements } from "@/lib/statements";
 import { clock, timeAgo } from "@/lib/verdicts";
 import { StatementCarousel } from "./StatementCarousel";
@@ -30,6 +31,7 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
   const [start, setStart] = useState(0);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [verdictFilter, setVerdictFilter] = useState<VerdictName | null>(null);
 
   const play = (seconds: number, claimId: string | null) => {
     if (ep.video_pending) return;
@@ -90,6 +92,7 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
         <VerifyAllButton videoId={ep.youtube_video_id} running={ep.auto_verify === "running"} compact
                          eligible={(ep.preview_claims ?? []).some((c) => canRequestVerify(c))} />
       )}
+      {!checking && <VerdictFilter counts={ep.tally} active={verdictFilter} onPick={setVerdictFilter} />}
       <p className="vcard-summary">
         {checking
           ? <Link href="/review#videos">Stop or remove</Link>
@@ -102,7 +105,7 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
       </p>
       {(!checking || (ep.preview_claims?.length ?? 0) > 0) && (
         <StatementCarousel videoId={ep.youtube_video_id} statements={ep.preview_claims ?? []} verifiedCount={checked}
-                           counts={ep.statement_counts ?? {}} videoPending={ep.video_pending}
+                           counts={ep.statement_counts ?? {}} verdictFilter={verdictFilter} videoPending={ep.video_pending}
                            activeId={activeId} onPlay={(c: PreviewClaim) => play(c.start_s, c.id)} />
       )}
     </article>

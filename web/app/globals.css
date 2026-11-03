@@ -444,3 +444,13 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .ring-spin { animation: ring-turn 0.9s linear infinite; }
 @keyframes ring-turn { to { transform: rotate(270deg); } }
 @media (prefers-reduced-motion: reduce) { .ring-spin { animation-duration: 3s; } }
+
+/* Verification-result filter chips, shown under the Verify all claims button */
+.vfilter { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.4rem 0 0; }
+.vchip { display: inline-flex; align-items: center; gap: 0.35rem; font: inherit; font-size: 0.78rem; padding: 0.1rem 0.55rem; border-radius: 999px; cursor: pointer; color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--vc, var(--rule)) 55%, transparent); background: color-mix(in srgb, var(--vc, var(--rule)) 11%, transparent); }
+.vchip:hover { background: color-mix(in srgb, var(--vc, var(--rule)) 22%, transparent); }
+.vchip-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--vc); }
+.vchip[aria-pressed="true"] { background: var(--vc); border-color: var(--vc); color: #fff; }
+.vchip[aria-pressed="true"] .vchip-dot { background: #fff; }
+.vchip-clear { --vc: var(--rule); border-style: dashed; background: transparent; color: var(--ink-soft); }

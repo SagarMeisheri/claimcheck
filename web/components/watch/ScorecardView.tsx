@@ -10,6 +10,7 @@ import { CORE_TYPES, STATEMENT_TYPES, TYPE_ORDER, VERIFYING, breakdownParts, can
 import { VERDICTS, clock, topicHue, topicLabel } from "@/lib/verdicts";
 import { CheckProgress } from "@/components/CheckProgress";
 import { VerifyAllButton } from "@/components/VerifyAllButton";
+import { VerdictFilter } from "@/components/VerdictFilter";
 import { ClaimCard, StatementCard, type CardPhase } from "./ClaimCard";
 import { ClaimTrack } from "./ClaimTrack";
 import { YouTubePlayer, type PlayerHandle } from "./YouTubePlayer";
@@ -40,6 +41,12 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
 
   const [view, setView] = useState<View>(initialView ?? "all");
   const [topic, setTopic] = useState<string | null>(initialTopic ?? null);
+  const [verdictFilter, setVerdictFilter] = useState<VerdictName | null>(null);
+  const verdictCounts = useMemo(() => {
+    const m: Partial<Record<VerdictName, number>> = {};
+    for (const c of ep.claims) if (c.verdict) m[c.verdict.verdict] = (m[c.verdict.verdict] ?? 0) + 1;
+    return m;
+  }, [ep.claims]);
   const [playerOn, setPlayerOn] = useState(false);
   const [startPlaying, setStartPlaying] = useState(false);
   const [cue, setCue] = useState(initialT ?? 0);
@@ -54,7 +61,8 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const [countdown, setCountdown] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  const byView = view === "all" ? everything : view === "verified" ? listed : everything.filter((c) => typeOf(c.statement_type) === view);
+  const typed = view === "all" ? everything : view === "verified" ? listed : everything.filter((c) => typeOf(c.statement_type) === view);
+  const byView = verdictFilter ? typed.filter((c) => c.verdict?.verdict === verdictFilter) : typed;
   // Subject chips: tags in the current type view, most common first. A chosen tag stays visible even at zero.
   const topicCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -316,6 +324,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           <VerifyAllButton videoId={ep.youtube_video_id} running={ep.auto_verify === "running"}
                            eligible={ep.claims.some((c) => canRequestVerify(c))} />
         )}
+        {!checking && <VerdictFilter counts={verdictCounts} active={verdictFilter} onPick={setVerdictFilter} />}
 
         {ep.claims.length > 0 && (
           <section className="score-summary" aria-label="Summary">

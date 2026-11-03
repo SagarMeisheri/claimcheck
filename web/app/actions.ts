@@ -163,7 +163,7 @@ export async function requestVerification(claimId: string): Promise<VerifyResult
 
 // "Verify all claims": one press runs the whole-video verifier. Limited per person and for the site (the pipeline
 // adds its own claim, search and cost caps). Rows go into verify_requests with ":all" on the requester, so they are
-// counted apart from single-claim Verify presses.
+// counted apart from single-claim Verify presses. Set a limit to 0 to turn it off (e.g. in .env.local).
 const VERIFY_ALL_PER_PERSON_PER_DAY = Number(process.env.VERIFY_ALL_PER_PERSON_PER_DAY ?? 3);
 const VERIFY_ALL_SITE_PER_HOUR = Number(process.env.VERIFY_ALL_SITE_PER_HOUR ?? 20);
 
@@ -186,8 +186,8 @@ export async function requestVerifyAll(videoId: string): Promise<{ ok: boolean; 
     db.from("verify_requests").select("id", { count: "exact", head: true }).eq("requester", who).eq("outcome", "queued").gte("created_at", dayAgo),
     db.from("verify_requests").select("id", { count: "exact", head: true }).like("requester", "%:all").eq("outcome", "queued").gte("created_at", hourAgo),
   ]);
-  if ((mine ?? 0) >= VERIFY_ALL_PER_PERSON_PER_DAY) return { ok: false, message: `You've used "Verify all claims" ${VERIFY_ALL_PER_PERSON_PER_DAY} times today, the daily limit. Try again tomorrow.` };
-  if ((site ?? 0) >= VERIFY_ALL_SITE_PER_HOUR) return { ok: false, message: "Lots of people are verifying videos right now. Try again in a few minutes." };
+  if (VERIFY_ALL_PER_PERSON_PER_DAY > 0 && (mine ?? 0) >= VERIFY_ALL_PER_PERSON_PER_DAY) return { ok: false, message: `You've used "Verify all claims" ${VERIFY_ALL_PER_PERSON_PER_DAY} times today, the daily limit. Try again tomorrow.` };
+  if (VERIFY_ALL_SITE_PER_HOUR > 0 && (site ?? 0) >= VERIFY_ALL_SITE_PER_HOUR) return { ok: false, message: "Lots of people are verifying videos right now. Try again in a few minutes." };
 
   const { data: reqRow } = await db.from("verify_requests")
     .insert({ claim_id: eligible[0].id, episode_id: ep.id, requester: who, outcome: "queued" }).select("id").single();
