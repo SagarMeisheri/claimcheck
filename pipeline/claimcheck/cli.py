@@ -3,6 +3,7 @@
   python -m claimcheck.cli https://www.youtube.com/watch?v=VIDEO_ID
   python -m claimcheck.cli --sources CLAIM_ID            # look up sources for one stored claim
   python -m claimcheck.cli --sources-all EPISODE_ID      # look up sources for every claim of a video
+  python -m claimcheck.cli --summarize-missing           # sources summary for claims looked up before summaries
 
 Needs the keys and Supabase settings from pipeline/.env (see .env.example).
 """
@@ -21,6 +22,8 @@ def main() -> None:
     ap.add_argument("url", nargs="?")
     ap.add_argument("--sources", metavar="CLAIM_ID", help="look up sources for one stored claim")
     ap.add_argument("--sources-all", metavar="EPISODE_ID", help="look up sources for every claim of a video")
+    ap.add_argument("--summarize-missing", action="store_true",
+                    help="write the sources summary for claims whose sources were saved without one (no new search)")
     ap.add_argument("--json", action="store_true", help="print the full result as JSON")
     args = ap.parse_args()
     warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -42,6 +45,11 @@ def main() -> None:
             return
         asyncio.run(store.start_claim_sources(args.sources))
         print(json.dumps(asyncio.run(run_claim_sources(args.sources, settings=settings, store=store)), indent=2))
+        return
+    if args.summarize_missing:
+        from .agents.sources import summarize_missing
+
+        print(json.dumps(asyncio.run(summarize_missing(settings=settings, store=store)), indent=2))
         return
     if args.sources_all:
         from .agents.sources import run_video_sources

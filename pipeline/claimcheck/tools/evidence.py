@@ -77,7 +77,6 @@ def to_sources(results: list[Any], policy: dict[str, Any], limit: int, excerpt_c
         excerpts = [e for e in (getattr(r, "excerpts", None) or []) if e and e.strip()]
         out.append(Source(url=url, title=(getattr(r, "title", None) or "").strip()[:300],
                           excerpt=best_excerpt(excerpts, claim_text, excerpt_chars),
-                          page_text=" … ".join(clean_excerpt(e, 100_000) for e in excerpts)[:2500],
                           publish_date=getattr(r, "publish_date", None), tier=source_tier(url, policy), rank=len(out)))
         if len(out) >= limit:
             break

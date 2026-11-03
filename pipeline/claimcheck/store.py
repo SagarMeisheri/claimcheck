@@ -47,6 +47,8 @@ class Store(Protocol):
     async def start_claim_sources(self, claim_id: str) -> bool: ...
     async def set_sources_status(self, claim_id: str, status: str, error: Optional[str] = None) -> None: ...
     async def save_claim_sources(self, claim_id: str, sources: list[Source], summary: str = "") -> None: ...
+    async def list_claims_missing_summary(self, limit: int) -> list[dict[str, Any]]: ...
+    async def save_sources_summary(self, claim_id: str, summary: str) -> None: ...
     async def add_episode_cost(self, episode_id: str, usd: float, tokens_in: int, tokens_out: int) -> None: ...
     # YouTube API data upkeep
     async def list_stale_episodes(self, days: int, limit: int = 500) -> list[dict[str, Any]]: ...
@@ -148,6 +150,17 @@ class SupabaseStore:
             self.db.table("claim_sources").insert([{**s.model_dump(), "claim_id": claim_id} for s in sources]).execute()
         self.db.table("claims").update({"sources_status": "done", "sources_error": None, "sources_summary": summary or None,
                                         "sources_checked_at": _now()}).eq("id", claim_id).execute()
+
+    async def list_claims_missing_summary(self, limit):
+        """Claims whose sources were saved before summaries existed, with those sources in search order."""
+        r = (self.db.table("claims")
+             .select("id, episode_id, claim_text, episodes(youtube_video_id, cost_usd), "
+                     "claim_sources(url, title, tier, excerpt, publish_date, rank)")
+             .eq("sources_status", "done").is_("sources_summary", "null").order("created_at").limit(limit).execute())
+        return [c for c in (r.data or []) if c.get("claim_sources")]
+
+    async def save_sources_summary(self, claim_id, summary):
+        self.db.table("claims").update({"sources_summary": summary or None}).eq("id", claim_id).execute()
 
     async def add_episode_cost(self, episode_id, usd, tokens_in, tokens_out):
         row = self.db.table("episodes").select("cost_usd, tokens_in, tokens_out").eq("id", episode_id).limit(1).execute().data

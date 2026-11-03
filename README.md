@@ -4,7 +4,7 @@ Paste a YouTube link (any public, finished video) and ClaimCheck breaks it into 
 every statement with its timestamp, tagged as a **claim, opinion, forecast or other**, filterable by type and
 subject, playable 20 s at a time. For a claim, a viewer can press **Check sources**: one web search on the claim's
 wording, showing the top 5 results as the search returned them (title, link, site, date and the relevant passage),
-with a 1-2 sentence AI summary of what those pages say, citing them as [1], [2].
+with a 1-2 sentence AI summary of those excerpts ("Sources summary").
 
 **ClaimCheck is not a fact-checker.** Nothing is judged true or false, there are no scores, and sources are search
 results shown for context only; their summary describes what the pages say and never whether a claim is right. Earlier versions published verdicts; that was removed (see `REPORT-adoption-and-legal.md` for why), and
@@ -31,6 +31,7 @@ pytest                                     # all tests run offline, no keys need
 python -m claimcheck.cli "https://www.youtube.com/watch?v=VIDEO_ID"
 python -m claimcheck.cli --sources CLAIM_ID        # look up sources for one claim, as the button does
 python -m claimcheck.cli --sources-all EPISODE_ID  # "Check sources for all claims"
+python -m claimcheck.cli --summarize-missing       # sources summary for claims looked up before summaries existed
 uvicorn claimcheck.server:app --port 8080  # the service the web app calls
 
 cd ../web
@@ -73,10 +74,10 @@ Sources (agents/sources.py, tools/evidence.py): nothing filtered after the searc
                   the request. Top 5 results kept in Parallel's order: title, link, date, site label (official /
                   news or research / none) and the passage of the page text that shares the most words and numbers
                   with the claim. ~$0.005, about a second
-    summarize     ADK LlmAgent on Gemini 3.5 Flash-Lite: 1-2 sentences (<= 45 words) on what the pages together say,
-                  with their own figures and dates, citing them as [1], [2]. Describes, never judges: a summary with
-                  judging words (confirms, contradicts, true, false, ...) is dropped in code, as are citations to
-                  sources that don't exist. If it fails, the sources are saved without it. ~$0.0007
+    summarize     ADK LlmAgent on Gemini 3.5 Flash-Lite: 1-2 plain sentences (<= 45 words) summarising the excerpts
+                  shown under the sources, and only those (so a reader can check it), with their figures and dates.
+                  Describes, never judges: a summary with judging words (confirms, contradicts, true, false, ...) is
+                  dropped in code. If it fails, the sources are saved without it. ~$0.0005
     save          on the claim for everyone (claim_sources rows + claims.sources_summary), or "no sources found"
   Every claim of a video                                      POST /episodes/{id}/sources-all
     the same search and summary for each claim without sources, 5 at a time, each saved as it lands. Up to 25 searches per
@@ -103,7 +104,7 @@ Each claim has a `sources_status`: `not_eligible` (not a claim, or redacted), `n
 | YouTube data | Refreshed every 25 days by the daily maintenance cron (YouTube allows 30); videos no longer public are marked `removed` and hidden; no channel avatars stored |
 | Privacy | Salted IP hashes only, for rate limits; deleted after 30 days by the maintenance cron |
 
-All of these are covered by tests in `pipeline/tests/` (49 tests, offline).
+All of these are covered by tests in `pipeline/tests/` (50 tests, offline).
 
 ## Going live
 

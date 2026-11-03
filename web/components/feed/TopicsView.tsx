@@ -32,7 +32,7 @@ export function TopicsView({ episodes }: { episodes: Episode[] }) {
                 <Link href={`/v/${r.videoId}#claim-${r.id}`}>
                   <span className="topic-claim">{r.claim_text}</span>
                   <span className="meta">{r.channel} at {clock(r.start_s)}</span>
-                  {r.sources.length > 0 && <span className="topic-src"><span className="src-tag">✓ {r.sources.length} {r.sources.length === 1 ? "source" : "sources"}</span> <span className="meta">{domain(r.sources[0].url)}{r.sources.length > 1 ? ` and ${r.sources.length - 1} more` : ""}</span></span>}
+                  {r.sources.length > 0 && <span className="meta topic-src">Sources: {domain(r.sources[0].url)}{r.sources.length > 1 ? ` and ${r.sources.length - 1} more` : ""}</span>}
                 </Link>
               </li>
             ))}

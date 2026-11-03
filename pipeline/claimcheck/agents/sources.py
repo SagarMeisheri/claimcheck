@@ -4,9 +4,9 @@ One claim ("Check sources")                                  POST /claims/{id}/s
   precheck (code)  a factual claim, not redacted, not already done, video under its cost cap
   search           tools/evidence.search_sources: the claim's own words -> up to 5 results with title, link, date
                    and the passage of the page text that best matches the claim
-  summarize (ADK)  one cheap model call writes 1-2 sentences on what the sources together say about the subject, with
-                   their own figures and dates, citing them as [1], [2]. Checked in code: citations to sources that
-                   don't exist are removed, and a summary using judging words (confirms, contradicts, true, false, ...)
+  summarize (ADK)  one cheap model call summarises the excerpts shown under the sources (and nothing else, so a reader
+                   can check every sentence against them) in 1-2 plain sentences, with their own figures and dates.
+                   Checked in code: a summary using judging words (confirms, contradicts, true, false, ...)
                    is dropped. If this step fails or the budget runs out, the sources are saved without a summary
   save             on the claim, for everyone (an empty result is saved too: "No sources found")
 
@@ -95,9 +95,9 @@ def precheck(row: Optional[dict[str, Any]], settings: Settings) -> tuple[bool, s
 
 # --- Summaries ------------------------------------------------------------------------------------
 
-def acceptable_summary(text: str, n_sources: int) -> str:
-    """The summary with citations to sources that don't exist removed; "" if it grades the statement or is empty."""
-    t = re.sub(r"\[(\d+)\]", lambda m: m.group(0) if 1 <= int(m.group(1)) <= n_sources else "", text or "")
+def acceptable_summary(text: str) -> str:
+    """The summary, tidied; "" if it grades the statement or is empty."""
+    t = re.sub(r"\s*\[\d+\]", "", text or "")  # no reference numbers: the summary is plain text
     t = re.sub(r"\s+([.,;:])", r"\1", re.sub(r"\s+", " ", t)).strip()
     if not t or _JUDGING.search(t):
         return ""
@@ -105,14 +105,17 @@ def acceptable_summary(text: str, n_sources: int) -> str:
 
 
 async def summarize(claim_text: str, sources: list[Source]) -> str:
-    """What the sources say, in 1-2 sentences citing them as [n] (ADK step, cheap model). Never raises; "" on failure."""
+    """A plain 1-2 sentence summary of the sources' excerpts (ADK step, Flash-Lite). Never raises; "" on failure."""
     ec = get_context()
     if not sources or not ec.settings.summarize_sources:
         return ""
     from .llm_agents import summarizer_agent
 
-    pages = [{"n": i + 1, "title": s.title, "site": domain_of(s.url), "text": s.page_text or s.excerpt}
-             for i, s in enumerate(sources)]
+    # Only the excerpts the reader sees, so every sentence of the summary can be checked against them.
+    pages = [{"n": i + 1, "title": s.title, "site": domain_of(s.url), "text": s.excerpt}
+             for i, s in enumerate(sources) if s.excerpt]
+    if not pages:
+        return ""
     try:
         runner = InMemoryRunner(agent=summarizer_agent(ec.settings, name=f"source_summarizer_{uuid.uuid4().hex[:6]}"),
                                 app_name=APP, plugins=ec.plugins_factory())
@@ -128,7 +131,7 @@ async def summarize(claim_text: str, sources: list[Source]) -> str:
         reason = "budget" if is_budget_error(e) else f"{type(e).__name__}: {e}"
         ec.log("sources", "summary_failed", "skipped", reason[:200])
         return ""
-    summary = acceptable_summary(text, len(sources))
+    summary = acceptable_summary(text)
     if text.strip() and not summary:
         ec.log("sources", "summary_judging_words", "skipped", text[:200])
     return summary
@@ -269,3 +272,34 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any) 
                 pass
         return {"status": "done", "searched": searched, "claims": len(todo), "remaining": len(claims) - len(todo),
                 "cost_usd": round(spent, 4)}
+
+
+# --- One-off: summaries for sources saved before summaries existed --------------------------------------
+
+async def summarize_missing(*, settings: Settings, store: Any, limit: int = 200) -> dict[str, Any]:
+    """Writes the sources summary for claims that have sources but none yet, from their stored excerpts (no new
+    search). Charged to each video's budget; a video over its cap is skipped."""
+    done = skipped = 0
+    cost = 0.0
+    for row in await store.list_claims_missing_summary(limit):
+        episode_id = row["episode_id"]
+        async with lock_for(episode_id):
+            ep = row.get("episodes") or {}
+            ec = _context(episode_id, ep, settings, store)
+            if ec.budget.spent_usd >= ec.budget.cap_usd:
+                skipped += 1
+                continue
+            start = ec.budget.spent_usd
+            token = set_context(ec)
+            try:
+                found = [Source(**s) for s in sorted(row["claim_sources"], key=lambda s: s.get("rank") or 0)]
+                summary = await summarize(row["claim_text"], found)
+                await store.save_sources_summary(row["id"], summary)
+                done += bool(summary)
+            finally:
+                spent = round(ec.budget.spent_usd - start, 6)
+                cost += spent
+                await store.add_episode_cost(episode_id, spent, ec.budget.tokens_in, ec.budget.tokens_out)
+                await store.save_guardrail_events(episode_id, ec.events)
+                token.var.reset(token)
+    return {"summarised": done, "skipped_over_budget": skipped, "cost_usd": round(cost, 4)}

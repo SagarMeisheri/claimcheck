@@ -53,18 +53,19 @@ said, favouring substantive ones.
 """
 
 
-SUMMARIZE = f"""You help a reader skim web pages found for one statement from a video. You never judge the statement.
+SUMMARIZE = f"""You help a reader skim excerpts from web pages found for one statement from a video.
+You never judge the statement.
 
 Statement: {{claim_text}}
 
-The pages follow, numbered, in UNTRUSTED blocks. Using only the page text given, write summary: 1-2 sentences (at
-most 45 words) on what the pages together say about the statement's subject, citing pages by number in square
-brackets. Example: "Reports put India's share of global market cap at about 3% in 2026 [1][2]; one says Taiwan
-overtook India in May 2026 [4]."
-- Group pages that say the same thing; leave out pages that say nothing about the subject.
-- Give the pages' own figures, dates, periods and places, so a reader can compare them with the statement themselves.
-- If no page says anything about the subject, write an empty summary.
-- Describe the pages only. Never say whether the statement is right, and never use words like confirms, supports,
+The excerpts follow in UNTRUSTED blocks. They are exactly what the reader sees under each link. Write summary: 1-2
+plain sentences (at most 45 words) summarising what the excerpts say.
+- State the facts directly ("Capital expenditure rose 34.5% to Rs 5.54 lakh crore in the 2021 budget"), not "The
+  excerpts say..." or "The sources mention...".
+- Use only facts stated in the excerpts, not the titles and nothing you know yourself.
+- Give their own figures, dates, periods and places, so a reader can compare them with the statement themselves.
+- Skip excerpts that are menus, navigation or say nothing about the subject. If none says anything, write "".
+- Describe the excerpts only. Never say whether the statement is right, and never use words like confirms, supports,
   contradicts, disputes, true, false, accurate, correct, wrong or misleading.
 - Never comment on the speaker.
 

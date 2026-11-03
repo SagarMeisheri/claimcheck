@@ -18,7 +18,7 @@ export default function Method() {
       <ol>
         <li>Anyone can paste a link to a public, finished YouTube video.</li>
         <li>An AI watches the video and lists its statements, each with the moment it was said, a short summary of the video, and one tag per statement.</li>
-        <li>For a claim, you can press &quot;Check sources&quot;. ClaimCheck runs one web search (with Parallel) on the claim&apos;s wording and shows the top 5 results in the search engine&apos;s order: the page title, the site, the date and a short excerpt from the page. An AI then writes one or two sentences on what those pages say, with their own figures and dates and numbered links to them. It describes the pages and never says whether the statement is right; nothing is filtered out. Social media and video sites are left out of the search. &quot;Check sources for all claims&quot; runs the same search for up to 25 claims at a time.</li>
+        <li>For a claim, you can press &quot;Check sources&quot;. ClaimCheck runs one web search (with Parallel) on the claim&apos;s wording and shows the top 5 results in the search engine&apos;s order: the page title, the site, the date and a short excerpt from the page. An AI then summarises those excerpts, and only those, in one or two sentences, with their own figures and dates and numbered links to them. It describes the pages and never says whether the statement is right; nothing is filtered out. Social media and video sites are left out of the search. &quot;Check sources for all claims&quot; runs the same search for up to 25 claims at a time.</li>
         <li>Results are saved and shown to everyone, so each claim only needs looking up once.</li>
       </ol>
 

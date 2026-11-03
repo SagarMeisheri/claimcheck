@@ -72,9 +72,9 @@ def extractor_agent(s: Settings) -> LlmAgent:
 def inject_pages(callback_context: CallbackContext, llm_request: LlmRequest) -> None:
     """before_model_callback on the summarizer: the pages, numbered, as untrusted data (instruction-like lines removed)."""
     blocks = "\n\n".join(
-        wrap_untrusted(f"PAGE {p['n']}", f"Title: {p['title']}\nSite: {p['site']}\n\n{screen_text(p['text'])[0]}")
+        wrap_untrusted(f"PAGE {p['n']}", f"Title: {p['title']}\nSite: {p['site']}\nExcerpt: {screen_text(p['text'])[0]}")
         for p in callback_context.state["pages"])
-    llm_request.contents.append(types.Content(role="user", parts=[types.Part(text=f"Pages:\n\n{blocks}\n\nSummarize what these pages say.")]))
+    llm_request.contents.append(types.Content(role="user", parts=[types.Part(text=f"Pages:\n\n{blocks}\n\nSummarize what these excerpts say.")]))
 
 
 def summarizer_agent(s: Settings, name: str = "source_summarizer") -> LlmAgent:

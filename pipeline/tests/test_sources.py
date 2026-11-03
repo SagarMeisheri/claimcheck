@@ -258,7 +258,7 @@ from google.adk.models.llm_response import LlmResponse  # noqa: E402
 from google.genai import types  # noqa: E402
 
 from claimcheck.agents import llm_agents  # noqa: E402
-from claimcheck.agents.sources import acceptable_summary  # noqa: E402
+from claimcheck.agents.sources import acceptable_summary, summarize_missing  # noqa: E402
 
 SUMMARY_SETTINGS = Settings(max_cost_usd_per_episode=3.0, sources_per_claim=5, search_cost_usd=0.005, summarize_sources=True)
 
@@ -272,7 +272,9 @@ class SummaryLlm(BaseLlm):
         if self.fail:
             raise RuntimeError("model down")
         assert "never judge the statement" in str(llm_request.config.system_instruction)
-        assert "UNTRUSTED PAGE 3" in str(llm_request.contents[-1])  # every page is given to the model
+        sent = str(llm_request.contents[-1])
+        assert "UNTRUSTED PAGE 3" in sent  # every source with an excerpt is given to the model
+        assert "Excerpt: India's share stood at 2.98 percent" in sent  # the excerpt the reader sees, nothing more
         yield LlmResponse(content=types.Content(role="model", parts=[types.Part(text=json.dumps({"summary": self.text}))]))
 
 
@@ -284,15 +286,14 @@ def _with_summary(monkeypatch, text, fail=False):
         hit("https://en.wikipedia.org/wiki/X", "Wikipedia", ["List of countries by market cap."])]))
 
 
-def test_one_summary_says_what_the_sources_say_citing_them_by_number(monkeypatch):
-    _with_summary(monkeypatch, "Reports put India's share of global market cap at 2.98% in March 2026 [1][3] [7].")
+def test_one_plain_summary_of_the_excerpts(monkeypatch):
+    _with_summary(monkeypatch, "Reports put India's share of global market cap at 2.98% in March 2026 [1].")
     store = FakeStore(row())
     res = asyncio.run(run_claim_sources("c1", settings=SUMMARY_SETTINGS, store=store))
     assert (res["status"], res["sources"], res["summary"]) == ("done", 3, True)
-    # a citation to a source that doesn't exist ([7]) is removed
-    assert store.summary["c1"] == "Reports put India's share of global market cap at 2.98% in March 2026 [1][3]."
+    # plain text: any reference numbers the model adds are removed
+    assert store.summary["c1"] == "Reports put India's share of global market cap at 2.98% in March 2026."
     assert store.saved["c1"] == ["https://www.livemint.com/a", "https://someblog.in/b", "https://en.wikipedia.org/wiki/X"]
-    assert "page_text" not in store.full["c1"][0].model_dump()  # the raw page text is never stored
 
 
 def test_a_summary_that_grades_the_claim_is_dropped_but_the_sources_are_kept(monkeypatch):
@@ -314,8 +315,31 @@ def test_a_failed_summary_step_still_saves_every_source(monkeypatch):
 def test_judging_words_are_caught_but_plain_descriptions_pass():
     for bad in ["Confirms the GDP figure [1].", "The claim is false according to RBI [2].", "Data contradicts this.",
                 "Figures are consistent with the statement.", "This is misleading."]:
-        assert acceptable_summary(bad, 5) == "", bad
-    for ok in ["Reports give GDP growth of 7.4% in 2025-26 [1][2].", "One gives India's share as 2.98% in March 2026 [3].",
-               "They describe passive fund allocation to India [1]."]:
-        assert acceptable_summary(ok, 5) == ok
-    assert len(acceptable_summary("word " * 100, 5)) <= 361
+        assert acceptable_summary(bad) == "", bad
+    for ok in ["Reports give GDP growth of 7.4% in 2025-26.", "One gives India's share as 2.98% in March 2026.",
+               "They describe passive fund allocation to India."]:
+        assert acceptable_summary(ok) == ok
+    assert len(acceptable_summary("word " * 100)) <= 361
+
+
+def test_old_lookups_get_a_summary_from_their_stored_excerpts_without_a_new_search(monkeypatch):
+    _with_summary(monkeypatch, "Reports give 2.98% in March 2026.")
+    monkeypatch.setattr(evidence, "_client", lambda s: (_ for _ in ()).throw(AssertionError("no search")))
+
+    class OldStore(FakeStore):
+        saved_summary: dict = {}
+
+        async def list_claims_missing_summary(self, limit):
+            stored = [{"url": u, "title": t, "tier": 3, "excerpt": e, "publish_date": None, "rank": i}
+                      for i, (u, t, e) in enumerate([("https://www.livemint.com/a", "Mint", "India's share stood at 2.98 percent as of March 30, 2026."),
+                                                     ("https://someblog.in/b", "Blog", "Markets are interesting."),
+                                                     ("https://en.wikipedia.org/wiki/X", "Wikipedia", "List of countries by market cap.")])]
+            return [{"id": "c1", "episode_id": "e1", "claim_text": "India is 3% of world market cap",
+                     "episodes": {"cost_usd": 0.1}, "claim_sources": stored}]
+
+        async def save_sources_summary(self, cid, summary):
+            self.saved_summary[cid] = summary
+
+    store = OldStore(row())
+    out = asyncio.run(summarize_missing(settings=SUMMARY_SETTINGS, store=store))
+    assert out["summarised"] == 1 and store.saved_summary["c1"] == "Reports give 2.98% in March 2026."
