@@ -1,6 +1,8 @@
 export type StatementType = "factual_claim" | "opinion" | "forecast" | "other";
 /** Looking up sources for one statement. Only factual claims can leave "not_eligible". */
 export type SourcesStatus = "not_eligible" | "not_requested" | "queued" | "searching" | "done" | "failed";
+/** How directly a claim's sources address its specific point (relevance, never agreement). */
+export type SourcesMatch = "high" | "medium" | "low";
 export type Pestle = "political" | "economic" | "social" | "technological" | "legal" | "environmental";
 
 /** One web search result for a claim, as the search returned it: shown for context, not checked or judged. */
@@ -29,7 +31,8 @@ export interface Claim {
   sources_status: SourcesStatus;
   sources_error: string | null;
   sources: Source[];
-  sources_summary: string | null; // AI: what the sources say, citing them as [1], [2]. Never a judgement
+  sources_summary: string | null; // AI summary of the excerpts. Never a judgement
+  sources_match: SourcesMatch | null;
 }
 
 /** A statement as shown in the home-page carousel and the Topics tab. */
@@ -45,6 +48,7 @@ export interface PreviewClaim {
   sources_status: SourcesStatus;
   sources: Source[]; // without excerpts, to keep the home page small
   sources_summary: string | null;
+  sources_match: SourcesMatch | null;
 }
 
 export interface Episode {

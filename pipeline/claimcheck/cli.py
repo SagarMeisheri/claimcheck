@@ -3,7 +3,7 @@
   python -m claimcheck.cli https://www.youtube.com/watch?v=VIDEO_ID
   python -m claimcheck.cli --sources CLAIM_ID            # look up sources for one stored claim
   python -m claimcheck.cli --sources-all EPISODE_ID      # look up sources for every claim of a video
-  python -m claimcheck.cli --summarize-missing           # sources summary for claims looked up before summaries
+  python -m claimcheck.cli --summarize-missing           # sources summary + match for claims looked up before them
 
 Needs the keys and Supabase settings from pipeline/.env (see .env.example).
 """

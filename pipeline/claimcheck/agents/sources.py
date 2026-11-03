@@ -5,7 +5,9 @@ One claim ("Check sources")                                  POST /claims/{id}/s
   search           tools/evidence.search_sources: the claim's own words -> up to 5 results with title, link, date
                    and the passage of the page text that best matches the claim
   summarize (ADK)  one cheap model call summarises the excerpts shown under the sources (and nothing else, so a reader
-                   can check every sentence against them) in 1-2 plain sentences, with their own figures and dates.
+                   can check every sentence against them) in 1-2 plain sentences, with their own figures and dates,
+                   and rates the source match (high / medium / low): how directly the excerpts address the claim's
+                   specific point. Relevance only, never agreement: a different figure for the same thing is "high".
                    Checked in code: a summary using judging words (confirms, contradicts, true, false, ...)
                    is dropped. If this step fails or the budget runs out, the sources are saved without a summary
   save             on the claim, for everyone (an empty result is saved too: "No sources found")
@@ -31,7 +33,7 @@ import asyncio
 import logging
 import re
 import uuid
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from google.adk.runners import InMemoryRunner
 from google.genai import types
@@ -104,18 +106,25 @@ def acceptable_summary(text: str) -> str:
     return t if len(t) <= MAX_SUMMARY_CHARS else t[:MAX_SUMMARY_CHARS].rsplit(" ", 1)[0] + "…"
 
 
-async def summarize(claim_text: str, sources: list[Source]) -> str:
-    """A plain 1-2 sentence summary of the sources' excerpts (ADK step, Flash-Lite). Never raises; "" on failure."""
+class Digest(NamedTuple):
+    """The summary step's output: summary ("" if none) and source match ("high" / "medium" / "low", "" if none)."""
+    summary: str = ""
+    match: str = ""
+
+
+async def summarize(claim_text: str, sources: list[Source]) -> Digest:
+    """A plain 1-2 sentence summary of the sources' excerpts and how directly they address the claim (ADK step,
+    Flash-Lite). Never raises; an empty Digest on failure."""
     ec = get_context()
     if not sources or not ec.settings.summarize_sources:
-        return ""
+        return Digest()
     from .llm_agents import summarizer_agent
 
     # Only the excerpts the reader sees, so every sentence of the summary can be checked against them.
     pages = [{"n": i + 1, "title": s.title, "site": domain_of(s.url), "text": s.excerpt}
              for i, s in enumerate(sources) if s.excerpt]
     if not pages:
-        return ""
+        return Digest()
     try:
         runner = InMemoryRunner(agent=summarizer_agent(ec.settings, name=f"source_summarizer_{uuid.uuid4().hex[:6]}"),
                                 app_name=APP, plugins=ec.plugins_factory())
@@ -126,18 +135,21 @@ async def summarize(claim_text: str, sources: list[Source]) -> str:
             pass
         done = await runner.session_service.get_session(app_name=APP, user_id="sources", session_id=session.id)
         raw = done.state.get("summary")
-        text = SourcesSummary.model_validate(raw).summary if raw else ""
+        out = SourcesSummary.model_validate(raw) if raw else None
     except Exception as e:
         reason = "budget" if is_budget_error(e) else f"{type(e).__name__}: {e}"
         ec.log("sources", "summary_failed", "skipped", reason[:200])
-        return ""
+        return Digest()
+    if out is None:
+        return Digest()
+    text = out.summary
     summary = acceptable_summary(text)
     if text.strip() and not summary:
         ec.log("sources", "summary_judging_words", "skipped", text[:200])
-    return summary
+    return Digest(summary, out.match)
 
 
-async def _search(claim_text: str, settings: Settings, policy: dict[str, Any]) -> tuple[list[Source], str]:
+async def _search(claim_text: str, settings: Settings, policy: dict[str, Any]) -> tuple[list[Source], Digest]:
     """Search (charged to the video's budget) then the summary. Raises only if the search itself fails."""
     ec = get_context()
     ec.budget.add(settings.search_cost_usd)
@@ -173,9 +185,10 @@ async def run_claim_sources(claim_id: str, *, settings: Settings, store: Any) ->
         start = ec.budget.spent_usd
         token = set_context(ec)
         try:
-            found, summary = await _search(row["claim_text"], settings, ec.policy)
-            await store.save_claim_sources(claim_id, found, summary)
-            result = {"claim_id": claim_id, "status": "done", "sources": len(found), "summary": bool(summary)}
+            found, digest = await _search(row["claim_text"], settings, ec.policy)
+            await store.save_claim_sources(claim_id, found, digest.summary, digest.match)
+            result = {"claim_id": claim_id, "status": "done", "sources": len(found), "summary": bool(digest.summary),
+                      "match": digest.match}
         except Exception as e:
             log.warning("source search for claim %s failed: %s: %s", claim_id, type(e).__name__, e)
             await store.set_sources_status(claim_id, "failed", RETRY_MESSAGE)
@@ -235,9 +248,9 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any) 
                     return  # summaries used up the rest of the budget: these claims go back to 'not requested'
                 try:
                     searched += 1
-                    found, summary = await _search(group[0]["claim_text"], settings, ec.policy)
+                    found, digest = await _search(group[0]["claim_text"], settings, ec.policy)
                     for c in group:  # claims with the same wording share the result
-                        await store.save_claim_sources(c["id"], found, summary)
+                        await store.save_claim_sources(c["id"], found, digest.summary, digest.match)
                 except Exception as e:
                     log.warning("source search for claim %s failed: %s: %s", group[0]["id"], type(e).__name__, e)
                     for c in group:
@@ -277,7 +290,7 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any) 
 # --- One-off: summaries for sources saved before summaries existed --------------------------------------
 
 async def summarize_missing(*, settings: Settings, store: Any, limit: int = 200) -> dict[str, Any]:
-    """Writes the sources summary for claims that have sources but none yet, from their stored excerpts (no new
+    """Writes the sources summary and match for claims that have sources but no match yet, from their stored excerpts (no new
     search). Charged to each video's budget; a video over its cap is skipped."""
     done = skipped = 0
     cost = 0.0
@@ -293,9 +306,9 @@ async def summarize_missing(*, settings: Settings, store: Any, limit: int = 200)
             token = set_context(ec)
             try:
                 found = [Source(**s) for s in sorted(row["claim_sources"], key=lambda s: s.get("rank") or 0)]
-                summary = await summarize(row["claim_text"], found)
-                await store.save_sources_summary(row["id"], summary)
-                done += bool(summary)
+                digest = await summarize(row["claim_text"], found)
+                await store.save_sources_summary(row["id"], digest.summary, digest.match)
+                done += bool(digest.summary or digest.match)
             finally:
                 spent = round(ec.budget.spent_usd - start, 6)
                 cost += spent

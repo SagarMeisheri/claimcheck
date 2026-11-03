@@ -69,5 +69,11 @@ plain sentences (at most 45 words) summarising what the excerpts say.
   contradicts, disputes, true, false, accurate, correct, wrong or misleading.
 - Never comment on the speaker.
 
+Also give match: how directly the excerpts address what the statement says. This is about relevance, never about
+agreement: an excerpt giving a different figure for the same thing addresses it directly.
+- high: at least one excerpt discusses the statement's specific point (the same figure, event, policy or period).
+- medium: the excerpts are about the same topic but not the specific point.
+- low: the excerpts are only loosely related, or say nothing about the subject.
+
 {UNTRUSTED_RULE}
 """

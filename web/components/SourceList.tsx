@@ -1,4 +1,4 @@
-import type { Source } from "@/lib/types";
+import type { Source, SourcesMatch } from "@/lib/types";
 import { TIER_LABEL, domain, shortDate } from "@/lib/format";
 
 export const SOURCES_NOTE =
@@ -10,12 +10,35 @@ export const SOURCES_NOTE =
  * compact (home page): the summary and numbered site links. Full (video page): the summary and every source with
  * its excerpt. No verdict and no colours for right or wrong.
  */
-export function SourceList({ sources, summary, compact = false }: { sources: Source[]; summary?: string | null; compact?: boolean }) {
+const MATCH_LABEL: Record<SourcesMatch, string> = { high: "High", medium: "Medium", low: "Low" };
+const MATCH_BARS: Record<SourcesMatch, number> = { high: 3, medium: 2, low: 1 };
+export const MATCH_NOTE =
+  "Source match: how directly the excerpts address this claim's specific point, rated by AI. It is not whether they agree: a source giving a different figure for the same thing is a high match.";
+
+/** "Match: High" with a small three-bar meter. Neutral colour: relevance, not right or wrong. */
+function MatchBadge({ match }: { match: SourcesMatch }) {
+  const bars = MATCH_BARS[match];
+  return (
+    <span className={`src-match is-${match}`} title={MATCH_NOTE} aria-label={`Source match: ${MATCH_LABEL[match]}`}>
+      <span className="src-bars" aria-hidden="true">{[1, 2, 3].map((i) => <i key={i} className={i <= bars ? "on" : ""} />)}</span>
+      {MATCH_LABEL[match]} match
+    </span>
+  );
+}
+
+export function SourceList({ sources, summary, match, compact = false }: {
+  sources: Source[]; summary?: string | null; match?: SourcesMatch | null; compact?: boolean;
+}) {
   if (!sources.length) {
     return <p className="meta source-none">The web search found no sources for this statement.</p>;
   }
   const clean = (summary ?? "").replace(/\s*\[\d+\]/g, "").replace(/\s+([.,;:])/g, "$1").trim(); // plain text
-  const head = <p className="src-label">{clean ? "Sources summary" : "Sources"}</p>;
+  const head = (
+    <div className="src-head">
+      <span className="src-label">{clean ? "Sources summary" : "Sources"}</span>
+      {match && <MatchBadge match={match} />}
+    </div>
+  );
   const text = clean ? <p className="src-summary">{clean}</p> : null;
 
   if (compact) {

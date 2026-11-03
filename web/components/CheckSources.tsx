@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { requestSources } from "@/app/actions";
-import type { Source, SourcesStatus } from "@/lib/types";
+import type { Source, SourcesMatch, SourcesStatus } from "@/lib/types";
 import { SEARCHING } from "@/lib/statements";
 import { SourceList } from "./SourceList";
 
@@ -17,8 +17,9 @@ const NONE: Source[] = []; // stable default: a fresh [] each render would re-ru
  * full: the video page (summary and the numbered list). compact: the home carousel (summary and numbered site links).
  */
 export function CheckSources({ claimId, status: initial, error: initialError, sources: initialSources = NONE, summary: initialSummary = null,
-  compact = false, onBusy }: {
-  claimId: string; status: SourcesStatus; error: string | null; sources?: Source[]; summary?: string | null; compact?: boolean;
+  match: initialMatch = null, compact = false, onBusy }: {
+  claimId: string; status: SourcesStatus; error: string | null; sources?: Source[]; summary?: string | null;
+  match?: SourcesMatch | null; compact?: boolean;
   onBusy?(busy: boolean): void;
 }) {
   const router = useRouter();
@@ -26,11 +27,12 @@ export function CheckSources({ claimId, status: initial, error: initialError, so
   const [message, setMessage] = useState<string | null>(initialError);
   const [sources, setSources] = useState<Source[]>(initialSources);
   const [summary, setSummary] = useState<string | null>(initialSummary);
+  const [match, setMatch] = useState<SourcesMatch | null>(initialMatch);
   const [pending, start] = useTransition();
   const running = SEARCHING.includes(status);
 
-  useEffect(() => { setStatus(initial); setMessage(initialError); setSources(initialSources); setSummary(initialSummary); },
-    [initial, initialError, initialSources, initialSummary]);
+  useEffect(() => { setStatus(initial); setMessage(initialError); setSources(initialSources); setSummary(initialSummary); setMatch(initialMatch); },
+    [initial, initialError, initialSources, initialSummary, initialMatch]);
   useEffect(() => { onBusy?.(running || pending); }, [running, pending, onBusy]);
 
   useEffect(() => {
@@ -40,7 +42,7 @@ export function CheckSources({ claimId, status: initial, error: initialError, so
       try {
         const r = await fetch(`/api/claims/${claimId}/sources`, { cache: "no-store" });
         if (!r.ok || stop) return;
-        const j = (await r.json()) as { status: SourcesStatus; error: string | null; sources: Source[]; summary: string | null };
+        const j = (await r.json()) as { status: SourcesStatus; error: string | null; sources: Source[]; summary: string | null; match: SourcesMatch | null };
         if (SEARCHING.includes(j.status)) return;
         stop = true;
         window.clearInterval(id);
@@ -48,6 +50,7 @@ export function CheckSources({ claimId, status: initial, error: initialError, so
         setMessage(j.error);
         setSources(j.sources ?? []);
         setSummary(j.summary ?? null);
+        setMatch(j.match ?? null);
         if (!compact) router.refresh();
       } catch { /* try again next tick */ }
     }, POLL_MS);
@@ -62,10 +65,11 @@ export function CheckSources({ claimId, status: initial, error: initialError, so
       const j = await fetch(`/api/claims/${claimId}/sources`, { cache: "no-store" }).then((x) => x.json()).catch(() => null);
       setSources(j?.sources ?? []);
       setSummary(j?.summary ?? null);
+      setMatch(j?.match ?? null);
     }
   });
 
-  if (status === "done") return <SourceList sources={sources} summary={summary} compact={compact} />;
+  if (status === "done") return <SourceList sources={sources} summary={summary} match={match} compact={compact} />;
   if (running || pending) {
     return (
       <p className={compact ? "ccard-verifying" : "verify-state"} role="status" aria-live="polite">

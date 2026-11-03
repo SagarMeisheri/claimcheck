@@ -79,6 +79,8 @@ await assert.rejects(db.query(`select count(*) from source_requests`))
 await assert.rejects(db.query(`select count(*) from feedback`))
 assert.deepEqual((await db.query(`select tier from claim_sources order by rank`)).rows.map((r) => r.tier), [1, 3])
 assert.equal((await db.query(`select sources_summary from claims where idx = 1`)).rows[0].sources_summary, null)
+assert.equal((await db.query(`select sources_match from claims where idx = 1`)).rows[0].sources_match, null)
+await assert.rejects(db.query(`update claims set sources_match = 'true' where idx = 1`))
 assert.equal((await db.query(`select sources_batch_status, statement_counts from episodes`)).rows.length, 1)
 await db.exec(`reset role`)
 

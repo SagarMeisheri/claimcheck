@@ -103,6 +103,7 @@ class SourcesSummary(BaseModel):
     """What the summary step returns: what the sources say, never an assessment of the statement."""
 
     summary: str = Field(default="", description="1-2 plain, neutral sentences (at most 45 words) summarising what the excerpts say, with their own figures and dates")
+    match: Literal["high", "medium", "low"] = Field(default="low", description="How directly the excerpts address what the statement says (not whether they agree): high = the same specific point, medium = the same topic but not the specific point, low = loosely related or nothing relevant")
 
 
 class ClaimRecord(BaseModel):

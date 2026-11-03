@@ -4,7 +4,8 @@ Paste a YouTube link (any public, finished video) and ClaimCheck breaks it into 
 every statement with its timestamp, tagged as a **claim, opinion, forecast or other**, filterable by type and
 subject, playable 20 s at a time. For a claim, a viewer can press **Check sources**: one web search on the claim's
 wording, showing the top 5 results as the search returned them (title, link, site, date and the relevant passage),
-with a 1-2 sentence AI summary of those excerpts ("Sources summary").
+with a 1-2 sentence AI summary of those excerpts ("Sources summary") and a source match (High / Medium / Low): how
+directly the excerpts address the claim's specific point, which is relevance, not agreement.
 
 **ClaimCheck is not a fact-checker.** Nothing is judged true or false, there are no scores, and sources are search
 results shown for context only; their summary describes what the pages say and never whether a claim is right. Earlier versions published verdicts; that was removed (see `REPORT-adoption-and-legal.md` for why), and
@@ -21,7 +22,7 @@ supabase/   Postgres schema, row-level security and column grants
 Needs Docker, the Supabase CLI, Python 3.11+, Node 20+. There is no demo data: the app shows only videos you submit.
 
 ```bash
-supabase start && supabase db reset        # local Postgres with migrations 0001-0014 (ports 55321-55329)
+supabase start && supabase db reset        # local Postgres with migrations 0001-0015 (ports 55321-55329)
 
 cd pipeline
 python3 -m venv .venv && . .venv/bin/activate
@@ -31,7 +32,7 @@ pytest                                     # all tests run offline, no keys need
 python -m claimcheck.cli "https://www.youtube.com/watch?v=VIDEO_ID"
 python -m claimcheck.cli --sources CLAIM_ID        # look up sources for one claim, as the button does
 python -m claimcheck.cli --sources-all EPISODE_ID  # "Check sources for all claims"
-python -m claimcheck.cli --summarize-missing       # sources summary for claims looked up before summaries existed
+python -m claimcheck.cli --summarize-missing       # summary + match for claims looked up before them
 uvicorn claimcheck.server:app --port 8080  # the service the web app calls
 
 cd ../web
@@ -76,8 +77,10 @@ Sources (agents/sources.py, tools/evidence.py): nothing filtered after the searc
                   with the claim. ~$0.005, about a second
     summarize     ADK LlmAgent on Gemini 3.5 Flash-Lite: 1-2 plain sentences (<= 45 words) summarising the excerpts
                   shown under the sources, and only those (so a reader can check it), with their figures and dates.
-                  Describes, never judges: a summary with judging words (confirms, contradicts, true, false, ...) is
-                  dropped in code. If it fails, the sources are saved without it. ~$0.0005
+                  The same call rates the source match (high / medium / low): how directly the excerpts address
+                  the claim's specific point. Relevance only, never agreement: a different figure for the same thing
+                  is "high". Describes, never judges: a summary with judging words (confirms, contradicts, true,
+                  false, ...) is dropped in code. If it fails, the sources are saved without either. ~$0.0005
     save          on the claim for everyone (claim_sources rows + claims.sources_summary), or "no sources found"
   Every claim of a video                                      POST /episodes/{id}/sources-all
     the same search and summary for each claim without sources, 5 at a time, each saved as it lands. Up to 25 searches per
@@ -104,16 +107,17 @@ Each claim has a `sources_status`: `not_eligible` (not a claim, or redacted), `n
 | YouTube data | Refreshed every 25 days by the daily maintenance cron (YouTube allows 30); videos no longer public are marked `removed` and hidden; no channel avatars stored |
 | Privacy | Salted IP hashes only, for rate limits; deleted after 30 days by the maintenance cron |
 
-All of these are covered by tests in `pipeline/tests/` (50 tests, offline).
+All of these are covered by tests in `pipeline/tests/` (52 tests, offline).
 
 ## Going live
 
 1. **Supabase**: create a project and run every migration in order (`supabase db push`, or the SQL editor):
-   `0001`–`0014`. An existing database only needs the ones it's missing. `0012_sources_only.sql` hides old verdicts,
+   `0001`–`0015`. An existing database only needs the ones it's missing. `0012_sources_only.sql` hides old verdicts,
    merges hearsay/analogy/loaded-language into "other", adds sources, rate-limit and YouTube-refresh columns;
    `0013_plain_search_sources.sql` stores search results as returned (excerpt, rank, any site) and reopens claims
-   that came back empty; `0014_source_summaries.sql` adds `claims.sources_summary`. If 0006–0011 were applied by hand
-   (not through the CLI), apply 0012-0014 the same way:
+   that came back empty; `0014_source_summaries.sql` adds `claims.sources_summary` and `0015_sources_match.sql`
+   adds `claims.sources_match`. If 0006–0011 were applied by hand
+   (not through the CLI), apply 0012-0015 the same way:
    running `supabase migration up` would re-run 0006's backfill. Deploy order: migration, then pipeline, then web.
 2. **Pipeline (Cloud Run)**: `cd pipeline && gcloud run deploy claimcheck-pipeline --source . --set-env-vars ...` with
    `GOOGLE_API_KEY`, `PARALLEL_API_KEY`, `YOUTUBE_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
@@ -130,7 +134,7 @@ Model names, limits and prices are environment variables (`CLAIMCHECK_FAST_MODEL
 
 ## What has and hasn't been verified
 
-Verified: all pipeline tests; live "Check sources" on real claims (5 sources and a Flash-Lite summary, about $0.0057); migrations 0012-0014 in PGlite (`node supabase/test_sources_migration.mjs`, with
+Verified: all pipeline tests; live "Check sources" on real claims (5 sources and a Flash-Lite summary, about $0.0057); migrations 0012-0015 in PGlite (`node supabase/test_sources_migration.mjs`, with
 `@electric-sql/pglite` installed) and on a local Supabase; web typecheck and production build; the pages in a real
 browser against local data, including filing and resolving a report.
 

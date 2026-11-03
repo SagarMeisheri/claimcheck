@@ -106,7 +106,9 @@ class FakeStore:
     async def set_sources_status(self, cid, status, error=None):
         self.status[cid] = (status, error)
 
-    async def save_claim_sources(self, cid, found, summary=""):
+    async def save_claim_sources(self, cid, found, summary="", match=""):
+        self.match = getattr(self, "match", {})
+        self.match[cid] = match
         self.saved[cid] = [s.url for s in found]
         self.summary = getattr(self, "summary", {})
         self.summary[cid] = summary
@@ -266,6 +268,7 @@ SUMMARY_SETTINGS = Settings(max_cost_usd_per_episode=3.0, sources_per_claim=5, s
 class SummaryLlm(BaseLlm):
     model: str = "fake"
     text: str = ""
+    match: str = "high"
     fail: bool = False
 
     async def generate_content_async(self, llm_request, stream=False) -> AsyncGenerator[LlmResponse, None]:
@@ -275,11 +278,11 @@ class SummaryLlm(BaseLlm):
         sent = str(llm_request.contents[-1])
         assert "UNTRUSTED PAGE 3" in sent  # every source with an excerpt is given to the model
         assert "Excerpt: India's share stood at 2.98 percent" in sent  # the excerpt the reader sees, nothing more
-        yield LlmResponse(content=types.Content(role="model", parts=[types.Part(text=json.dumps({"summary": self.text}))]))
+        yield LlmResponse(content=types.Content(role="model", parts=[types.Part(text=json.dumps({"summary": self.text, "match": self.match}))]))
 
 
-def _with_summary(monkeypatch, text, fail=False):
-    monkeypatch.setattr(llm_agents, "_model", lambda name, settings: SummaryLlm(text=text, fail=fail))
+def _with_summary(monkeypatch, text, fail=False, match="high"):
+    monkeypatch.setattr(llm_agents, "_model", lambda name, settings: SummaryLlm(text=text, fail=fail, match=match))
     monkeypatch.setattr(evidence, "_client", lambda s: FakeParallel([
         hit("https://www.livemint.com/a", "Mint", ["India's share stood at 2.98 percent as of March 30, 2026."]),
         hit("https://someblog.in/b", "Blog", ["Markets are interesting."]),
@@ -290,7 +293,8 @@ def test_one_plain_summary_of_the_excerpts(monkeypatch):
     _with_summary(monkeypatch, "Reports put India's share of global market cap at 2.98% in March 2026 [1].")
     store = FakeStore(row())
     res = asyncio.run(run_claim_sources("c1", settings=SUMMARY_SETTINGS, store=store))
-    assert (res["status"], res["sources"], res["summary"]) == ("done", 3, True)
+    assert (res["status"], res["sources"], res["summary"], res["match"]) == ("done", 3, True, "high")
+    assert store.match["c1"] == "high"
     # plain text: any reference numbers the model adds are removed
     assert store.summary["c1"] == "Reports put India's share of global market cap at 2.98% in March 2026."
     assert store.saved["c1"] == ["https://www.livemint.com/a", "https://someblog.in/b", "https://en.wikipedia.org/wiki/X"]
@@ -337,9 +341,24 @@ def test_old_lookups_get_a_summary_from_their_stored_excerpts_without_a_new_sear
             return [{"id": "c1", "episode_id": "e1", "claim_text": "India is 3% of world market cap",
                      "episodes": {"cost_usd": 0.1}, "claim_sources": stored}]
 
-        async def save_sources_summary(self, cid, summary):
-            self.saved_summary[cid] = summary
+        async def save_sources_summary(self, cid, summary, match=""):
+            self.saved_summary[cid] = (summary, match)
 
     store = OldStore(row())
     out = asyncio.run(summarize_missing(settings=SUMMARY_SETTINGS, store=store))
-    assert out["summarised"] == 1 and store.saved_summary["c1"] == "Reports give 2.98% in March 2026."
+    assert out["summarised"] == 1 and store.saved_summary["c1"] == ("Reports give 2.98% in March 2026.", "high")
+
+
+def test_source_match_is_saved_even_when_the_summary_is_dropped(monkeypatch):
+    # match rates relevance only; a summary with judging words is dropped but the match is kept
+    _with_summary(monkeypatch, "The sources confirm the statement.", match="medium")
+    store = FakeStore(row())
+    asyncio.run(run_claim_sources("c1", settings=SUMMARY_SETTINGS, store=store))
+    assert store.summary["c1"] == "" and store.match["c1"] == "medium"
+
+
+def test_a_failed_summary_step_saves_no_match(monkeypatch):
+    _with_summary(monkeypatch, "", fail=True)
+    store = FakeStore(row())
+    asyncio.run(run_claim_sources("c1", settings=SUMMARY_SETTINGS, store=store))
+    assert store.match["c1"] == ""
