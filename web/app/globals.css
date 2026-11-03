@@ -7,6 +7,8 @@
   --focus: #1d5fd1;
   --band: #0f1513;
   --highlight: #e4eee9;
+  --src-bg: #eaf1f9;      /* sources summary panel: a soft blue, set apart from the claim (not green: not "true") */
+  --src-rule: #cddcec;
 
   --ok: #1f7a4d;
   --err: #c2362f;
@@ -33,6 +35,8 @@
     --focus: #7fa8ff;
     --band: #080c0b;
     --highlight: #1f2c28;
+    --src-bg: #18232f;
+    --src-rule: #2a3a4c;
     --ok: #4cb582;
     --err: #ee6a62;
     --t-factual: #7fa9d9;
@@ -352,7 +356,7 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 /* Carousel: a little smaller, so more fits on screen. */
 .ccard { width: 12rem; }
 .ccard-head { font-size: 0.78rem; }
-.ccard-text { font-size: 0.86rem; line-height: 1.32; -webkit-line-clamp: 4; }
+.ccard-text { font-size: 0.86rem; line-height: 1.32; -webkit-line-clamp: 10; } /* claims are short: show them whole */
 .ccard-main { padding: 0.55rem 0.65rem 0.3rem; }
 .topic-tags { padding: 0 0.65rem 0.4rem; gap: 0.25rem; }
 .topic-tag { font-size: 0.72rem; padding: 0.05rem 0.45rem; }
@@ -401,7 +405,7 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .said-toggle { display: block; margin-top: 0.4rem; }
 /* Sources: "Sources summary" heading with a green count (found, not "true"), the summary, then the source links. */
 .source-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.4rem; margin-top: 0.75rem; min-width: 0; padding: 0.65rem 0.8rem; border-radius: 10px;
-  background: var(--paper); border: 1px solid var(--rule); }
+  background: var(--src-bg); border: 1px solid var(--src-rule); }
 .src-label { margin: 0; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
 .src-summary { margin: 0; font-size: 0.98rem; line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
 /* one row of source chips that scrolls sideways */

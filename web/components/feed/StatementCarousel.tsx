@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useCallback, useState } from "react";
 import type { PreviewClaim, StatementType } from "@/lib/types";
-import { TopicTags } from "@/components/TopicTags";
 import { CheckSources } from "@/components/CheckSources";
 import { SourceList } from "@/components/SourceList";
 import { STATEMENT_TYPES, TYPE_ORDER, totalStatements, typeOf } from "@/lib/statements";
@@ -12,8 +11,8 @@ import { clock, topicHue, topicLabel } from "@/lib/format";
 type Counts = Partial<Record<StatementType, number>>;
 type Tab = "all" | StatementType;
 
-function Card({ videoId, c, active, topic, onTopic, onPlay }: {
-  videoId: string; c: PreviewClaim; active: boolean; topic: string | null; onTopic(t: string): void; onPlay(c: PreviewClaim): void;
+function Card({ videoId, c, active, onPlay }: {
+  videoId: string; c: PreviewClaim; active: boolean; onPlay(c: PreviewClaim): void;
 }) {
   const [busy, setBusy] = useState(false);
   const onBusy = useCallback((b: boolean) => setBusy(b), []);
@@ -32,7 +31,6 @@ function Card({ videoId, c, active, topic, onTopic, onPlay }: {
         </span>
         <span className="ccard-text">{c.claim_text}</span>
       </button>
-      <TopicTags topics={c.topics} active={topic} onPick={onTopic} />
       {isClaim && (
         <div className="ccard-foot">
           {c.sources_status === "done"
@@ -112,7 +110,7 @@ export function StatementCarousel({ videoId, statements, withSources, counts, ac
         </div>
       )}
       <div className="carousel" role="list" aria-label="Statements in this video">
-        {shown.map((c) => <Card key={c.id} videoId={videoId} c={c} active={activeId === c.id} topic={topic} onTopic={pick} onPlay={onPlay} />)}
+        {shown.map((c) => <Card key={c.id} videoId={videoId} c={c} active={activeId === c.id} onPlay={onPlay} />)}
         {shown.length === 0 && <p className="meta ccard-empty">No statements match.</p>}
       </div>
       {pages > 1 && (
