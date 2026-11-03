@@ -69,6 +69,11 @@ await db.exec(`insert into claim_sources (claim_id, url, title, tier, excerpt, r
 await db.exec(`insert into source_requests (claim_id, episode_id, requester, kind) select id, episode_id, 'h', 'one' from claims where idx = 1`)
 await db.exec(`insert into feedback (claim_id, note, kind) select id, 'wrong speaker', 'wrong_speaker' from claims where idx = 1`)
 
+// 0017: podcast types are allowed, anything else is not
+await db.exec(`update claims set statement_type = 'question' where idx = 6`)
+await db.exec(`update claims set statement_type = 'opinion' where idx = 6`)
+await assert.rejects(db.query(`update claims set statement_type = 'hearsay' where idx = 6`))
+
 // What the public can see.
 await db.exec(`set role anon`)
 const pub = (await db.query(`select id, statement_type, sources_status, sources_error, context_quote, speaker from claims`)).rows

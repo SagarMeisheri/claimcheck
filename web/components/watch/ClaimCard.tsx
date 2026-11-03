@@ -5,7 +5,7 @@ import { CheckSources } from "@/components/CheckSources";
 import { ReportForm } from "@/components/ReportForm";
 import { SourceList } from "@/components/SourceList";
 import type { Claim } from "@/lib/types";
-import { STATEMENT_TYPES, SEARCHING, canCheckSources, typeOf } from "@/lib/statements";
+import { STATEMENT_TYPES, SEARCHING, canCheckSources, hasSources, typeOf } from "@/lib/statements";
 import { clock, ytLink } from "@/lib/format";
 
 export type CardPhase = "idle" | "playing" | "ended";
@@ -44,7 +44,7 @@ export function StatementCard({ claim: c, videoId, active, phase, canWatch, canL
   const hidden = c.not_checked_reason === "outside_policy"; // text and moment stay unpublished
   const type = typeOf(c.statement_type);
   const isClaim = type === "factual_claim" && !hidden;
-  const sourceable = !hidden; // sources can be looked up for every statement type
+  const sourceable = !hidden && hasSources(type); // every type except questions and stories
   const showSources = sourceable && canLookUp && (canCheckSources(c) || SEARCHING.includes(c.sources_status));
   return (
     <article id={`card-${c.id}`} data-claim={c.id} data-type={type}

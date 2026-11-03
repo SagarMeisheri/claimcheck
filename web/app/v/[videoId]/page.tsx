@@ -37,7 +37,7 @@ export default async function WatchPage({ params, searchParams }: Props) {
   );
 }
 
-/** ?view=all|with_sources|factual_claim|opinion|forecast|other. Old links (verified, flagged, hearsay, ...) still open. */
+/** ?view=all|with_sources|factual_claim|opinion|forecast|advice|story|question|other. Old links (verified, flagged, hearsay, ...) still open. */
 function parseView(v: string | undefined): View | null {
   if (!v) return null;
   if (v === "all" || v === "with_sources") return v;

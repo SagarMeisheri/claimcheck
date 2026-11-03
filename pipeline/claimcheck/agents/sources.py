@@ -1,7 +1,7 @@
 """Sources for claims: one Parallel web search per claim, whatever it returns is shown, plus a short summary of them.
 
 One claim ("Check sources")                                  POST /claims/{id}/sources
-  precheck (code)  any statement type (claim, opinion, forecast, other), not redacted, not already done, video under its cost cap
+  precheck (code)  any statement type except questions and stories, not redacted, not already done, video under its cost cap
   search           tools/evidence.search_sources: the claim's own words -> up to 5 results with title, link, date
                    and the passage of the page text that best matches the claim
   summarize (ADK)  one cheap model call summarises the excerpts shown under the sources (and nothing else, so a reader
@@ -41,7 +41,7 @@ from google.genai import types
 from ..config import Settings
 from ..context import Budget, EpisodeContext, get_context, is_budget_error, set_context
 from ..policy import domain_of, load_policy
-from ..schemas import Source, SourcesSummary
+from ..schemas import NO_SOURCE_TYPES, Source, SourcesSummary
 from ..tools.evidence import search_sources
 
 log = logging.getLogger("claimcheck")
@@ -79,6 +79,8 @@ def precheck(row: Optional[dict[str, Any]], settings: Settings) -> tuple[bool, s
     ep = row.get("episodes") or {}
     if ep.get("status") not in ("done", "in_review"):
         return False, "This video hasn't finished being analysed yet.", 409
+    if row.get("statement_type") in NO_SOURCE_TYPES:
+        return False, "Questions and personal stories don't have sources to look up.", 409
     if row.get("policy_tier") == "never" or row.get("not_checked_reason") == "outside_policy":
         return False, "This statement is outside our content policy.", 409
     status = row.get("sources_status")

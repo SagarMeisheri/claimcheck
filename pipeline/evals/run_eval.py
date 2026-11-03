@@ -5,7 +5,7 @@ Gold file format (JSONL), one video per line:
    "statements": [{"match": "4 crore houses", "type": "factual_claim", "source_domain": "pib.gov.in"}, ...]}
 
 `match` is a case-insensitive substring of the extracted statement text. `type` is the expected tag
-(factual_claim, opinion, forecast, other). `source_domain` is optional: for factual claims, a site that
+(factual_claim, opinion, forecast, advice, story, question, other). `source_domain` is optional: for factual claims, a site that
 "Check sources" should find (the lookup is run for those claims, so it costs searches).
 
 Reports: extraction recall, tag agreement, source recall (when source_domain is given) and cost per video.

@@ -17,6 +17,9 @@
   --t-factual: #2f5d8c;
   --t-opinion: #9a6a1f;
   --t-forecast: #237a78;
+  --t-advice: #6a4c9c;
+  --t-story: #a04a74;
+  --t-question: #b0532c;
   --t-other: #7a8581;
 
   --font-display: "Anek Latin", "Anek Devanagari", system-ui, sans-serif;
@@ -42,6 +45,9 @@
     --t-factual: #7fa9d9;
     --t-opinion: #d9a65a;
     --t-forecast: #5cc0bc;
+    --t-advice: #b49be0;
+    --t-story: #e08cb2;
+    --t-question: #e8916a;
     --t-other: #8f9a96;
   }
 }

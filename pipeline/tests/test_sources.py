@@ -371,5 +371,11 @@ def test_a_failed_summary_step_saves_no_match(monkeypatch):
 
 
 def test_opinions_forecasts_and_other_statements_can_have_sources_too():
-    for kind in ("opinion", "forecast", "other"):
+    for kind in ("opinion", "forecast", "advice", "other"):
         assert precheck(row(statement_type=kind), SETTINGS)[0], kind
+
+
+def test_questions_and_stories_have_no_sources_to_look_up():
+    for kind in ("question", "story"):
+        ok, msg, code = precheck(row(statement_type=kind), SETTINGS)
+        assert not ok and code == 409 and "Questions and personal stories" in msg

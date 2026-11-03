@@ -13,14 +13,17 @@ from pydantic import BaseModel, Field, model_validator
 PestleArea = Literal["political", "economic", "social", "technological", "legal", "environmental"]
 PolicyTier = Literal["normal", "never"]
 ClaimType = Literal["fact", "opinion", "prediction", "anecdote"]
-# What kind of statement it is. Every type can have sources looked up (unless redacted by the content policy).
-StatementType = Literal["factual_claim", "opinion", "forecast", "other"]
+# What kind of statement it is. Questions and personal stories assert nothing a source could address, so they have
+# no "Check sources"; every other type does (unless redacted by the content policy).
+StatementType = Literal["factual_claim", "opinion", "forecast", "advice", "story", "question", "other"]
+NO_SOURCE_TYPES: frozenset[str] = frozenset({"question", "story"})
 SourcesStatus = Literal["not_eligible", "not_requested", "queued", "searching", "done", "failed"]
 
 # Tags used before the four-tag set; they read as criticism of a named speaker, so they are folded into "other".
 LEGACY_TYPES: dict[str, str] = {"hearsay": "other", "analogy": "other", "loaded_language": "other"}
 # Legacy claim_type stored alongside statement_type (claims.claim_type is NOT NULL with a check constraint).
-_LEGACY_CLAIM_TYPE: dict[str, str] = {"factual_claim": "fact", "opinion": "opinion", "forecast": "prediction", "other": "anecdote"}
+_LEGACY_CLAIM_TYPE: dict[str, str] = {"factual_claim": "fact", "opinion": "opinion", "forecast": "prediction", "advice": "opinion",
+                                       "story": "anecdote", "question": "anecdote", "other": "anecdote"}
 _FROM_CLAIM_TYPE: dict[str, str] = {"fact": "factual_claim", "opinion": "opinion", "prediction": "forecast", "anecdote": "other"}
 
 
@@ -70,7 +73,7 @@ class ExtractedStatement(BaseModel):
     speaker: str = Field(description="Name only if it is said or shown on screen in the video, otherwise a role (Host, Guest 1)")
     claim: str = Field(description="The statement, self-contained, speaker's numbers kept exactly")
     context_quote: str = Field(description="The spoken words as you heard them (Hindi or English as spoken), up to ~40 words")
-    statement_type: StatementType = Field(description="Required tag: factual_claim, opinion, forecast or other")
+    statement_type: StatementType = Field(description="Required tag: factual_claim, opinion, forecast, advice, story, question or other")
     pestle_area: PestleArea
     topics: list[str] = Field(description="1-2 short subject names (plain words) saying what the statement is about, most relevant first")
     policy_tier: PolicyTier
@@ -111,7 +114,9 @@ class ClaimRecord(BaseModel):
 
 def sources_status(rec: ClaimRecord) -> str:
     """The claims.sources_status value for a statement leaving the first pass."""
-    return "not_eligible" if rec.not_checked_reason == "outside_policy" else "not_requested"
+    if rec.not_checked_reason == "outside_policy" or rec.claim.statement_type in NO_SOURCE_TYPES:
+        return "not_eligible"
+    return "not_requested"
 
 
 class GuardrailEvent(BaseModel):

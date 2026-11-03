@@ -1,8 +1,8 @@
 # ClaimCheck
 
 Paste a YouTube link (any public, finished video) and ClaimCheck breaks it into what was said: an AI summary and
-every statement with its timestamp, tagged as a **claim, opinion, forecast or other**, filterable by type and
-subject, playable 20 s at a time. On any statement (claim, opinion, forecast or other), a viewer can press
+every statement with its timestamp, tagged as a **claim, opinion, forecast, advice, story, question or other**, filterable by type and
+subject, playable 20 s at a time. On any statement except questions and stories (which assert nothing a source could address), a viewer can press
 **Check sources**: one web search on the statement's
 wording, showing the top 5 results as the search returned them (title, link, site, date and the relevant passage),
 with a 1-2 sentence AI summary of those excerpts ("Sources summary") and a source match (High / Medium / Low): how
@@ -23,7 +23,7 @@ supabase/   Postgres schema, row-level security and column grants
 Needs Docker, the Supabase CLI, Python 3.11+, Node 20+. There is no demo data: the app shows only videos you submit.
 
 ```bash
-supabase start && supabase db reset        # local Postgres with migrations 0001-0016 (ports 55321-55329)
+supabase start && supabase db reset        # local Postgres with migrations 0001-0017 (ports 55321-55329)
 
 cd pipeline
 python3 -m venv .venv && . .venv/bin/activate
@@ -62,7 +62,8 @@ it is never shrunk below 200x200, per YouTube's API policies.
 EpisodePipeline (ADK SequentialAgent)                       POST /episodes
   IngestGate      code   public and finished (not live); title/description treated as untrusted
   ExtractorAgent  LLM    Gemini 3.8 Flash reads the YouTube URL (agentic video processing): every statement with
-                         timestamp, speaker (a name only if said or shown), tag (claim / opinion / forecast / other),
+                         timestamp, speaker (a name only if said or shown), tag (claim / opinion / forecast / advice / story / question / other;
+                         sponsor reads are skipped),
                          1-2 subject tags, plus a neutral 2-3 sentence summary. Statements stream to the database as
                          they are written
   ClaimFilter     code   150-statement cap; never-show topics redacted in code whatever the model said
@@ -108,18 +109,19 @@ Each claim has a `sources_status`: `not_eligible` (not a claim, or redacted), `n
 | YouTube data | Refreshed every 25 days by the daily maintenance cron (YouTube allows 30); videos no longer public are marked `removed` and hidden; no channel avatars stored |
 | Privacy | Salted IP hashes only, for rate limits; deleted after 30 days by the maintenance cron |
 
-All of these are covered by tests in `pipeline/tests/` (53 tests, offline).
+All of these are covered by tests in `pipeline/tests/` (56 tests, offline).
 
 ## Going live
 
 1. **Supabase**: create a project and run every migration in order (`supabase db push`, or the SQL editor):
-   `0001`–`0016`. An existing database only needs the ones it's missing. `0012_sources_only.sql` hides old verdicts,
+   `0001`–`0017`. An existing database only needs the ones it's missing. `0012_sources_only.sql` hides old verdicts,
    merges hearsay/analogy/loaded-language into "other", adds sources, rate-limit and YouTube-refresh columns;
    `0013_plain_search_sources.sql` stores search results as returned (excerpt, rank, any site) and reopens claims
    that came back empty; `0014_source_summaries.sql` adds `claims.sources_summary` and `0015_sources_match.sql`
    adds `claims.sources_match`;
-   `0016_sources_for_all_statements.sql` opens sources up to opinions, forecasts and other statements. If 0006–0011 were applied by hand
-   (not through the CLI), apply 0012-0016 the same way:
+   `0016_sources_for_all_statements.sql` opens sources up to opinions, forecasts and other statements;
+   `0017_podcast_statement_types.sql` allows the advice, story and question tags. If 0006–0011 were applied by hand
+   (not through the CLI), apply 0012-0017 the same way:
    running `supabase migration up` would re-run 0006's backfill. Deploy order: migration, then pipeline, then web.
 2. **Pipeline (Cloud Run)**: `cd pipeline && gcloud run deploy claimcheck-pipeline --source . --set-env-vars ...` with
    `GOOGLE_API_KEY`, `PARALLEL_API_KEY`, `YOUTUBE_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
@@ -136,7 +138,7 @@ Model names, limits and prices are environment variables (`CLAIMCHECK_FAST_MODEL
 
 ## What has and hasn't been verified
 
-Verified: all pipeline tests; live "Check sources" on real claims (5 sources, summary and match, about $0.008); migrations 0012-0016 in PGlite (`node supabase/test_sources_migration.mjs`, with
+Verified: all pipeline tests; live "Check sources" on real claims (5 sources, summary and match, about $0.008); migrations 0012-0017 in PGlite (`node supabase/test_sources_migration.mjs`, with
 `@electric-sql/pglite` installed) and on a local Supabase; web typecheck and production build; the pages in a real
 browser against local data, including filing and resolving a report.
 

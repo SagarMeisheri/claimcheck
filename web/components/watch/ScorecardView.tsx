@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Thumb } from "@/components/Thumb";
 import type { Claim, EpisodeDetail, SourcesMatch, StatementType } from "@/lib/types";
-import { STATEMENT_TYPES, SEARCHING, TYPE_ORDER, breakdownParts, canCheckSources, typeOf } from "@/lib/statements";
+import { STATEMENT_TYPES, SEARCHING, TYPE_ORDER, breakdownParts, canCheckSources, hasSources, typeOf } from "@/lib/statements";
 import { clock } from "@/lib/format";
 import { MatchFilter, matchCounts } from "@/components/MatchFilter";
 import { CheckProgress } from "@/components/CheckProgress";
@@ -312,7 +312,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
             </div>
             <MatchFilter counts={matchCounts(byView)} value={match} onChange={setMatch} />
             {view !== "all" && view !== "with_sources" && (
-              <p className="meta stmt-legend">{STATEMENT_TYPES[view].meaning} Press Check sources on any statement to see what web sources say about it.</p>
+              <p className="meta stmt-legend">{STATEMENT_TYPES[view].meaning}{hasSources(view) ? " Press Check sources to see what web sources say about it." : ""}</p>
             )}
             {playable.length > 1 && (
               <p className="play-all">
@@ -338,7 +338,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           <ul className="nclist">
             <li>An AI watched the video, listed {ep.claims.length} statements with their timestamps, and tagged each one as a claim, opinion, forecast or other.</li>
             <li>The wording of each statement, the transcript, the speaker names and the tags are AI output and can be wrong. Use &quot;Watch 20 s&quot; to hear the original, and &quot;Report a problem&quot; if something is off.</li>
-            <li>Nothing is judged true or false. On any statement, &quot;Check sources&quot; runs a web search and shows the top results with an AI summary of their excerpts.</li>
+            <li>Nothing is judged true or false. On any statement except questions and stories, &quot;Check sources&quot; runs a web search and shows the top results with an AI summary of their excerpts.</li>
             <li><Link href="/method">How it works</Link></li>
             <li><a href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}&t=${Math.floor(time)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube from {clock(time)}</a></li>
           </ul>

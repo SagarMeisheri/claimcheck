@@ -18,7 +18,7 @@ from ..context import get_context
 from ..guardrails.injection import find_injections, wrap_untrusted
 from ..guardrails.input_checks import validate_metadata
 from ..policy import is_never, normalize_topics
-from ..schemas import ClaimRecord, ExtractedClaim
+from ..schemas import ClaimRecord, ExtractedClaim, sources_status
 from ..store import ts_to_seconds
 from ..tools.youtube import fetch_metadata
 
@@ -124,7 +124,7 @@ class Publisher(BaseAgent):
         for r in records:
             t = r.claim.statement_type or "other"
             statement_counts[t] = statement_counts.get(t, 0) + 1
-        auto = ec.settings.auto_sources and any(r.not_checked_reason != "outside_policy" for r in records)
+        auto = ec.settings.auto_sources and any(sources_status(r) == "not_requested" for r in records)
         await ec.store.update_episode(ec.episode_id, {
             **base, "status": "done", "statement_counts": statement_counts,
             # Set in the same write that publishes the statements, so the page never shows a gap before the batch starts.

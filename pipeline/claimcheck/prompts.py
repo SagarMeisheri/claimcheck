@@ -26,8 +26,13 @@ statement_type, one per statement:
   named studies, rules, dated events). Keep the speaker's numbers, units and time periods exactly.
 - opinion: a view or value judgement ("this is the best policy", "the market is overvalued").
 - forecast: a statement about the future ("rates will fall next year").
-- other: anything else that is still substantive: a personal story, a comparison, a reference to what others
-  say, a general remark.
+- advice: a recommendation to the listener about what to do ("put 60% of your savings in index funds",
+  "get your blood sugar tested every year").
+- story: a personal experience or anecdote ("when I started my company in 2010, ...").
+- question: a substantive question that moves the conversation, usually from the host ("what went wrong with the
+  2016 policy?"). If a question contains a claim ("isn't it true GDP fell 10% under X?"), also list that claim as
+  its own factual_claim at the same time.
+- other: anything else that is still substantive: a comparison, a reference to what others say, a general remark.
 
 For every statement:
 - claim: the statement in plain words, self-contained. Resolve pronouns ("it", "this scheme") to the named thing.
@@ -46,7 +51,8 @@ For every statement:
 After the statements, write summary: 2-3 plain sentences saying what the video covers and the main subjects
 discussed. Neutral tone. No judgements of the speakers or of whether anything said is right.
 
-Skip ads, sponsor reads, intros, greetings and small talk. Return at most 150 statements in the order they were
+Skip ads and sponsor reads entirely (never list them as statements), and skip intros, greetings, small talk and
+filler questions ("how are you?", "can you tell us more?"). Return at most 150 statements in the order they were
 said, favouring substantive ones.
 
 {UNTRUSTED_RULE}

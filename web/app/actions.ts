@@ -129,6 +129,9 @@ export async function requestSources(claimId: string): Promise<SourcesResult> {
   if (status === "done") return { ok: true, status, message: "Sources have already been looked up." };
   const stale = !!c.sources_requested_at && Date.now() - Date.parse(c.sources_requested_at) > STALE_MS;
   if ((status === "queued" || status === "searching") && !stale) return { ok: true, status, message: "Already searching." };
+  if (c.statement_type === "question" || c.statement_type === "story") {
+    return { ok: false, status, message: "Questions and personal stories don't have sources to look up." };
+  }
   if (c.policy_tier === "never" || c.not_checked_reason === "outside_policy" || status === "not_eligible") {
     return { ok: false, status, message: "This statement is outside our content policy." };
   }
@@ -178,7 +181,7 @@ export async function requestAllSources(videoId: string): Promise<{ ok: boolean;
   if (!["done", "in_review"].includes(ep.status)) return { ok: false, message: "This video is still being analysed. Try again when it's finished." };
   if (ep.sources_batch_status === "running") return { ok: true, message: "Already checking sources for this video." };
 
-  const { data: eligible } = await db.from("claims").select("id").eq("episode_id", ep.id)
+  const { data: eligible } = await db.from("claims").select("id").eq("episode_id", ep.id).not("statement_type", "in", "(question,story)")
     .in("sources_status", ["not_requested", "failed"]).limit(1);
   if (!eligible?.length) return { ok: false, message: "Sources have already been looked up for every statement in this video." };
 

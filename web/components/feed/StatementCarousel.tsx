@@ -5,7 +5,7 @@ import { useCallback, useState } from "react";
 import type { PreviewClaim, SourcesMatch, StatementType } from "@/lib/types";
 import { CheckSources } from "@/components/CheckSources";
 import { SourceList } from "@/components/SourceList";
-import { STATEMENT_TYPES, TYPE_ORDER, totalStatements, typeOf } from "@/lib/statements";
+import { STATEMENT_TYPES, TYPE_ORDER, hasSources, totalStatements, typeOf } from "@/lib/statements";
 import { clock } from "@/lib/format";
 import { MatchFilter, matchCounts } from "@/components/MatchFilter";
 
@@ -18,7 +18,7 @@ function Card({ videoId, c, active, onPlay }: {
   const [busy, setBusy] = useState(false);
   const onBusy = useCallback((b: boolean) => setBusy(b), []);
   const t = STATEMENT_TYPES[typeOf(c.statement_type)];
-  const sourceable = c.sources_status !== "not_eligible"; // any type, unless redacted
+  const sourceable = c.sources_status !== "not_eligible" && hasSources(c.statement_type); // not questions or stories
   const cls = `ccard ccard-statement${active ? " is-active" : ""}${busy ? " is-verifying" : ""}`;
   return (
     <article className={cls} role="listitem" style={{ ["--stype" as string]: t.cssVar }}>

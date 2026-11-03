@@ -1,4 +1,4 @@
-export type StatementType = "factual_claim" | "opinion" | "forecast" | "other";
+export type StatementType = "factual_claim" | "opinion" | "forecast" | "advice" | "story" | "question" | "other";
 /** Looking up sources for one statement (any type). Only statements redacted by the content policy stay "not_eligible". */
 export type SourcesStatus = "not_eligible" | "not_requested" | "queued" | "searching" | "done" | "failed";
 /** How directly a claim's sources address its specific point (relevance, never agreement). */

@@ -61,7 +61,7 @@ def test_extractor_schema_requires_statement_type_and_has_no_characterisation():
     item = ExtractionResult.model_json_schema()["$defs"]["ExtractedStatement"]
     assert "statement_type" in item["required"] and "claim_type" not in item["properties"]
     assert "tag_note" not in item["properties"]
-    assert set(item["properties"]["statement_type"]["enum"]) == {"factual_claim", "opinion", "forecast", "other"}
+    assert set(item["properties"]["statement_type"]["enum"]) == {"factual_claim", "opinion", "forecast", "advice", "story", "question", "other"}
 
 
 def test_extractor_schema_asks_for_topics_list():
@@ -174,3 +174,11 @@ def test_prices_are_conservative_and_can_be_overridden(monkeypatch):
     assert s.prices["gemini-3.8-flash"] == (1.50, 7.50)
     monkeypatch.setenv("CLAIMCHECK_PRICES_JSON", '{"gemini-3.8-flash": [0.75, 3.75]}')
     assert Settings().prices["gemini-3.8-flash"] == (0.75, 3.75)
+
+
+def test_podcast_types_questions_and_stories_have_no_sources():
+    assert stmt(stype="advice").claim_type == "opinion"
+    assert stmt(stype="story").claim_type == "anecdote" and stmt(stype="question").claim_type == "anecdote"
+    rec = lambda t: ClaimRecord(index=0, start_s=0, claim=stmt(stype=t), effective_tier="normal")
+    assert sources_status(rec("advice")) == "not_requested"
+    assert sources_status(rec("question")) == "not_eligible" and sources_status(rec("story")) == "not_eligible"
