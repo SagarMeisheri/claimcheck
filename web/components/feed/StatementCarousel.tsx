@@ -6,7 +6,7 @@ import type { PreviewClaim, StatementType } from "@/lib/types";
 import { TopicTags } from "@/components/TopicTags";
 import { InlineVerify, type InlineResult } from "./InlineVerify";
 import { STATEMENT_TYPES, TYPE_ORDER, totalStatements, typeOf } from "@/lib/statements";
-import { VERDICTS, clock, domain, scoreLabel, topicLabel } from "@/lib/verdicts";
+import { VERDICTS, clock, domain, scoreLabel, topicHue, topicLabel } from "@/lib/verdicts";
 
 type Counts = Partial<Record<StatementType, number>>;
 type Tab = "all" | StatementType;
@@ -110,8 +110,9 @@ export function StatementCarousel({ videoId, statements, verifiedCount, counts, 
       {chips.length > 1 && (
         <div className="topic-filters stmt-topics" role="group" aria-label="Filter by subject">
           {chips.map(([t, n]) => (
-            <button key={t} type="button" className="topic-tag" aria-pressed={topic === t} onClick={() => pick(t)}>
-              {topicLabel(t)} <span className="meta">{n}</span>
+            <button key={t} type="button" className="topic-tag" aria-pressed={topic === t} onClick={() => pick(t)}
+                      style={{ ["--th" as string]: topicHue(t) }}>
+              {topicLabel(t)} <span className="tag-n">{n}</span>
             </button>
           ))}
           {topic && <button type="button" className="topic-tag topic-clear" onClick={() => setTopic(null)}>Clear ×</button>}

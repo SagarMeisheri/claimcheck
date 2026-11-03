@@ -412,3 +412,11 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .stmt-tab { font-size: 0.82rem; padding: 0.15rem 0.6rem; }
 .stmt-topics { max-height: 4.6rem; }
 .ccard-foot { padding: 0.35rem 0.65rem; }
+
+/* Topic tags: a soft tint per topic; the count matches the tag text size. */
+.topic-tag { background: hsl(var(--th, 210) 60% 55% / 0.13); border-color: hsl(var(--th, 210) 50% 50% / 0.35); color: var(--ink); }
+.topic-tag:hover { background: hsl(var(--th, 210) 60% 55% / 0.24); border-color: hsl(var(--th, 210) 50% 45% / 0.6); }
+.topic-tag[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper-raised); }
+.topic-tag .tag-n { font-size: 1em; opacity: 0.6; margin-left: 0.15em; font-variant-numeric: tabular-nums; }
+.topic-chip { font-size: 0.78rem; padding: 0.1rem 0.55rem; }
+.topic-clear { background: transparent; border-color: var(--rule); color: var(--ink-soft); }

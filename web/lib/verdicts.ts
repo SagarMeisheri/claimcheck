@@ -74,6 +74,13 @@ const TOPIC_LABELS: Record<string, string> = {
   illicit_economy: "Illicit economy", air_pollution: "Air pollution", rare_earths: "Rare earths and minerals",
 };
 
+/** A stable soft colour (hue in degrees) per topic, so the same topic always has the same tint. */
+export function topicHue(key: string): number {
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return [210, 150, 30, 280, 340, 175, 50, 250][h % 8];
+}
+
 export function topicLabel(key: string): string {
   if (TOPIC_LABELS[key]) return TOPIC_LABELS[key];
   const s = key.replaceAll("_", " ");

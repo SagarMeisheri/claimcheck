@@ -7,7 +7,7 @@ import { VerdictStrip } from "@/components/MiniBar";
 import { Avatar, Thumb } from "@/components/Thumb";
 import type { Claim, EpisodeDetail, StatementType, VerdictName } from "@/lib/types";
 import { CORE_TYPES, STATEMENT_TYPES, TYPE_ORDER, VERIFYING, breakdownParts, typeOf } from "@/lib/statements";
-import { VERDICTS, clock, topicLabel } from "@/lib/verdicts";
+import { VERDICTS, clock, topicHue, topicLabel } from "@/lib/verdicts";
 import { CheckProgress } from "@/components/CheckProgress";
 import { ClaimCard, StatementCard, type CardPhase } from "./ClaimCard";
 import { ClaimTrack } from "./ClaimTrack";
@@ -348,8 +348,9 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
               <div className="filters topic-filters" role="group" aria-label="Show statements by subject">
                 <button className="chip" aria-pressed={topic === null} onClick={() => setTopic(null)}>All subjects</button>
                 {(topic && !topicCounts.some(([t]) => t === topic) ? [...topicCounts, [topic, 0] as [string, number]] : topicCounts).map(([t, n]) => (
-                  <button key={t} className="chip" aria-pressed={topic === t} onClick={() => setTopic(topic === t ? null : t)}>
-                    {topicLabel(t)} {n}
+                  <button key={t} className="chip topic-tag topic-chip" aria-pressed={topic === t} onClick={() => setTopic(topic === t ? null : t)}
+                          style={{ ["--th" as string]: topicHue(t) }}>
+                    {topicLabel(t)} <span className="tag-n">{n}</span>
                   </button>
                 ))}
               </div>
