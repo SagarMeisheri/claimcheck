@@ -9,12 +9,31 @@ type YTPlayer = {
   pauseVideo(): void;
   getCurrentTime(): number;
   getPlayerState(): number;
+  setPlaybackRate(rate: number): void;
+  loadModule?(name: string): void;
+  setOption?(module: string, option: string, value: unknown): void;
   destroy(): void;
 };
 declare global {
   interface Window {
     YT?: { Player: new (el: HTMLElement, opts: unknown) => YTPlayer; PlayerState: Record<string, number> };
     onYouTubeIframeAPIReady?: () => void;
+  }
+}
+
+/** Every video starts at this speed so viewers don't have to change it. They can still pick another speed in the player. */
+const DEFAULT_RATE = 1.5;
+/** Caption size: -1 is 75% (0 = 100%, 1 = 150%). Undocumented YouTube option, so it is best effort and never throws. */
+const CAPTION_SIZE = -1;
+
+function applyDefaults(p: YTPlayer | null) {
+  if (!p) return;
+  p.setPlaybackRate(DEFAULT_RATE);
+  try {
+    p.loadModule?.("captions");
+    p.setOption?.("captions", "fontSize", CAPTION_SIZE);
+  } catch {
+    /* YouTube changed or removed the option: captions just keep their normal size */
   }
 }
 
@@ -66,6 +85,7 @@ export const YouTubePlayer = forwardRef<PlayerHandle, Props>(function YouTubePla
   const host = useRef<HTMLDivElement>(null);
   const player = useRef<YTPlayer | null>(null);
   const isReady = useRef(false);
+  const rateApplied = useRef(false);
   const cbs = useRef({ onPlayingChange, onError, onReady });
   cbs.current = { onPlayingChange, onError, onReady };
 
@@ -80,14 +100,22 @@ export const YouTubePlayer = forwardRef<PlayerHandle, Props>(function YouTubePla
         videoId,
         width: "100%",
         height: "100%",
-        playerVars: { playsinline: 1, rel: 0, controls: 1, fs: 1, start: Math.max(0, Math.floor(start)), origin: window.location.origin },
+        playerVars: { playsinline: 1, rel: 0, controls: 1, fs: 1, iv_load_policy: 3, cc_load_policy: 0, start: Math.max(0, Math.floor(start)), origin: window.location.origin },
         events: {
           onReady: () => {
             isReady.current = true;
+            applyDefaults(player.current);
             cbs.current.onReady?.();
             if (autoplay) player.current?.playVideo();
           },
-          onStateChange: (e: { data: number }) => cbs.current.onPlayingChange?.(e.data === 1),
+          onStateChange: (e: { data: number }) => {
+            // YouTube can reset the rate when playback first starts, so set it once more then. After that the viewer's choice stands.
+            if (e.data === 1 && !rateApplied.current) {
+              rateApplied.current = true;
+              applyDefaults(player.current);
+            }
+            cbs.current.onPlayingChange?.(e.data === 1);
+          },
           onError: (e: { data: number }) => cbs.current.onError?.(e.data),
         },
       });
@@ -101,6 +129,7 @@ export const YouTubePlayer = forwardRef<PlayerHandle, Props>(function YouTubePla
       }
       player.current = null;
       isReady.current = false;
+      rateApplied.current = false;
     };
     // The player is created once per video; start/autoplay only apply to the first load.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -318,7 +318,7 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .vcard-thumb-btn:disabled { cursor: default; }
 .vcard-thumb-btn:hover .facade-play { background: #c4302b; }
 .vcard-player { aspect-ratio: 16 / 9; width: 100%; background: #000; border-radius: 8px; overflow: hidden; }
-.vcard-close { margin-top: 0.3rem; background: none; border: 0; padding: 0; color: var(--ink-soft); font-size: 0.85rem; cursor: pointer; text-decoration: underline; }
+.vcard-close { background: none; border: 0; padding: 0; color: var(--ink-soft); font-size: 0.85rem; cursor: pointer; text-decoration: underline; }
 .ccard-playbtn { width: 100%; background: none; border: 0; text-align: left; font: inherit; color: inherit; cursor: pointer; }
 .ccard-playbtn:disabled { cursor: default; }
 .ccard-playbtn:hover:not(:disabled) .ccard-text { text-decoration: underline; }
@@ -330,13 +330,13 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .stmt-card.is-active { box-shadow: inset 4px 0 0 var(--focus); }
 .stmt-note { margin: 0.15rem 0 0; font-style: italic; }
 .stmt-filters { margin-bottom: 0.4rem; flex-wrap: wrap; }
-.topic-filters { margin-bottom: 0.5rem; flex-wrap: wrap; }
+.topic-filters { margin-bottom: 0.5rem; flex-wrap: wrap; align-content: flex-start; max-height: 6rem; overflow-y: auto; overflow-x: hidden; }
 .topic-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; padding: 0 0.75rem 0.45rem; }
 .claim-card .topic-tags { padding: 0; margin: 0.35rem 0 0; }
 .topic-tag { font: inherit; font-size: 0.78rem; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid var(--rule); background: transparent; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
 .topic-tag:hover { border-color: var(--ink); color: var(--ink); }
 .topic-tag[aria-pressed="true"] { background: var(--ink); color: var(--paper-raised); border-color: var(--ink); }
-.stmt-topics { display: flex; gap: 0.35rem; overflow-x: auto; padding: 0.35rem 0 0; flex-wrap: nowrap; }
+.stmt-topics { display: flex; gap: 0.35rem; flex-wrap: wrap; align-content: flex-start; padding: 0.35rem 0 0; max-height: 6rem; overflow-y: auto; overflow-x: hidden; }
 .topic-clear { border-style: dashed; }
 .topic-filters .chip { font-size: 0.8rem; opacity: 0.9; }
 .chip-type { border-color: var(--stype); }
@@ -395,3 +395,20 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 @keyframes ccard-pulse { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-factual) 25%, transparent); } }
 .vcard-channel { flex-wrap: wrap; }
 .vcard-channel-name { font-weight: 600; color: var(--ink); }
+
+/* Playing: the player takes the full width of the card (easier to read captions); the summary moves below it. */
+.vcard-head.is-playing { grid-template-columns: minmax(0, 1fr); }
+.vcard-head.is-playing .vcard-media { max-width: 56rem; }
+.vcard-under { display: flex; gap: 1rem; align-items: baseline; margin: 0.35rem 0 0; font-size: 0.85rem; }
+.vcard-yt { color: var(--ink); font-weight: 600; text-decoration: underline; }
+
+/* Carousel: a little smaller, so more fits on screen. */
+.ccard { width: 12rem; }
+.ccard-head { font-size: 0.78rem; }
+.ccard-text { font-size: 0.86rem; line-height: 1.32; -webkit-line-clamp: 4; }
+.ccard-main { padding: 0.55rem 0.65rem 0.3rem; }
+.topic-tags { padding: 0 0.65rem 0.4rem; gap: 0.25rem; }
+.topic-tag { font-size: 0.72rem; padding: 0.05rem 0.45rem; }
+.stmt-tab { font-size: 0.82rem; padding: 0.15rem 0.6rem; }
+.stmt-topics { max-height: 4.6rem; }
+.ccard-foot { padding: 0.35rem 0.65rem; }

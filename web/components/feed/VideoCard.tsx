@@ -49,14 +49,17 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
 
   return (
     <article className="vcard">
-      <div className="vcard-head">
+      <div className={`vcard-head${playerOn && !failed ? " is-playing" : ""}`}>
         <div ref={frame} className="vcard-media">
           {playerOn && !failed ? (
             <>
               <div className="vcard-player">
                 <YouTubePlayer ref={player} videoId={ep.youtube_video_id} start={start} autoplay onError={() => setFailed(true)} />
               </div>
-              <button type="button" className="vcard-close" onClick={close}>Close video</button>
+              <p className="vcard-under">
+                <a className="vcard-yt" href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}`} target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a>
+                <button type="button" className="vcard-close" onClick={close}>Close video</button>
+              </p>
             </>
           ) : (
             <button type="button" className="vcard-thumb vcard-thumb-btn" disabled={ep.video_pending || checking}

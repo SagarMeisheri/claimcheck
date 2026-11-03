@@ -286,6 +286,11 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
             )}
           </div>
         </div>
+        {!ep.video_pending && playerOn && (
+          <p className="vcard-under">
+            <a className="vcard-yt" href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}`} target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a>
+          </p>
+        )}
 
         {ep.claims.length > 0 && (
           <div className={`track-holder${playerOn ? " is-on" : ""}`}>
