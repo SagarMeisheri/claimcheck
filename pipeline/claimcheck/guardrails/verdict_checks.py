@@ -144,10 +144,9 @@ def apply_verdict_checks(
         if ok is False:
             downgrade("unverifiable", "number_mismatch", "claim numbers not found in cited quotes")
 
-    # 3. Stricter tier: Supported/False/Misleading need an official (tier-1) source.
-    if tier == "stricter" and verdict in ("supported", "false", "misleading") and policy["tiers"]["stricter"].get("require_tier1_source"):
-        if not any(c.tier == 1 for c in good):
-            downgrade("unverifiable", "tier1_source_required", "stricter-tier claim without an official source")
+    # 3. A verdict other than unverifiable must rest on a recognised news (or official) source.
+    if verdict in ("supported", "false", "misleading") and not any(c.tier <= 2 for c in good):
+        downgrade("unverifiable", "no_news_source", "cited sources are not recognised news outlets")
 
     # 4. Disputed needs two independent sources that both pass the quote check.
     if verdict == "disputed" and len({c.url for c in good}) < 2:
@@ -155,10 +154,7 @@ def apply_verdict_checks(
 
     # 5. False rule: strong source, high confidence, and a second judge run agrees.
     if verdict == "false":
-        strong = any(c.tier <= 2 for c in good)
-        if not strong:
-            downgrade("unverifiable", "false_needs_strong_source")
-        elif confidence < rules["false_min_confidence"]:
+        if confidence < rules["false_min_confidence"]:
             downgrade("unverifiable", "false_low_confidence", f"confidence {confidence:.2f}")
         elif rules.get("false_requires_second_judge"):
             if second_opinion is None:
@@ -181,7 +177,7 @@ def apply_verdict_checks(
         reasoning=reasoning,
         correction=judge.correction if verdict == "false" else "",
         evidence_grade=judge.evidence_grade or "not_applicable",
-        citations=good if verdict != "unverifiable" else [],
+        citations=good,  # always keep the quotes that passed the check, even when the verdict is unverifiable
         downgrades=[f"{r}: {d}" for r, d in downgrades],
     )
     return final, downgrades

@@ -30,7 +30,6 @@ tiers:
     description: Personal finance, markets, tax and EPFO rules, company numbers, economy statistics, technology, environment data.
   stricter:
     description: Political claims, health and nutrition, science, legal rules, social statistics.
-    require_tier1_source: true       # Supported/False/Misleading need an official source
     review_verdicts: ["false", misleading, disputed]
   never:
     description: Religious or spiritual beliefs; claims about whole communities, castes or religions; private individuals and minors; merits of live court cases; attacks and disasters in the first 48 hours; satire; opinions, predictions, anecdotes.

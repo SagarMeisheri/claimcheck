@@ -85,8 +85,8 @@ Claim: {{claim_text}}
 Said in: {{video_title}}, around {{start_ts}}, PESTLE area: {{pestle_area}}
 
 Return three searches, one for each purpose:
-1. official (scope "tier1"): the primary source, e.g. the ministry, regulator or statistics body. Name the dataset
-   (e.g. "PLFS unemployment rate 2025", "PMAY-G houses completed").
+1. news (scope "open"): the reporting behind the claim, e.g. the newspaper investigation, wire report or
+   official release it came from. Name the outlet or dataset when the speaker did.
 2. corroborate (scope "open"): an independent source (research body, reputable media) for the same fact.
 3. counter (scope "open"): look for evidence AGAINST the claim: a revision, a different figure, a correction.
 

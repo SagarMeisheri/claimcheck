@@ -105,13 +105,19 @@ def test_false_low_confidence_becomes_unverifiable():
     assert fv.verdict == "unverifiable"
 
 
-def test_stricter_tier_requires_official_source():
+def test_news_source_is_enough_even_for_stricter_claims():
     url = "https://thehindu.com/gdp"
     ev = {url: {"title": "The Hindu", "text": GDP_TEXT, "tier": 2}}
-    fv, d = apply_verdict_checks(judge("supported", url=url), claim(tier="stricter"), "stricter", ev, POLICY)
-    assert fv.verdict == "unverifiable" and any(r == "tier1_source_required" for r, _ in d)
-    fv, _ = apply_verdict_checks(judge("supported", url=url), claim(), "normal", ev, POLICY)
-    assert fv.verdict == "supported"
+    fv, _ = apply_verdict_checks(judge("supported", url=url), claim(tier="stricter"), "stricter", ev, POLICY)
+    assert fv.verdict == "supported" and fv.citations
+
+
+def test_unrecognised_source_is_unverifiable_but_keeps_its_citation():
+    url = "https://random-blog.example/gdp"
+    ev = {url: {"title": "Blog", "text": GDP_TEXT, "tier": 3}}
+    fv, d = apply_verdict_checks(judge("supported", url=url), claim(), "normal", ev, POLICY)
+    assert fv.verdict == "unverifiable" and any(r == "no_news_source" for r, _ in d)
+    assert [c.url for c in fv.citations] == [url]
 
 
 def test_disputed_needs_two_sources():
