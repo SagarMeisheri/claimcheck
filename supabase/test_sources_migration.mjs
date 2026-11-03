@@ -1,4 +1,4 @@
-// Tests 0012 and 0013 in PGlite: old verdicts hidden, tags merged, sources public (any site, in search order),
+// Tests 0012-0014 in PGlite: old verdicts hidden, tags merged, sources public (any site, in search order),
 // empty lookups reopened, private tables private.
 // cd somewhere && npm i @electric-sql/pglite @electric-sql/pglite-pgvector
 // node supabase/test_sources_migration.mjs supabase/migrations   (run from a folder where those packages resolve)
@@ -78,6 +78,7 @@ await assert.rejects(db.query(`select tally from episodes`))
 await assert.rejects(db.query(`select count(*) from source_requests`))
 await assert.rejects(db.query(`select count(*) from feedback`))
 assert.deepEqual((await db.query(`select tier from claim_sources order by rank`)).rows.map((r) => r.tier), [1, 3])
+assert.equal((await db.query(`select sources_summary from claims where idx = 1`)).rows[0].sources_summary, null)
 assert.equal((await db.query(`select sources_batch_status, statement_counts from episodes`)).rows.length, 1)
 await db.exec(`reset role`)
 

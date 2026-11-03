@@ -30,7 +30,7 @@ type EpisodeRow = {
 
 const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, statement_counts, summary, sources_batch_status, created_at, channel_id, channels(name)";
 const SOURCE_COLS = "claim_sources(url, title, tier, excerpt, publish_date, rank)";
-const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, ${SOURCE_COLS}`;
+const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, ${SOURCE_COLS}`;
 const PUBLIC_STATUSES = ["done", "in_review", "processing", "queued"];
 
 function toEpisode(r: EpisodeRow): Episode {
@@ -62,7 +62,8 @@ function toClaim(c: any): Claim {
 function toPreview(c: Claim): PreviewClaim {
   return {
     id: c.id, start_s: c.start_s, claim_text: c.claim_text, speaker: c.speaker, pestle_area: c.pestle_area, topic: c.topic,
-    topics: c.topics, statement_type: c.statement_type, sources_status: c.sources_status, first_source: c.sources[0] ?? null,
+    topics: c.topics, statement_type: c.statement_type, sources_status: c.sources_status,
+    sources: c.sources.map((s) => ({ ...s, excerpt: "" })), sources_summary: c.sources_summary ?? null,
   };
 }
 
@@ -157,15 +158,17 @@ export async function getOpenReports(): Promise<OpenReport[]> {
   }));
 }
 
-export type ClaimSources = { id: string; sources_status: SourcesStatus; sources_error: string | null; video_id: string | null; sources: Source[] };
+export type ClaimSources = {
+  id: string; sources_status: SourcesStatus; sources_error: string | null; video_id: string | null; sources: Source[]; sources_summary: string | null;
+};
 
 /** Live state of one claim's source lookup, polled by the "Check sources" button. */
 export async function getClaimSources(id: string): Promise<ClaimSources | null> {
   const { data } = await publicDb().from("claims")
-    .select(`id, sources_status, sources_error, episodes(youtube_video_id), ${SOURCE_COLS}`)
+    .select(`id, sources_status, sources_error, sources_summary, episodes(youtube_video_id), ${SOURCE_COLS}`)
     .eq("id", id).maybeSingle();
   if (!data) return null;
   const d = data as any;
   return { id: d.id, sources_status: d.sources_status, sources_error: d.sources_error,
-           video_id: d.episodes?.youtube_video_id ?? null, sources: inSearchOrder(d.claim_sources) };
+           video_id: d.episodes?.youtube_video_id ?? null, sources: inSearchOrder(d.claim_sources), sources_summary: d.sources_summary ?? null };
 }

@@ -14,5 +14,5 @@ export async function GET(_req: Request, { params }: { params: Promise<{ claimId
   if (!s) return NextResponse.json({ status: "unknown" }, { status: 404, headers: { "Cache-Control": "no-store" } });
   // Once the result is in, drop the cached video page so the next refresh shows it.
   if (FINAL.includes(s.sources_status) && s.video_id) revalidatePath(`/v/${s.video_id}`);
-  return NextResponse.json({ status: s.sources_status, error: s.sources_error, sources: s.sources }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ status: s.sources_status, error: s.sources_error, sources: s.sources, summary: s.sources_summary }, { headers: { "Cache-Control": "no-store" } });
 }

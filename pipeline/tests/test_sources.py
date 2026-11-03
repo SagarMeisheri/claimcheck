@@ -14,7 +14,8 @@ from claimcheck.tools import evidence
 from claimcheck.tools.evidence import best_excerpt, clean_excerpt, search_sources, to_sources
 
 POLICY = load_policy()
-SETTINGS = Settings(max_cost_usd_per_episode=3.0, sources_per_claim=5, sources_concurrency=3, search_cost_usd=0.005)
+SETTINGS = Settings(max_cost_usd_per_episode=3.0, sources_per_claim=5, sources_concurrency=3, search_cost_usd=0.005,
+                    summarize_sources=False)  # summaries: see the tests at the end
 
 
 def hit(url, title="t", excerpts=("Some text from the page.",), date=None):
@@ -105,8 +106,12 @@ class FakeStore:
     async def set_sources_status(self, cid, status, error=None):
         self.status[cid] = (status, error)
 
-    async def save_claim_sources(self, cid, found):
+    async def save_claim_sources(self, cid, found, summary=""):
         self.saved[cid] = [s.url for s in found]
+        self.summary = getattr(self, "summary", {})
+        self.summary[cid] = summary
+        self.full = getattr(self, "full", {})
+        self.full[cid] = found
         self.status[cid] = ("done", None)
 
     async def add_episode_cost(self, eid, usd, tin, tout):
@@ -114,6 +119,9 @@ class FakeStore:
 
     async def update_episode(self, eid, fields):
         self.updates.append(fields)
+
+    async def save_guardrail_events(self, eid, events):
+        self.events = events
 
 
 def test_precheck():
@@ -181,7 +189,7 @@ def test_all_claims_stop_at_the_budget_and_return_the_rest(monkeypatch):
     monkeypatch.setattr(evidence, "_client", lambda s: FakeParallel([hit("https://a.example/x")]))
     store = FakeStore(batch=claims(10))
     out = asyncio.run(run_video_sources("e1", settings=Settings(max_cost_usd_per_episode=0.02, search_cost_usd=0.005,
-                                                                 sources_concurrency=3), store=store))
+                                                                 sources_concurrency=3, summarize_sources=False), store=store))
     assert out["searched"] == 4 and len(store.saved) == 4  # $0.02 pays for 4 searches; earliest claims first
     assert set(store.saved) == {"id9", "id8", "id7", "id6"}
 
@@ -226,7 +234,7 @@ def test_lookups_for_one_video_are_serialised(monkeypatch):
 def test_each_press_is_capped_and_the_rest_wait_for_the_next_press(monkeypatch):
     monkeypatch.setattr(evidence, "_client", lambda s: FakeParallel([hit("https://a.example/x")]))
     store = FakeStore(batch=claims(10))
-    out = asyncio.run(run_video_sources("e1", settings=Settings(sources_all_max_searches=3, search_cost_usd=0.005), store=store))
+    out = asyncio.run(run_video_sources("e1", settings=Settings(sources_all_max_searches=3, search_cost_usd=0.005, summarize_sources=False), store=store))
     assert out["searched"] == 3 and out["remaining"] == 7 and set(store.saved) == {"id9", "id8", "id7"}
     assert not any(f"id{i}" in store.status for i in range(7))  # never touched: they keep "Check sources"
 
@@ -239,3 +247,75 @@ def test_claims_with_the_same_wording_share_one_search(monkeypatch):
     store = FakeStore(batch=batch)
     out = asyncio.run(run_video_sources("e1", settings=SETTINGS, store=store))
     assert out["searched"] == 2 and len(fake.calls) == 2 and store.saved["a"] == store.saved["b"] == ["https://a.example/x"]
+
+
+# --- One neutral line per source (ADK step) ------------------------------------------------------------
+import json  # noqa: E402
+from typing import AsyncGenerator  # noqa: E402
+
+from google.adk.models.base_llm import BaseLlm  # noqa: E402
+from google.adk.models.llm_response import LlmResponse  # noqa: E402
+from google.genai import types  # noqa: E402
+
+from claimcheck.agents import llm_agents  # noqa: E402
+from claimcheck.agents.sources import acceptable_summary  # noqa: E402
+
+SUMMARY_SETTINGS = Settings(max_cost_usd_per_episode=3.0, sources_per_claim=5, search_cost_usd=0.005, summarize_sources=True)
+
+
+class SummaryLlm(BaseLlm):
+    model: str = "fake"
+    text: str = ""
+    fail: bool = False
+
+    async def generate_content_async(self, llm_request, stream=False) -> AsyncGenerator[LlmResponse, None]:
+        if self.fail:
+            raise RuntimeError("model down")
+        assert "never judge the statement" in str(llm_request.config.system_instruction)
+        assert "UNTRUSTED PAGE 3" in str(llm_request.contents[-1])  # every page is given to the model
+        yield LlmResponse(content=types.Content(role="model", parts=[types.Part(text=json.dumps({"summary": self.text}))]))
+
+
+def _with_summary(monkeypatch, text, fail=False):
+    monkeypatch.setattr(llm_agents, "_model", lambda name, settings: SummaryLlm(text=text, fail=fail))
+    monkeypatch.setattr(evidence, "_client", lambda s: FakeParallel([
+        hit("https://www.livemint.com/a", "Mint", ["India's share stood at 2.98 percent as of March 30, 2026."]),
+        hit("https://someblog.in/b", "Blog", ["Markets are interesting."]),
+        hit("https://en.wikipedia.org/wiki/X", "Wikipedia", ["List of countries by market cap."])]))
+
+
+def test_one_summary_says_what_the_sources_say_citing_them_by_number(monkeypatch):
+    _with_summary(monkeypatch, "Reports put India's share of global market cap at 2.98% in March 2026 [1][3] [7].")
+    store = FakeStore(row())
+    res = asyncio.run(run_claim_sources("c1", settings=SUMMARY_SETTINGS, store=store))
+    assert (res["status"], res["sources"], res["summary"]) == ("done", 3, True)
+    # a citation to a source that doesn't exist ([7]) is removed
+    assert store.summary["c1"] == "Reports put India's share of global market cap at 2.98% in March 2026 [1][3]."
+    assert store.saved["c1"] == ["https://www.livemint.com/a", "https://someblog.in/b", "https://en.wikipedia.org/wiki/X"]
+    assert "page_text" not in store.full["c1"][0].model_dump()  # the raw page text is never stored
+
+
+def test_a_summary_that_grades_the_claim_is_dropped_but_the_sources_are_kept(monkeypatch):
+    _with_summary(monkeypatch, "The sources confirm the statement [1].")
+    store = FakeStore(row())
+    res = asyncio.run(run_claim_sources("c1", settings=SUMMARY_SETTINGS, store=store))
+    assert res["sources"] == 3 and store.summary["c1"] == ""
+    assert any(e.rule == "summary_judging_words" for e in store.events)
+
+
+def test_a_failed_summary_step_still_saves_every_source(monkeypatch):
+    _with_summary(monkeypatch, "", fail=True)
+    store = FakeStore(row())
+    res = asyncio.run(run_claim_sources("c1", settings=SUMMARY_SETTINGS, store=store))
+    assert res["status"] == "done" and res["sources"] == 3 and res["summary"] is False
+    assert any(e.rule == "summary_failed" for e in store.events)
+
+
+def test_judging_words_are_caught_but_plain_descriptions_pass():
+    for bad in ["Confirms the GDP figure [1].", "The claim is false according to RBI [2].", "Data contradicts this.",
+                "Figures are consistent with the statement.", "This is misleading."]:
+        assert acceptable_summary(bad, 5) == "", bad
+    for ok in ["Reports give GDP growth of 7.4% in 2025-26 [1][2].", "One gives India's share as 2.98% in March 2026 [3].",
+               "They describe passive fund allocation to India [1]."]:
+        assert acceptable_summary(ok, 5) == ok
+    assert len(acceptable_summary("word " * 100, 5)) <= 361

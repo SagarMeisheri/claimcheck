@@ -36,7 +36,7 @@ function Card({ videoId, c, active, topic, onTopic, onPlay }: {
       {isClaim && (
         <div className="ccard-foot">
           {c.sources_status === "done"
-            ? <SourceList sources={c.first_source ? [c.first_source] : []} compact />
+            ? <SourceList sources={c.sources} summary={c.sources_summary} compact />
             : (c.sources_status === "not_requested" || c.sources_status === "failed" || c.sources_status === "queued" || c.sources_status === "searching")
               && <CheckSources claimId={c.id} status={c.sources_status} error={null} compact onBusy={onBusy} />}
           <Link href={`/v/${videoId}#claim-${c.id}`} className="ccard-play">Open in the video page</Link>

@@ -3,10 +3,11 @@
 Paste a YouTube link (any public, finished video) and ClaimCheck breaks it into what was said: an AI summary and
 every statement with its timestamp, tagged as a **claim, opinion, forecast or other**, filterable by type and
 subject, playable 20 s at a time. For a claim, a viewer can press **Check sources**: one web search on the claim's
-wording, showing the top 5 results as the search returned them (title, link, site, date and the relevant passage).
+wording, showing the top 5 results as the search returned them (title, link, site, date and the relevant passage),
+with a 1-2 sentence AI summary of what those pages say, citing them as [1], [2].
 
 **ClaimCheck is not a fact-checker.** Nothing is judged true or false, there are no scores, and sources are search
-results shown for context only. Earlier versions published verdicts; that was removed (see `REPORT-adoption-and-legal.md` for why), and
+results shown for context only; their summary describes what the pages say and never whether a claim is right. Earlier versions published verdicts; that was removed (see `REPORT-adoption-and-legal.md` for why), and
 old verdict data is kept in the database but hidden from the public (migration 0012).
 
 ```
@@ -20,7 +21,7 @@ supabase/   Postgres schema, row-level security and column grants
 Needs Docker, the Supabase CLI, Python 3.11+, Node 20+. There is no demo data: the app shows only videos you submit.
 
 ```bash
-supabase start && supabase db reset        # local Postgres with migrations 0001-0013 (ports 55321-55329)
+supabase start && supabase db reset        # local Postgres with migrations 0001-0014 (ports 55321-55329)
 
 cd pipeline
 python3 -m venv .venv && . .venv/bin/activate
@@ -64,7 +65,7 @@ EpisodePipeline (ADK SequentialAgent)                       POST /episodes
   ClaimFilter     code   150-statement cap; never-show topics redacted in code whatever the model said
   Publisher       code   the only writer; statement counts, summary, cost
 
-Sources (agents/sources.py, tools/evidence.py): no model, nothing filtered after the search
+Sources (agents/sources.py, tools/evidence.py): nothing filtered after the search
   One claim                                                   POST /claims/{id}/sources
     web app       rate limits (10 per person per day, 120 per hour site-wide), marks the claim queued
     precheck      a claim, not redacted, no sources yet, video under its cost cap; one lookup per video at a time
@@ -72,9 +73,13 @@ Sources (agents/sources.py, tools/evidence.py): no model, nothing filtered after
                   the request. Top 5 results kept in Parallel's order: title, link, date, site label (official /
                   news or research / none) and the passage of the page text that shares the most words and numbers
                   with the claim. ~$0.005, about a second
-    save          on the claim for everyone, or "no sources found"
+    summarize     ADK LlmAgent on Gemini 3.5 Flash-Lite: 1-2 sentences (<= 45 words) on what the pages together say,
+                  with their own figures and dates, citing them as [1], [2]. Describes, never judges: a summary with
+                  judging words (confirms, contradicts, true, false, ...) is dropped in code, as are citations to
+                  sources that don't exist. If it fails, the sources are saved without it. ~$0.0007
+    save          on the claim for everyone (claim_sources rows + claims.sources_summary), or "no sources found"
   Every claim of a video                                      POST /episodes/{id}/sources-all
-    the same search for each claim without sources, 5 at a time, each saved as it lands. Up to 25 searches per
+    the same search and summary for each claim without sources, 5 at a time, each saved as it lands. Up to 25 searches per
     press (earliest claims first; press again for more), never beyond the video's budget; claims with the same
     wording share one search
 
@@ -92,21 +97,22 @@ Each claim has a `sources_status`: `not_eligible` (not a claim, or redacted), `n
 | Every model call | Per-video cost cap ($3) via an ADK plugin, covering the first pass and every source search ($0.005 each); counts prompt, output, thinking **and tool-use** tokens (agentic video bills frames and transcript as tool use). Prices in `config.py` use the published 2027 Flash price so the cap never undercounts. Model Armor plugin when templates are configured |
 | Prompts | Describe, never evaluate; no prompt asks whether a claim is true or for a view of a speaker. All video text and fetched pages are wrapped as untrusted data; instruction-like lines in pages are removed |
 | Buttons | Claims only; 10 "Check sources" per person per day and 120 per hour site-wide, 3 "Check sources for all" per person per day and 20 per hour (`SOURCES_*` env vars; 0 disables). Submissions: 5 per person per day |
-| Sources | A plain web search per claim, no model involved; results shown as returned (top 5, Parallel's order), social media and video sites excluded in the request. Site labels (official, news or research) are display only and never hide a result |
+| Sources | A plain web search per claim; results shown as returned (top 5, Parallel's order), social media and video sites excluded in the request. Site labels (official, news or research) are display only and never hide a result. The AI summary of the pages runs on Flash-Lite with the pages wrapped as untrusted data, and is dropped if it uses judging words |
 | Content policy | Religious beliefs, claims about whole communities/castes/religions, private individuals and minors, live court cases, disasters in the first 48 h, satire: stored redacted and never shown |
 | Reports | "Report a problem" on every statement goes to `/review`; a reviewer can hide a statement for everyone |
 | YouTube data | Refreshed every 25 days by the daily maintenance cron (YouTube allows 30); videos no longer public are marked `removed` and hidden; no channel avatars stored |
 | Privacy | Salted IP hashes only, for rate limits; deleted after 30 days by the maintenance cron |
 
-All of these are covered by tests in `pipeline/tests/` (45 tests, offline).
+All of these are covered by tests in `pipeline/tests/` (49 tests, offline).
 
 ## Going live
 
 1. **Supabase**: create a project and run every migration in order (`supabase db push`, or the SQL editor):
-   `0001`–`0013`. An existing database only needs the ones it's missing. `0012_sources_only.sql` hides old verdicts,
+   `0001`–`0014`. An existing database only needs the ones it's missing. `0012_sources_only.sql` hides old verdicts,
    merges hearsay/analogy/loaded-language into "other", adds sources, rate-limit and YouTube-refresh columns;
    `0013_plain_search_sources.sql` stores search results as returned (excerpt, rank, any site) and reopens claims
-   that came back empty. If 0006–0011 were applied by hand (not through the CLI), apply 0012 and 0013 the same way:
+   that came back empty; `0014_source_summaries.sql` adds `claims.sources_summary`. If 0006–0011 were applied by hand
+   (not through the CLI), apply 0012-0014 the same way:
    running `supabase migration up` would re-run 0006's backfill. Deploy order: migration, then pipeline, then web.
 2. **Pipeline (Cloud Run)**: `cd pipeline && gcloud run deploy claimcheck-pipeline --source . --set-env-vars ...` with
    `GOOGLE_API_KEY`, `PARALLEL_API_KEY`, `YOUTUBE_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
@@ -119,11 +125,11 @@ All of these are covered by tests in `pipeline/tests/` (45 tests, offline).
    recall >= 80%, tag agreement >= 80%.
 
 Model names, limits and prices are environment variables (`CLAIMCHECK_FAST_MODEL`,
-`CLAIMCHECK_PRICES_JSON`, `CLAIMCHECK_SOURCES_PER_CLAIM`, `CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES`, `CLAIMCHECK_VIDEO_PROCESSING=static` for the fallback, ...); see `pipeline/claimcheck/config.py`.
+`CLAIMCHECK_PRICES_JSON`, `CLAIMCHECK_SOURCES_PER_CLAIM`, `CLAIMCHECK_SUMMARY_MODEL`, `CLAIMCHECK_SUMMARIZE_SOURCES=0`, `CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES`, `CLAIMCHECK_VIDEO_PROCESSING=static` for the fallback, ...); see `pipeline/claimcheck/config.py`.
 
 ## What has and hasn't been verified
 
-Verified: all pipeline tests; a live "Check sources" on a real claim (5 sources, $0.005); migrations 0012-0013 in PGlite (`node supabase/test_sources_migration.mjs`, with
+Verified: all pipeline tests; live "Check sources" on real claims (5 sources and a Flash-Lite summary, about $0.0057); migrations 0012-0014 in PGlite (`node supabase/test_sources_migration.mjs`, with
 `@electric-sql/pglite` installed) and on a local Supabase; web typecheck and production build; the pages in a real
 browser against local data, including filing and resolving a report.
 

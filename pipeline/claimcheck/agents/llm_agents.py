@@ -1,4 +1,5 @@
-"""The extractor LlmAgent: reads the video and returns tagged statements. Source lookups use no model (tools/evidence.py)."""
+"""LlmAgents: the extractor (reads the video, tags statements) and the source summarizer (what the web
+sources found for a claim say, in 1-2 sentences). Neither has tools; searches run in code (tools/evidence.py)."""
 
 from __future__ import annotations
 
@@ -13,7 +14,8 @@ from google.genai import types
 from .. import prompts
 from ..config import Settings
 from ..context import get_context
-from ..schemas import ExtractionResult
+from ..guardrails.injection import screen_text, wrap_untrusted
+from ..schemas import ExtractionResult, SourcesSummary
 
 
 def _model(name: str, settings: Settings) -> Any:
@@ -63,3 +65,19 @@ def extractor_agent(s: Settings) -> LlmAgent:
                     include_contents="none", output_schema=ExtractionResult, output_key="extraction",
                     generate_content_config=cfg, before_agent_callback=skip_if_gated,
                     before_model_callback=inject_video)
+
+
+# --- Source summaries ------------------------------------------------------------------------
+
+def inject_pages(callback_context: CallbackContext, llm_request: LlmRequest) -> None:
+    """before_model_callback on the summarizer: the pages, numbered, as untrusted data (instruction-like lines removed)."""
+    blocks = "\n\n".join(
+        wrap_untrusted(f"PAGE {p['n']}", f"Title: {p['title']}\nSite: {p['site']}\n\n{screen_text(p['text'])[0]}")
+        for p in callback_context.state["pages"])
+    llm_request.contents.append(types.Content(role="user", parts=[types.Part(text=f"Pages:\n\n{blocks}\n\nSummarize what these pages say.")]))
+
+
+def summarizer_agent(s: Settings, name: str = "source_summarizer") -> LlmAgent:
+    return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.SUMMARIZE,
+                    include_contents="none", output_schema=SourcesSummary, output_key="summary",
+                    generate_content_config=_cfg(0.0), before_model_callback=inject_pages)

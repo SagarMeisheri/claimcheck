@@ -1,7 +1,8 @@
 """Prompts. They describe the task only; every rule that matters is enforced in code.
 
 ClaimCheck describes what a video says. No prompt asks a model to decide whether a claim is true, and no prompt asks
-for an opinion about a speaker. Sources are found by a plain web search (tools/evidence.py), with no model involved.
+for an opinion about a speaker. Sources are found by a plain web search (tools/evidence.py); a cheap model then writes
+one neutral line per source (SUMMARIZE), checked in code for judging words.
 
 {placeholders} are filled from ADK session state.
 """
@@ -47,6 +48,25 @@ discussed. Neutral tone. No judgements of the speakers or of whether anything sa
 
 Skip ads, sponsor reads, intros, greetings and small talk. Return at most 150 statements in the order they were
 said, favouring substantive ones.
+
+{UNTRUSTED_RULE}
+"""
+
+
+SUMMARIZE = f"""You help a reader skim web pages found for one statement from a video. You never judge the statement.
+
+Statement: {{claim_text}}
+
+The pages follow, numbered, in UNTRUSTED blocks. Using only the page text given, write summary: 1-2 sentences (at
+most 45 words) on what the pages together say about the statement's subject, citing pages by number in square
+brackets. Example: "Reports put India's share of global market cap at about 3% in 2026 [1][2]; one says Taiwan
+overtook India in May 2026 [4]."
+- Group pages that say the same thing; leave out pages that say nothing about the subject.
+- Give the pages' own figures, dates, periods and places, so a reader can compare them with the statement themselves.
+- If no page says anything about the subject, write an empty summary.
+- Describe the pages only. Never say whether the statement is right, and never use words like confirms, supports,
+  contradicts, disputes, true, false, accurate, correct, wrong or misleading.
+- Never comment on the speaker.
 
 {UNTRUSTED_RULE}
 """

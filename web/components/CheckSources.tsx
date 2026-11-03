@@ -14,19 +14,23 @@ const NONE: Source[] = []; // stable default: a fresh [] each render would re-ru
  * "Check sources" for one claim. Pressing it asks the pipeline to look up sources (saved for everyone). While it runs
  * the button shows progress and polls the claim; when done it shows the sources in place.
  *
- * full: the video page (shows the whole list). compact: the home carousel (shows the first source).
+ * full: the video page (summary and the numbered list). compact: the home carousel (summary and numbered site links).
  */
-export function CheckSources({ claimId, status: initial, error: initialError, sources: initialSources = NONE, compact = false, onBusy }: {
-  claimId: string; status: SourcesStatus; error: string | null; sources?: Source[]; compact?: boolean; onBusy?(busy: boolean): void;
+export function CheckSources({ claimId, status: initial, error: initialError, sources: initialSources = NONE, summary: initialSummary = null,
+  compact = false, onBusy }: {
+  claimId: string; status: SourcesStatus; error: string | null; sources?: Source[]; summary?: string | null; compact?: boolean;
+  onBusy?(busy: boolean): void;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState<SourcesStatus>(initial);
   const [message, setMessage] = useState<string | null>(initialError);
   const [sources, setSources] = useState<Source[]>(initialSources);
+  const [summary, setSummary] = useState<string | null>(initialSummary);
   const [pending, start] = useTransition();
   const running = SEARCHING.includes(status);
 
-  useEffect(() => { setStatus(initial); setMessage(initialError); setSources(initialSources); }, [initial, initialError, initialSources]);
+  useEffect(() => { setStatus(initial); setMessage(initialError); setSources(initialSources); setSummary(initialSummary); },
+    [initial, initialError, initialSources, initialSummary]);
   useEffect(() => { onBusy?.(running || pending); }, [running, pending, onBusy]);
 
   useEffect(() => {
@@ -36,13 +40,14 @@ export function CheckSources({ claimId, status: initial, error: initialError, so
       try {
         const r = await fetch(`/api/claims/${claimId}/sources`, { cache: "no-store" });
         if (!r.ok || stop) return;
-        const j = (await r.json()) as { status: SourcesStatus; error: string | null; sources: Source[] };
+        const j = (await r.json()) as { status: SourcesStatus; error: string | null; sources: Source[]; summary: string | null };
         if (SEARCHING.includes(j.status)) return;
         stop = true;
         window.clearInterval(id);
         setStatus(j.status);
         setMessage(j.error);
         setSources(j.sources ?? []);
+        setSummary(j.summary ?? null);
         if (!compact) router.refresh();
       } catch { /* try again next tick */ }
     }, POLL_MS);
@@ -56,10 +61,11 @@ export function CheckSources({ claimId, status: initial, error: initialError, so
     if (r.status === "done") {
       const j = await fetch(`/api/claims/${claimId}/sources`, { cache: "no-store" }).then((x) => x.json()).catch(() => null);
       setSources(j?.sources ?? []);
+      setSummary(j?.summary ?? null);
     }
   });
 
-  if (status === "done") return <SourceList sources={sources} compact={compact} />;
+  if (status === "done") return <SourceList sources={sources} summary={summary} compact={compact} />;
   if (running || pending) {
     return (
       <p className={compact ? "ccard-verifying" : "verify-state"} role="status" aria-live="polite">

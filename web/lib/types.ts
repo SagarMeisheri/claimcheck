@@ -29,6 +29,7 @@ export interface Claim {
   sources_status: SourcesStatus;
   sources_error: string | null;
   sources: Source[];
+  sources_summary: string | null; // AI: what the sources say, citing them as [1], [2]. Never a judgement
 }
 
 /** A statement as shown in the home-page carousel and the Topics tab. */
@@ -42,7 +43,8 @@ export interface PreviewClaim {
   topics: string[];
   statement_type: StatementType;
   sources_status: SourcesStatus;
-  first_source: Source | null;
+  sources: Source[]; // without excerpts, to keep the home page small
+  sources_summary: string | null;
 }
 
 export interface Episode {

@@ -224,9 +224,6 @@ section + section { margin-top: 2.5rem; }
 .cc-claim { margin: 0.2rem 0 0; font-size: 1.04rem; line-height: 1.4; }
 .cc-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.65rem; }
 .cc-more { margin-top: 0.5rem; }
-.source { margin: 0; border-left: 4px solid; padding: 0.1rem 0 0.1rem 0.8rem; }
-.source blockquote { margin: 0; font-size: 1.02rem; }
-.source figcaption { margin-top: 0.3rem; font-size: 0.9rem; }
 .said { color: var(--ink-soft); font-style: italic; margin: 0.4rem 0 0; }
 .back-to-now { position: fixed; bottom: 1.25rem; right: 1.25rem; z-index: 40; background: var(--focus); color: #fff; border: none; border-radius: 999px; padding: 0.5rem 1rem; font-weight: 600; cursor: pointer; }
 
@@ -401,17 +398,32 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .linkish { background: none; border: 0; padding: 0; font: inherit; font-size: 0.88rem; color: var(--ink-soft); text-decoration: underline; text-decoration-color: var(--rule); cursor: pointer; }
 .linkish:hover { color: var(--ink); }
 .said-toggle { display: block; margin-top: 0.4rem; }
-.source-list { display: grid; gap: 0.6rem; margin-top: 0.65rem; }
-.source-list-h { margin: 0; font-size: 0.8rem; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; }
-.source-list .source { border-left-color: var(--rule); }
-.source-title { font-weight: 600; }
-.source-site { margin: 0.1rem 0 0; font-size: 0.82rem; }
-.source-excerpt { margin: 0.25rem 0 0; font-size: 0.92rem; color: var(--ink-soft); }
-.source-note { font-size: 0.8rem; margin: 0; }
+/* Sources: a green "N sources" tag (found, not "true"), the AI summary with [n] links, then numbered sources. */
+.source-list { display: grid; gap: 0.5rem; margin-top: 0.65rem; min-width: 0; justify-items: start; }
+.src-tag { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.76rem; font-weight: 600;
+  color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); white-space: nowrap; }
+.src-summary { margin: 0; font-size: 0.92rem; line-height: 1.45; overflow-wrap: anywhere; }
+.cite { display: inline-block; min-width: 1.05rem; margin: 0 0.08rem; padding: 0 0.22rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; line-height: 1.3;
+  text-align: center; vertical-align: 0.15em; text-decoration: none; color: var(--ink); background: var(--paper); border: 1px solid var(--rule); }
+.cite:hover { border-color: var(--ink-soft); }
+.src-n { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 1.15rem; height: 1.15rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600;
+  color: var(--ink-soft); background: var(--paper); border: 1px solid var(--rule); }
+.src-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.src-nums { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.2rem; }
+.src-nums .cite { margin: 0; font-size: 0.74rem; padding: 0.05rem 0.3rem; vertical-align: 0; }
+.src-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.55rem; width: 100%; }
+.src-items li { display: flex; gap: 0.55rem; align-items: flex-start; min-width: 0; }
+.src-items .src-n { margin-top: 0.15rem; }
+.src-body { min-width: 0; }
+.source-title { font-weight: 600; font-size: 0.95rem; overflow-wrap: anywhere; text-decoration-color: var(--rule); }
+.source-site { margin: 0.1rem 0 0; font-size: 0.8rem; }
+.source-excerpt { margin: 0.2rem 0 0; font-size: 0.86rem; color: var(--ink-soft); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.source-note { font-size: 0.78rem; margin: 0; }
 .source-none { font-size: 0.86rem; margin: 0.5rem 0 0; }
+.ccard-foot { min-width: 0; }
 .ccard-foot .source-list { margin-top: 0; }
-.ccard-foot .source-title { font-size: 0.86rem; }
-.ccard-foot .source-excerpt { font-size: 0.82rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ccard-foot .src-summary { font-size: 0.84rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .ccard-foot .ccard-play { border-top: 0; padding: 0.35rem 0 0; }
 .tick-sourced::before { content: ""; position: absolute; top: -0.45rem; left: 50%; width: 5px; height: 5px; border-radius: 50%; background: var(--ink); transform: translateX(-50%); }
 .topic-src { display: block; }

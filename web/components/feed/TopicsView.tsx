@@ -15,7 +15,7 @@ export function TopicsView({ episodes }: { episodes: Episode[] }) {
     const key = r.topics?.[0] ?? r.topic ?? r.pestle_area;
     groups.set(key, [...(groups.get(key) ?? []), r]);
   }
-  const sorted = [...groups.entries()].filter(([, list]) => list.length > 1 || list.some((r) => r.first_source))
+  const sorted = [...groups.entries()].filter(([, list]) => list.length > 1 || list.some((r) => r.sources.length > 0))
     .sort((a, b) => b[1].length - a[1].length);
   if (!sorted.length) return <div className="empty"><p>No claims grouped by subject yet.</p></div>;
   return (
@@ -32,7 +32,7 @@ export function TopicsView({ episodes }: { episodes: Episode[] }) {
                 <Link href={`/v/${r.videoId}#claim-${r.id}`}>
                   <span className="topic-claim">{r.claim_text}</span>
                   <span className="meta">{r.channel} at {clock(r.start_s)}</span>
-                  {r.first_source && <span className="meta topic-src">Source: {r.first_source.title || domain(r.first_source.url)}</span>}
+                  {r.sources.length > 0 && <span className="topic-src"><span className="src-tag">✓ {r.sources.length} {r.sources.length === 1 ? "source" : "sources"}</span> <span className="meta">{domain(r.sources[0].url)}{r.sources.length > 1 ? ` and ${r.sources.length - 1} more` : ""}</span></span>}
                 </Link>
               </li>
             ))}

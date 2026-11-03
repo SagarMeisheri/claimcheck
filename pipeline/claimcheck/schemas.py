@@ -97,6 +97,13 @@ class Source(BaseModel):
     publish_date: Optional[str] = None
     tier: int = 3                     # display label only: 1 official, 2 established news/research, 3 other
     rank: int = 0                     # Parallel's order, most relevant first
+    page_text: str = Field(default="", exclude=True)  # Parallel's excerpts, for the summary step only; never stored
+
+
+class SourcesSummary(BaseModel):
+    """What the summary step returns: what the sources say, never an assessment of the statement."""
+
+    summary: str = Field(default="", description="1-2 neutral sentences (at most 45 words) on what the sources together say about the subject, with their own figures and dates, citing them as [1], [2]")
 
 
 class ClaimRecord(BaseModel):

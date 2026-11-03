@@ -26,6 +26,7 @@ def _env(name: str, default: str = "") -> str:
 # 31 Dec 2026 and $1.50/$7.50 from 1 Jan 2027: the later price is used so the cost cap never undercounts.
 # Override with CLAIMCHECK_PRICES_JSON='{"gemini-3.8-flash": [0.75, 3.75]}'.
 _DEFAULT_PRICES: dict[str, tuple[float, float]] = {
+    "flash-lite": (0.30, 2.50),        # gemini-3.5-flash-lite (sources summary)
     "gemini-3.8-flash": (1.50, 7.50),
 }
 
@@ -67,6 +68,10 @@ class Settings:
     sources_per_claim: int = int(_env("CLAIMCHECK_SOURCES_PER_CLAIM", "5"))
     sources_search_mode: str = field(default_factory=lambda: _env("CLAIMCHECK_SOURCES_SEARCH_MODE", "fast"))  # turbo | fast | basic | advanced
     excerpt_chars: int = int(_env("CLAIMCHECK_EXCERPT_CHARS", "320"))
+    # One short neutral line per source, written by a cheap model from the page text (agents/sources.py). If it
+    # fails or the budget runs out, the sources are still saved and the excerpt is shown instead.
+    summarize_sources: bool = _env("CLAIMCHECK_SUMMARIZE_SOURCES", "1") == "1"
+    summary_model: str = field(default_factory=lambda: _env("CLAIMCHECK_SUMMARY_MODEL", "gemini-3.5-flash-lite"))
     # "Check sources for all claims" (agents/sources.py): the same search for every claim, a few at a time.
     # Searches per press (earliest claims first; press again for the rest). Claims with the same wording share one.
     sources_all_max_searches: int = int(_env("CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES", "25"))

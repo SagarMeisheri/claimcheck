@@ -66,7 +66,7 @@ export function StatementCard({ claim: c, videoId, active, phase, canWatch, canL
           : <button type="button" className="linkish said-toggle" onClick={() => setShowQuote(true)}>What was said</button>
       )}
 
-      {isClaim && c.sources_status === "done" && <SourceList sources={c.sources} />}
+      {isClaim && c.sources_status === "done" && <SourceList sources={c.sources} summary={c.sources_summary} />}
       {showSources && <CheckSources claimId={c.id} status={c.sources_status} error={c.sources_error} />}
 
       {!hidden && (
