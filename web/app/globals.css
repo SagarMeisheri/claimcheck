@@ -447,3 +447,9 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .report-open { margin-left: auto; }
 .report-form { flex: 1 1 100%; margin-top: 0.4rem; }
 .report-done { flex: 1 1 100%; }
+
+/* Source match filter chips (relevance, not agreement): neutral blue bars, like the badge on each card */
+.match-filters { margin: 0.4rem 0 0.5rem; flex-wrap: wrap; gap: 0.35rem; }
+.match-chip { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; }
+.match-chip:disabled { opacity: 0.45; cursor: default; }
+.match-chip[aria-pressed="true"] .src-bars i.on { background: currentColor; }

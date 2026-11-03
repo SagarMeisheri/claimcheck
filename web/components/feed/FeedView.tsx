@@ -5,10 +5,9 @@ import { readFollows } from "@/lib/follows";
 import type { Episode, Pestle } from "@/lib/types";
 import { PESTLE } from "@/lib/format";
 import { SubmitForm } from "@/app/submit/SubmitForm";
-import { TopicsView } from "./TopicsView";
 import { VideoCard } from "./VideoCard";
 
-type Tab = "latest" | "topics" | "following";
+type Tab = "latest" | "following";
 type Filter = { kind: "area"; area: Pestle } | null;
 
 export function FeedView({ episodes }: { episodes: Episode[] }) {
@@ -47,7 +46,6 @@ export function FeedView({ episodes }: { episodes: Episode[] }) {
       <div className="feed-controls">
         <div className="tabs" role="tablist" aria-label="Feed">
           {tabBtn("latest", "Latest")}
-          {tabBtn("topics", "Topics")}
           {tabBtn("following", "Following")}
         </div>
         <label className="search">
@@ -65,8 +63,6 @@ export function FeedView({ episodes }: { episodes: Episode[] }) {
             : <p>No videos match these filters yet.</p>}
           {(filter || q) && <button className="btn secondary" onClick={() => { setFilter(null); setQ(""); }}>Clear filters</button>}
         </div>
-      ) : tab === "topics" ? (
-        <TopicsView episodes={shown} />
       ) : (
         <div className="vgrid">
           {shown.map((e, i) => <VideoCard key={e.id} ep={e} eager={i < 3} />)}

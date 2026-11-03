@@ -4,7 +4,6 @@ import { useState } from "react";
 import { CheckSources } from "@/components/CheckSources";
 import { ReportForm } from "@/components/ReportForm";
 import { SourceList } from "@/components/SourceList";
-import { TopicTags } from "@/components/TopicTags";
 import type { Claim } from "@/lib/types";
 import { STATEMENT_TYPES, SEARCHING, canCheckSources, typeOf } from "@/lib/statements";
 import { clock, ytLink } from "@/lib/format";
@@ -35,11 +34,10 @@ export function TypeTag({ type }: { type: string }) {
  * and "Check sources" or the sources already found. Nothing here judges the statement or the speaker.
  */
 export function StatementCard({ claim: c, videoId, active, phase, canWatch, canLookUp = true, hasNext, countdown,
-  activeTopic, onTopic, onSeek, onWatch, onKeepWatching, onNext, onShare }: {
+  onSeek, onWatch, onKeepWatching, onNext, onShare }: {
   claim: Claim; videoId: string; active: boolean; phase: CardPhase; canWatch: boolean;
   canLookUp?: boolean; // false while the video is still being analysed
   hasNext: boolean; countdown: number | null;
-  activeTopic?: string | null; onTopic(t: string): void;
   onSeek(): void; onWatch(): void; onKeepWatching(): void; onNext(): void; onShare(): void;
 }) {
   const [showQuote, setShowQuote] = useState(false);
@@ -59,7 +57,6 @@ export function StatementCard({ claim: c, videoId, active, phase, canWatch, canL
         {active && phase === "playing" && <span className="cc-playing">Playing</span>}
       </div>
       <p className="cc-claim">{hidden ? "A statement that isn't shown under our content policy" : c.claim_text}</p>
-      {!hidden && <TopicTags topics={c.topics} active={activeTopic} onPick={onTopic} />}
 
       {!hidden && c.context_quote && (
         showQuote

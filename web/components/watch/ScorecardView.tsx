@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Thumb } from "@/components/Thumb";
-import type { Claim, EpisodeDetail, StatementType } from "@/lib/types";
+import type { Claim, EpisodeDetail, SourcesMatch, StatementType } from "@/lib/types";
 import { STATEMENT_TYPES, SEARCHING, TYPE_ORDER, breakdownParts, canCheckSources, typeOf } from "@/lib/statements";
-import { clock, topicHue, topicLabel } from "@/lib/format";
+import { clock } from "@/lib/format";
+import { MatchFilter, matchCounts } from "@/components/MatchFilter";
 import { CheckProgress } from "@/components/CheckProgress";
 import { CheckAllSources } from "@/components/CheckAllSources";
 import { StatementCard, type CardPhase } from "./ClaimCard";
@@ -20,8 +21,8 @@ const LEAD_S = 3;
 const CUE_LEAD_S = 5;
 const AUTO_NEXT_S = 4;
 
-export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, initialTopic }: {
-  ep: EpisodeDetail; initialT: number | null; autoplay: boolean; momentId: string | null; initialView: View | null; initialTopic?: string | null;
+export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, initialMatch }: {
+  ep: EpisodeDetail; initialT: number | null; autoplay: boolean; momentId: string | null; initialView: View | null; initialMatch?: SourcesMatch | null;
 }) {
   const router = useRouter();
   const player = useRef<PlayerHandle>(null);
@@ -37,7 +38,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const checking = ep.status === "processing" || ep.status === "queued";
 
   const [view, setView] = useState<View>(initialView ?? "all");
-  const [topic, setTopic] = useState<string | null>(initialTopic ?? null);
+  const [match, setMatch] = useState<SourcesMatch | null>(initialMatch ?? null);
   const [playerOn, setPlayerOn] = useState(false);
   const [startPlaying, setStartPlaying] = useState(false);
   const [cue, setCue] = useState(initialT ?? 0);
@@ -52,14 +53,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const [toast, setToast] = useState<string | null>(null);
 
   const byView = view === "all" ? everything : view === "with_sources" ? withSources : everything.filter((c) => typeOf(c.statement_type) === view);
-  // Subject chips: tags in the current view, most common first. A chosen tag stays visible even at zero.
-  const topicCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const c of byView) for (const t of c.topics ?? []) m.set(t, (m.get(t) ?? 0) + 1);
-    return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [byView]);
-  const allTopicCount = useMemo(() => new Set(ep.claims.flatMap((c) => c.topics ?? [])).size, [ep.claims]);
-  const viewList = topic ? byView.filter((c) => c.topics?.includes(topic)) : byView;
+  const viewList = match ? byView.filter((c) => c.sources_match === match) : byView;
   const playable = viewList.filter((c) => c.not_checked_reason !== "outside_policy");
   const current = useMemo(() => {
     let cur: Claim | null = null;
@@ -217,14 +211,13 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const shareClaim = (c: Claim) => share(`${window.location.origin}/v/${ep.youtube_video_id}#claim-${c.id}`, `${ep.title} at ${clock(c.start_s)}`);
 
   // --- Rendering helpers ----------------------------------------------------------------------
-  const pickTopic = (t: string) => setTopic((cur) => (cur === t ? null : t));
   const card = (c: Claim) => {
     const isActive = activeId === c.id;
     return (
       <StatementCard key={c.id} claim={c} videoId={ep.youtube_video_id} active={isActive}
         phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"} canWatch
         canLookUp={!checking} hasNext={!!nextIn(c)} countdown={isActive && autoAll ? countdown : null}
-        activeTopic={topic} onTopic={pickTopic} onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
+        onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
         onKeepWatching={() => { setClip(null); setCountdown(null); setAutoAll(false); setFollowing(true); setScrollFollow(true); player.current?.play(); }}
         onNext={() => { const n = nextIn(c); if (n) { setCountdown(null); playMoment(n); scrollToCard(n.id); } }}
         onShare={() => shareClaim(c)} />
@@ -317,17 +310,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
               ))}
               <button className="chip" aria-pressed={view === "with_sources"} onClick={() => setView("with_sources")}>With sources {withSources.length}</button>
             </div>
-            {allTopicCount > 1 && (
-              <div className="filters topic-filters" role="group" aria-label="Show statements by subject">
-                <button className="chip" aria-pressed={topic === null} onClick={() => setTopic(null)}>All subjects</button>
-                {(topic && !topicCounts.some(([t]) => t === topic) ? [...topicCounts, [topic, 0] as [string, number]] : topicCounts).map(([t, n]) => (
-                  <button key={t} className="chip topic-tag topic-chip" aria-pressed={topic === t} onClick={() => setTopic(topic === t ? null : t)}
-                          style={{ ["--th" as string]: topicHue(t) }}>
-                    {topicLabel(t)} <span className="tag-n">{n}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            <MatchFilter counts={matchCounts(byView)} value={match} onChange={setMatch} />
             {view !== "all" && view !== "with_sources" && (
               <p className="meta stmt-legend">{STATEMENT_TYPES[view].meaning} Press Check sources on any statement to see what web sources say about it.</p>
             )}

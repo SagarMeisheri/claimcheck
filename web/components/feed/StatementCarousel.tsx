@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useState } from "react";
-import type { PreviewClaim, StatementType } from "@/lib/types";
+import type { PreviewClaim, SourcesMatch, StatementType } from "@/lib/types";
 import { CheckSources } from "@/components/CheckSources";
 import { SourceList } from "@/components/SourceList";
 import { STATEMENT_TYPES, TYPE_ORDER, totalStatements, typeOf } from "@/lib/statements";
-import { clock, topicHue, topicLabel } from "@/lib/format";
+import { clock } from "@/lib/format";
+import { MatchFilter, matchCounts } from "@/components/MatchFilter";
 
 type Counts = Partial<Record<StatementType, number>>;
 type Tab = "all" | StatementType;
@@ -76,39 +77,25 @@ function pageList(page: number, pages: number): (number | "gap")[] {
   return out;
 }
 
-/** Row under a video: tabs by statement type, subject chips, then that selection's statements, a page at a time. */
+/** Row under a video: tabs by statement type, source match chips, then that selection's statements, a page at a time. */
 export function StatementCarousel({ videoId, statements, withSources, counts, activeId = null, onPlay }: {
   videoId: string; statements: PreviewClaim[]; withSources: number; counts: Counts; activeId?: string | null; onPlay(c: PreviewClaim): void;
 }) {
   const [tab, setTab] = useState<Tab>("all");
-  const [topic, setTopic] = useState<string | null>(null);
+  const [match, setMatch] = useState<SourcesMatch | null>(null);
   const [page, setPage] = useState(1);
   const total = totalStatements(counts);
   if (!total && !statements.length) return null;
   const inTab = tab === "all" ? statements : statements.filter((c) => typeOf(c.statement_type) === tab);
-  const topicCounts = new Map<string, number>();
-  for (const c of inTab) for (const t of c.topics ?? []) topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
-  const chips = [...topicCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  const list = topic ? inTab.filter((c) => c.topics?.includes(topic)) : inTab;
+  const list = match ? inTab.filter((c) => c.sources_match === match) : inTab;
   const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   const cur = Math.min(page, pages);
   const shown = list.slice((cur - 1) * PAGE_SIZE, cur * PAGE_SIZE);
-  const pick = (t: string) => { setTopic((c) => (c === t ? null : t)); setPage(1); };
-  const changeTab = (t: Tab) => { setTab(t); setTopic(null); setPage(1); };
+  const changeTab = (t: Tab) => { setTab(t); setMatch(null); setPage(1); };
   return (
     <div className="stmt-carousel">
       <TypeTabs counts={counts} tab={tab} onTab={changeTab} withSources={withSources} />
-      {chips.length > 1 && (
-        <div className="topic-filters stmt-topics" role="group" aria-label="Filter by subject">
-          {chips.map(([t, n]) => (
-            <button key={t} type="button" className="topic-tag" aria-pressed={topic === t} onClick={() => pick(t)}
-                    style={{ ["--th" as string]: topicHue(t) }}>
-              {topicLabel(t)} <span className="tag-n">{n}</span>
-            </button>
-          ))}
-          {topic && <button type="button" className="topic-tag topic-clear" onClick={() => { setTopic(null); setPage(1); }}>Clear ×</button>}
-        </div>
-      )}
+      <MatchFilter counts={matchCounts(inTab)} value={match} onChange={(m) => { setMatch(m); setPage(1); }} />
       <div className="carousel" role="list" aria-label="Statements in this video">
         {shown.map((c) => <Card key={c.id} videoId={videoId} c={c} active={activeId === c.id} onPlay={onPlay} />)}
         {shown.length === 0 && <p className="meta ccard-empty">No statements match.</p>}
