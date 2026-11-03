@@ -76,7 +76,7 @@ class Settings:
     summary_thinking: str = field(default_factory=lambda: _env("CLAIMCHECK_SUMMARY_THINKING", "low"))
     # "Check sources for all statements" (agents/sources.py): the same search for every statement, a few at a time.
     # Searches per press (earliest claims first; press again for the rest). Claims with the same wording share one.
-    sources_all_max_searches: int = int(_env("CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES", "50"))
+    sources_all_max_searches: int = int(_env("CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES", "75"))
     sources_concurrency: int = int(_env("CLAIMCHECK_SOURCES_CONCURRENCY", "5"))
     auto_sources: bool = _env("CLAIMCHECK_AUTO_SOURCES", "0") == "1"  # run it right after extraction
     tool_timeout_s: float = float(_env("CLAIMCHECK_TOOL_TIMEOUT_S", "60"))

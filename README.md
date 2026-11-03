@@ -85,7 +85,7 @@ Sources (agents/sources.py, tools/evidence.py): nothing filtered after the searc
                   false, ...) is dropped in code. If it fails, the sources are saved without either. ~$0.003
     save          on the claim for everyone (claim_sources rows + claims.sources_summary), or "no sources found"
   Every claim of a video                                      POST /episodes/{id}/sources-all
-    the same search and summary for each claim without sources, 5 at a time, each saved as it lands. Up to 50 searches per
+    the same search and summary for each statement without sources, 5 at a time, each saved as it lands. Up to 75 searches per
     press (earliest claims first; press again for more), never beyond the video's budget; claims with the same
     wording share one search
 

@@ -172,7 +172,7 @@ export async function requestSources(claimId: string): Promise<SourcesResult> {
   return { ok: true, status: "searching", message: "Searching the web. This usually takes a few seconds." };
 }
 
-/** "Check sources for all statements": one press runs a web search for each statement of a video (up to 50 per press; press again for more). */
+/** "Check sources for all statements": one press runs a web search for each statement of a video (up to 75 per press; press again for more). */
 export async function requestAllSources(videoId: string): Promise<{ ok: boolean; message: string }> {
   if (!/^[\w-]{6,20}$/.test(videoId)) return { ok: false, message: "Unknown video." };
   const db = serviceDb();
