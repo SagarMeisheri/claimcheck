@@ -36,6 +36,14 @@ _WORD = re.compile(r"[a-z]+|\d+(?:[.,]\d+)*")
 _STOP = set("a an and are as at be by for from has have in is it its of on or that the this to was were will with".split())
 
 
+# PDF titles sometimes carry LaTeX spacing at either end: "-1cmMacroeconomic Implications ...?1cm"
+_TEX_SPACING = re.compile(r"^\s*-?\d+(?:\.\d+)?(?:cm|mm|pt|em)|-?\d+(?:\.\d+)?(?:cm|mm|pt|em)\s*$")
+
+
+def clean_title(title: str) -> str:
+    return re.sub(r"\s+", " ", _TEX_SPACING.sub("", title)).strip()[:300]
+
+
 def _terms(text: str) -> set[str]:
     return {w for w in _WORD.findall(text.lower()) if w not in _STOP and (len(w) > 2 or w[0].isdigit())}
 
@@ -75,7 +83,7 @@ def to_sources(results: list[Any], policy: dict[str, Any], limit: int, excerpt_c
             continue
         seen.add(url)
         excerpts = [e for e in (getattr(r, "excerpts", None) or []) if e and e.strip()]
-        out.append(Source(url=url, title=(getattr(r, "title", None) or "").strip()[:300],
+        out.append(Source(url=url, title=clean_title(getattr(r, "title", None) or ""),
                           excerpt=best_excerpt(excerpts, claim_text, excerpt_chars),
                           publish_date=getattr(r, "publish_date", None), tier=source_tier(url, policy), rank=len(out)))
         if len(out) >= limit:

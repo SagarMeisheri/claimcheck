@@ -25,7 +25,7 @@ def test_statement_type_and_legacy_claim_type_stay_in_step():
     # Old rows / old model output with only claim_type still work.
     old = ExtractedClaim(start_ts="1:00", speaker="H", claim="x", context_quote="x", pestle_area="economic",
                          topic="gdp", claim_type="prediction", policy_tier="normal")
-    assert old.statement_type == "forecast" and not old.sourceable
+    assert old.statement_type == "forecast"
     # statement_type wins when the two disagree.
     assert ExtractedClaim.model_validate({**stmt().model_dump(), "claim_type": "opinion"}).claim_type == "fact"
 
@@ -37,10 +37,9 @@ def test_legacy_tags_that_characterise_a_speaker_become_other(legacy):
     assert ExtractedClaim.model_validate({**stmt().model_dump(), "policy_tier": "stricter"}).policy_tier == "normal"
 
 
-def test_only_factual_claims_can_have_sources():
-    assert classify_statement(stmt(), POLICY) == ("normal", None)
-    for t in ("opinion", "forecast", "other"):
-        assert classify_statement(stmt(stype=t), POLICY) == ("normal", t)
+def test_every_statement_type_can_have_sources():
+    for t in ("factual_claim", "opinion", "forecast", "other"):
+        assert classify_statement(stmt(stype=t), POLICY) == ("normal", None)
 
 
 def test_never_topics_are_redacted_for_every_type():
@@ -54,8 +53,7 @@ def test_sources_status_for_new_statements():
     claim = ClaimRecord(index=0, start_s=0, claim=stmt(), effective_tier="normal")
     assert sources_status(claim) == "not_requested"
     assert sources_status(claim.model_copy(update={"not_checked_reason": "outside_policy"})) == "not_eligible"
-    assert sources_status(ClaimRecord(index=1, start_s=0, claim=stmt(stype="opinion"), effective_tier="normal",
-                                      not_checked_reason="opinion")) == "not_eligible"
+    assert sources_status(ClaimRecord(index=1, start_s=0, claim=stmt(stype="opinion"), effective_tier="normal")) == "not_requested"
 
 
 def test_extractor_schema_requires_statement_type_and_has_no_characterisation():
@@ -130,7 +128,7 @@ def test_streamer_saves_each_statement_once_and_tags_it():
         await st.finish()
     asyncio.run(go())
     assert [r.claim.statement_type for r in saved] == ["factual_claim", "opinion"]
-    assert [r.index for r in saved] == [0, 1] and saved[1].not_checked_reason == "opinion"
+    assert [r.index for r in saved] == [0, 1] and saved[1].not_checked_reason is None
     assert [u for u in updates if "statement_counts" in u][-1]["statement_counts"] == {"factual_claim": 1, "opinion": 1}
 
 

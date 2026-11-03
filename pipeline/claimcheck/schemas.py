@@ -1,6 +1,6 @@
 """Structured outputs for every LLM step (ADK output_schema) plus internal records.
 
-ClaimCheck tags statements and, on request, finds sources for a claim with one web search. It never judges a claim
+ClaimCheck tags statements and, on request, finds sources for a statement with one web search. It never judges a claim
 true or false.
 """
 
@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 PestleArea = Literal["political", "economic", "social", "technological", "legal", "environmental"]
 PolicyTier = Literal["normal", "never"]
 ClaimType = Literal["fact", "opinion", "prediction", "anecdote"]
-# What kind of statement it is. Only factual_claim can have sources looked up; the rest are tagged and shown.
+# What kind of statement it is. Every type can have sources looked up (unless redacted by the content policy).
 StatementType = Literal["factual_claim", "opinion", "forecast", "other"]
 SourcesStatus = Literal["not_eligible", "not_requested", "queued", "searching", "done", "failed"]
 
@@ -61,11 +61,6 @@ class ExtractedClaim(BaseModel):
             self.statement_type = _FROM_CLAIM_TYPE.get(self.claim_type or "fact", "other")  # type: ignore[assignment]
         self.claim_type = _LEGACY_CLAIM_TYPE[self.statement_type]  # type: ignore[assignment,index]
         return self
-
-    @property
-    def sourceable(self) -> bool:
-        """Whether sources can be looked up for it."""
-        return self.statement_type == "factual_claim"
 
 
 class ExtractedStatement(BaseModel):
@@ -116,7 +111,7 @@ class ClaimRecord(BaseModel):
 
 def sources_status(rec: ClaimRecord) -> str:
     """The claims.sources_status value for a statement leaving the first pass."""
-    return "not_requested" if rec.claim.sourceable and not rec.not_checked_reason else "not_eligible"
+    return "not_eligible" if rec.not_checked_reason == "outside_policy" else "not_requested"
 
 
 class GuardrailEvent(BaseModel):

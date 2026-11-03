@@ -1,7 +1,7 @@
 """Sources for claims: one Parallel web search per claim, whatever it returns is shown, plus a short summary of them.
 
 One claim ("Check sources")                                  POST /claims/{id}/sources
-  precheck (code)  a factual claim, not redacted, not already done, video under its cost cap
+  precheck (code)  any statement type (claim, opinion, forecast, other), not redacted, not already done, video under its cost cap
   search           tools/evidence.search_sources: the claim's own words -> up to 5 results with title, link, date
                    and the passage of the page text that best matches the claim
   summarize (ADK)  one cheap model call summarises the excerpts shown under the sources (and nothing else, so a reader
@@ -12,7 +12,7 @@ One claim ("Check sources")                                  POST /claims/{id}/s
                    is dropped. If this step fails or the budget runs out, the sources are saved without a summary
   save             on the claim, for everyone (an empty result is saved too: "No sources found")
 
-Every claim of a video ("Check sources for all claims")      POST /episodes/{id}/sources-all
+Every statement of a video ("Check sources for all statements")      POST /episodes/{id}/sources-all
   the same search + summary for each claim that has none yet, a few at a time (settings.sources_concurrency), each
   saved the moment it is ready. Limits: at most settings.sources_all_max_searches searches per press (earliest claims
   first; press again for the rest), never more than the video's remaining budget pays for, and claims with the same
@@ -79,8 +79,6 @@ def precheck(row: Optional[dict[str, Any]], settings: Settings) -> tuple[bool, s
     ep = row.get("episodes") or {}
     if ep.get("status") not in ("done", "in_review"):
         return False, "This video hasn't finished being analysed yet.", 409
-    if row.get("statement_type") != "factual_claim":
-        return False, "Sources can only be looked up for claims, not opinions or forecasts.", 409
     if row.get("policy_tier") == "never" or row.get("not_checked_reason") == "outside_policy":
         return False, "This statement is outside our content policy.", 409
     status = row.get("sources_status")
@@ -114,7 +112,7 @@ class Digest(NamedTuple):
 
 async def summarize(claim_text: str, sources: list[Source]) -> Digest:
     """A plain 1-2 sentence summary of the sources' excerpts and how directly they address the claim (ADK step,
-    Flash-Lite). Never raises; an empty Digest on failure."""
+    Gemini 3.8 Flash). Never raises; an empty Digest on failure."""
     ec = get_context()
     if not sources or not ec.settings.summarize_sources:
         return Digest()
@@ -211,7 +209,7 @@ async def run_claim_sources(claim_id: str, *, settings: Settings, store: Any) ->
 # --- Every claim of a video --------------------------------------------------------------------------
 
 async def run_video_sources(episode_id: str, *, settings: Settings, store: Any) -> dict[str, Any]:
-    """Looks up sources for every claim of a video that has none yet. Never raises."""
+    """Looks up sources for every statement of a video that has none yet. Never raises."""
     async with lock_for(episode_id):
         ep = await store.get_episode(episode_id)
         if not ep or ep.get("status") not in ("done", "in_review"):
@@ -222,7 +220,8 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any) 
         for c in claims:
             groups.setdefault(same_wording(c["claim_text"]), []).append(c)
         left = settings.max_cost_usd_per_episode - float(ep.get("cost_usd") or 0)
-        affordable = max(0, int(left / settings.search_cost_usd + 1e-9)) if settings.search_cost_usd > 0 else len(groups)
+        each = settings.lookup_cost_estimate_usd  # search + summary
+        affordable = max(0, int(left / each + 1e-9)) if each > 0 else len(groups)
         searches = list(groups.values())[:max(0, min(settings.sources_all_max_searches, affordable))]
         todo = [c for g in searches for c in g]
         if not todo:

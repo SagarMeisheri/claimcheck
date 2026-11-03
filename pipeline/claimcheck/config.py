@@ -26,7 +26,7 @@ def _env(name: str, default: str = "") -> str:
 # 31 Dec 2026 and $1.50/$7.50 from 1 Jan 2027: the later price is used so the cost cap never undercounts.
 # Override with CLAIMCHECK_PRICES_JSON='{"gemini-3.8-flash": [0.75, 3.75]}'.
 _DEFAULT_PRICES: dict[str, tuple[float, float]] = {
-    "flash-lite": (0.30, 2.50),        # gemini-3.5-flash-lite (sources summary)
+    "flash-lite": (0.30, 2.50),        # gemini-3.5-flash-lite (cheaper option for the sources summary)
     "gemini-3.8-flash": (1.50, 7.50),
 }
 
@@ -71,10 +71,12 @@ class Settings:
     # One short neutral line per source, written by a cheap model from the page text (agents/sources.py). If it
     # fails or the budget runs out, the sources are still saved and the excerpt is shown instead.
     summarize_sources: bool = _env("CLAIMCHECK_SUMMARIZE_SOURCES", "1") == "1"
-    summary_model: str = field(default_factory=lambda: _env("CLAIMCHECK_SUMMARY_MODEL", "gemini-3.5-flash-lite"))
-    # "Check sources for all claims" (agents/sources.py): the same search for every claim, a few at a time.
+    summary_model: str = field(default_factory=lambda: _env("CLAIMCHECK_SUMMARY_MODEL", "gemini-3.8-flash"))
+    # Thinking for the sources summary + match: minimal, low, medium, high or "default". Low keeps it ~$0.003 a claim.
+    summary_thinking: str = field(default_factory=lambda: _env("CLAIMCHECK_SUMMARY_THINKING", "low"))
+    # "Check sources for all statements" (agents/sources.py): the same search for every statement, a few at a time.
     # Searches per press (earliest claims first; press again for the rest). Claims with the same wording share one.
-    sources_all_max_searches: int = int(_env("CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES", "25"))
+    sources_all_max_searches: int = int(_env("CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES", "50"))
     sources_concurrency: int = int(_env("CLAIMCHECK_SOURCES_CONCURRENCY", "5"))
     auto_sources: bool = _env("CLAIMCHECK_AUTO_SOURCES", "0") == "1"  # run it right after extraction
     tool_timeout_s: float = float(_env("CLAIMCHECK_TOOL_TIMEOUT_S", "60"))
@@ -83,6 +85,14 @@ class Settings:
 
     prices: dict = field(default_factory=_prices)
     search_cost_usd: float = float(_env("CLAIMCHECK_SEARCH_COST_USD", "0.005"))
+    # Rough cost of one sources summary, used only to plan how many lookups a video's budget can pay for
+    # (the real cost is counted from tokens). ~$0.003 on Gemini 3.8 Flash with low thinking.
+    summary_cost_estimate_usd: float = float(_env("CLAIMCHECK_SUMMARY_COST_ESTIMATE_USD", "0.003"))
+
+    @property
+    def lookup_cost_estimate_usd(self) -> float:
+        """One search plus its summary, for planning a "Check sources for all statements" press."""
+        return self.search_cost_usd + (self.summary_cost_estimate_usd if self.summarize_sources else 0.0)
 
 
 def get_settings() -> Settings:

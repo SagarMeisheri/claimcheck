@@ -32,7 +32,8 @@ insert into claims (episode_id, idx, claim_text, pestle_area, claim_type, policy
   ('${EP}',3,'hearsay','economic','opinion','normal',null,'hearsay','vague source','hearsay'),
   ('${EP}',4,'analogy','economic','opinion','normal',null,'analogy','compares','analogy'),
   ('${EP}',5,'loaded','economic','opinion','normal',null,'loaded_language','charged','loaded_language'),
-  ('${EP}',6,'opinion','economic','opinion','normal',null,'opinion',null,'opinion');
+  ('${EP}',6,'opinion','economic','opinion','normal',null,'opinion',null,'opinion'),
+  ('${EP}',7,'old opinion','economic','opinion','never',null,'opinion',null,'opinion');
 update episodes e set statement_counts = (select jsonb_object_agg(statement_type, n) from (select statement_type, count(*) n from claims group by 1) t);
 `)
 for (const f of v12) await db.exec(fs.readFileSync(path.join(dir, f), 'utf8'))
@@ -42,14 +43,17 @@ await db.exec(`insert into claim_sources (claim_id, url, title, tier, quote) sel
 await db.exec(`update claims set sources_status = 'done' where idx in (0, 1)`)
 for (const f of after) await db.exec(fs.readFileSync(path.join(dir, f), 'utf8'))
 
-// Tags merged, counts recomputed, sources status backfilled.
+// Tags merged, counts recomputed, sources status backfilled; since 0016 every type but the redacted one can have sources.
 const rows = (await db.query(`select idx, statement_type, sources_status from claims order by idx`)).rows
 assert.deepEqual(rows.map((r) => [r.idx, r.statement_type, r.sources_status]), [
   [0, 'factual_claim', 'not_requested'], [1, 'factual_claim', 'done'], [2, 'factual_claim', 'not_eligible'],
-  [3, 'other', 'not_eligible'], [4, 'other', 'not_eligible'], [5, 'other', 'not_eligible'], [6, 'opinion', 'not_eligible'],
+  [3, 'other', 'not_requested'], [4, 'other', 'not_requested'], [5, 'other', 'not_requested'], [6, 'opinion', 'not_requested'],
+  [7, 'opinion', 'not_requested'],
 ])
+assert.deepEqual((await db.query(`select policy_tier, not_checked_reason from claims where idx in (2, 7) order by idx`)).rows,
+  [{ policy_tier: 'never', not_checked_reason: 'outside_policy' }, { policy_tier: 'normal', not_checked_reason: null }])
 assert.deepEqual((await db.query(`select statement_counts from episodes`)).rows[0].statement_counts,
-  { factual_claim: 3, other: 3, opinion: 1 })
+  { factual_claim: 3, other: 3, opinion: 2 })
 assert.equal((await db.query(`select avatar_url from channels`)).rows[0].avatar_url, null)
 
 // Constraints
@@ -68,7 +72,7 @@ await db.exec(`insert into feedback (claim_id, note, kind) select id, 'wrong spe
 // What the public can see.
 await db.exec(`set role anon`)
 const pub = (await db.query(`select id, statement_type, sources_status, sources_error, context_quote, speaker from claims`)).rows
-assert.equal(pub.length, 7)
+assert.equal(pub.length, 8)
 await assert.rejects(db.query(`select tag_note from claims`), 'tag notes are hidden')
 await assert.rejects(db.query(`select verdict_id from claims`), 'verdict links are hidden')
 await assert.rejects(db.query(`select verification_status from claims`))
@@ -80,6 +84,8 @@ await assert.rejects(db.query(`select count(*) from feedback`))
 assert.deepEqual((await db.query(`select tier from claim_sources order by rank`)).rows.map((r) => r.tier), [1, 3])
 assert.equal((await db.query(`select sources_summary from claims where idx = 1`)).rows[0].sources_summary, null)
 assert.equal((await db.query(`select sources_match from claims where idx = 1`)).rows[0].sources_match, null)
+// 0016: opinions, forecasts and other statements can have sources; redacted ones still can't
+assert.equal((await db.query(`select count(*)::int n from claims where sources_status = 'not_eligible' and statement_type <> 'factual_claim' and not_checked_reason is distinct from 'outside_policy'`)).rows[0].n, 0)
 await assert.rejects(db.query(`update claims set sources_match = 'true' where idx = 1`))
 assert.equal((await db.query(`select sources_batch_status, statement_counts from episodes`)).rows.length, 1)
 await db.exec(`reset role`)

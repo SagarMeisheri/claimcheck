@@ -32,7 +32,7 @@ export function TypeTag({ type }: { type: string }) {
 
 /**
  * One statement: its AI tag, time, the AI's plain-words version of what was said, the AI transcript on request,
- * and for claims, "Check sources" or the sources already found. Nothing here judges the statement or the speaker.
+ * and "Check sources" or the sources already found. Nothing here judges the statement or the speaker.
  */
 export function StatementCard({ claim: c, videoId, active, phase, canWatch, canLookUp = true, hasNext, countdown,
   activeTopic, onTopic, onSeek, onWatch, onKeepWatching, onNext, onShare }: {
@@ -46,7 +46,8 @@ export function StatementCard({ claim: c, videoId, active, phase, canWatch, canL
   const hidden = c.not_checked_reason === "outside_policy"; // text and moment stay unpublished
   const type = typeOf(c.statement_type);
   const isClaim = type === "factual_claim" && !hidden;
-  const showSources = isClaim && canLookUp && (canCheckSources(c) || SEARCHING.includes(c.sources_status));
+  const sourceable = !hidden; // sources can be looked up for every statement type
+  const showSources = sourceable && canLookUp && (canCheckSources(c) || SEARCHING.includes(c.sources_status));
   return (
     <article id={`card-${c.id}`} data-claim={c.id} data-type={type}
              className={`claim-card stmt-card${isClaim ? "" : " claim-card-unchecked"}${active ? " is-active" : ""}`}
@@ -66,7 +67,7 @@ export function StatementCard({ claim: c, videoId, active, phase, canWatch, canL
           : <button type="button" className="linkish said-toggle" onClick={() => setShowQuote(true)}>What was said</button>
       )}
 
-      {isClaim && c.sources_status === "done" && <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} />}
+      {sourceable && c.sources_status === "done" && <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} />}
       {showSources && <CheckSources claimId={c.id} status={c.sources_status} error={c.sources_error} />}
 
       {!hidden && (

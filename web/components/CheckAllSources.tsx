@@ -18,7 +18,7 @@ function Ring({ pct }: { pct: number | null }) {
 }
 
 /**
- * "Check sources for all claims": starts the whole-video lookup. While it runs the button turns into a ring with
+ * "Check sources for all statements": starts the whole-video lookup. While it runs the button turns into a ring with
  * "Checking sources: 3 of 10", polls the video, and refreshes the page whenever another claim has its sources.
  */
 export function CheckAllSources({ videoId, running: initialRunning, eligible, compact = false }: {
@@ -72,7 +72,7 @@ export function CheckAllSources({ videoId, running: initialRunning, eligible, co
   if (!eligible) return null;
   return (
     <p className={`verify-all${compact ? " compact" : ""}`}>
-      <button type="button" className="btn small verify-all-btn" onClick={go}>Check sources for all claims</button>
+      <button type="button" className="btn small verify-all-btn" onClick={go}>Check sources for all statements</button>
       {message && <span className="meta verify-all-msg" role="status">{message}</span>}
     </p>
   );

@@ -2,7 +2,7 @@
 
   python -m claimcheck.cli https://www.youtube.com/watch?v=VIDEO_ID
   python -m claimcheck.cli --sources CLAIM_ID            # look up sources for one stored claim
-  python -m claimcheck.cli --sources-all EPISODE_ID      # look up sources for every claim of a video
+  python -m claimcheck.cli --sources-all EPISODE_ID      # look up sources for every statement of a video
   python -m claimcheck.cli --summarize-missing           # sources summary + match for claims looked up before them
 
 Needs the keys and Supabase settings from pipeline/.env (see .env.example).
@@ -21,7 +21,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="ClaimCheck: tag the statements in one YouTube video")
     ap.add_argument("url", nargs="?")
     ap.add_argument("--sources", metavar="CLAIM_ID", help="look up sources for one stored claim")
-    ap.add_argument("--sources-all", metavar="EPISODE_ID", help="look up sources for every claim of a video")
+    ap.add_argument("--sources-all", metavar="EPISODE_ID", help="look up sources for every statement of a video")
     ap.add_argument("--summarize-missing", action="store_true",
                     help="write the sources summary for claims whose sources were saved without one (no new search)")
     ap.add_argument("--json", action="store_true", help="print the full result as JSON")

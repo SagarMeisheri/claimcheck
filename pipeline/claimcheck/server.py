@@ -109,7 +109,7 @@ async def cancel(episode_id: str, x_pipeline_secret: Optional[str] = Header(defa
 
 @app.post("/episodes/{episode_id}/sources-all")
 async def sources_all(episode_id: str, wait: bool = False, x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
-    """Looks up sources for every claim of a video that has finished its first pass."""
+    """Looks up sources for every statement of a video that has finished its first pass."""
     _auth(x_pipeline_secret)
     from .agents.sources import run_video_sources
 

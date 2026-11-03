@@ -329,7 +329,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
               </div>
             )}
             {view !== "all" && view !== "with_sources" && (
-              <p className="meta stmt-legend">{STATEMENT_TYPES[view].meaning}{view === "factual_claim" ? " Press Check sources to see what official and news sources say about it." : ""}</p>
+              <p className="meta stmt-legend">{STATEMENT_TYPES[view].meaning} Press Check sources on any statement to see what web sources say about it.</p>
             )}
             {playable.length > 1 && (
               <p className="play-all">
@@ -355,7 +355,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           <ul className="nclist">
             <li>An AI watched the video, listed {ep.claims.length} statements with their timestamps, and tagged each one as a claim, opinion, forecast or other.</li>
             <li>The wording of each statement, the transcript, the speaker names and the tags are AI output and can be wrong. Use &quot;Watch 20 s&quot; to hear the original, and &quot;Report a problem&quot; if something is off.</li>
-            <li>Nothing is judged true or false. For a claim, &quot;Check sources&quot; shows sentences copied from official and established news sources about the same subject.</li>
+            <li>Nothing is judged true or false. On any statement, &quot;Check sources&quot; runs a web search and shows the top results with an AI summary of their excerpts.</li>
             <li><Link href="/method">How it works</Link></li>
             <li><a href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}&t=${Math.floor(time)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube from {clock(time)}</a></li>
           </ul>

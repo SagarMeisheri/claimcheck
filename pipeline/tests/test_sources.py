@@ -59,6 +59,12 @@ def test_every_result_is_used_in_parallels_order_with_a_label_only(monkeypatch):
     assert call["mode"] == "fast"
 
 
+def test_pdf_layout_junk_is_removed_from_titles():
+    assert evidence.clean_title("-1cmMacroeconomic Implications of COVID-19: Can Negative Supply Shocks Cause Demand Shortages?1cm") == \
+        "Macroeconomic Implications of COVID-19: Can Negative Supply Shocks Cause Demand Shortages?"
+    assert evidence.clean_title("Rainfall of 10cm expected in Mumbai") == "Rainfall of 10cm expected in Mumbai"
+
+
 def test_excerpts_are_cleaned_and_shortened():
     assert clean_excerpt("## Title\n\nSee [the report](https://x.y/z) for **details**.", 200) == "Title See the report for details."
     long = clean_excerpt("word " * 200, 50)
@@ -129,7 +135,7 @@ class FakeStore:
 def test_precheck():
     assert precheck(row(), SETTINGS) == (True, "", 200)
     assert precheck(row(sources_status="failed"), SETTINGS)[0]
-    for kw, words in [({"statement_type": "opinion"}, "only be looked up for claims"), ({"policy_tier": "never"}, "content policy"),
+    for kw, words in [({"policy_tier": "never"}, "content policy"),
                       ({"sources_status": "done"}, "already"), ({"sources_status": "searching"}, "Already searching"),
                       ({"episodes": {"cost_usd": 3.0}}, "budget"), ({"episodes": {"status": "processing"}}, "finished")]:
         ok, msg, code = precheck(row(**kw), SETTINGS)
@@ -362,3 +368,8 @@ def test_a_failed_summary_step_saves_no_match(monkeypatch):
     store = FakeStore(row())
     asyncio.run(run_claim_sources("c1", settings=SUMMARY_SETTINGS, store=store))
     assert store.match["c1"] == ""
+
+
+def test_opinions_forecasts_and_other_statements_can_have_sources_too():
+    for kind in ("opinion", "forecast", "other"):
+        assert precheck(row(statement_type=kind), SETTINGS)[0], kind

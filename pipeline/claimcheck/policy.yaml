@@ -1,6 +1,6 @@
 # ClaimCheck content policy and source policy.
 # Changing this file changes behaviour without touching prompts.
-# Loaded by claimcheck/policy.py. ClaimCheck tags statements and, on request, shows web sources for a claim.
+# Loaded by claimcheck/policy.py. ClaimCheck tags statements and, on request, shows web sources for a statement.
 # It never judges a claim true or false.
 
 version: 2

@@ -129,8 +129,8 @@ export async function requestSources(claimId: string): Promise<SourcesResult> {
   if (status === "done") return { ok: true, status, message: "Sources have already been looked up." };
   const stale = !!c.sources_requested_at && Date.now() - Date.parse(c.sources_requested_at) > STALE_MS;
   if ((status === "queued" || status === "searching") && !stale) return { ok: true, status, message: "Already searching." };
-  if (c.statement_type !== "factual_claim" || c.policy_tier === "never" || c.not_checked_reason === "outside_policy" || status === "not_eligible") {
-    return { ok: false, status, message: "Sources can only be looked up for claims, not opinions or forecasts." };
+  if (c.policy_tier === "never" || c.not_checked_reason === "outside_policy" || status === "not_eligible") {
+    return { ok: false, status, message: "This statement is outside our content policy." };
   }
   if (!["done", "in_review"].includes((c as any).episodes?.status)) {
     return { ok: false, status, message: "This video is still being analysed. Try again when it's finished." };
@@ -169,7 +169,7 @@ export async function requestSources(claimId: string): Promise<SourcesResult> {
   return { ok: true, status: "searching", message: "Searching the web. This usually takes a few seconds." };
 }
 
-/** "Check sources for all claims": one press runs a web search for each claim of a video (up to 25 per press; press again for more). */
+/** "Check sources for all statements": one press runs a web search for each statement of a video (up to 50 per press; press again for more). */
 export async function requestAllSources(videoId: string): Promise<{ ok: boolean; message: string }> {
   if (!/^[\w-]{6,20}$/.test(videoId)) return { ok: false, message: "Unknown video." };
   const db = serviceDb();
@@ -178,13 +178,13 @@ export async function requestAllSources(videoId: string): Promise<{ ok: boolean;
   if (!["done", "in_review"].includes(ep.status)) return { ok: false, message: "This video is still being analysed. Try again when it's finished." };
   if (ep.sources_batch_status === "running") return { ok: true, message: "Already checking sources for this video." };
 
-  const { data: eligible } = await db.from("claims").select("id").eq("episode_id", ep.id).eq("statement_type", "factual_claim")
+  const { data: eligible } = await db.from("claims").select("id").eq("episode_id", ep.id)
     .in("sources_status", ["not_requested", "failed"]).limit(1);
-  if (!eligible?.length) return { ok: false, message: "Sources have already been looked up for every claim in this video." };
+  if (!eligible?.length) return { ok: false, message: "Sources have already been looked up for every statement in this video." };
 
   const who = await visitorHash();
   const { mine, site } = await requestCounts("all", who);
-  if (ALL_PER_PERSON_PER_DAY > 0 && mine >= ALL_PER_PERSON_PER_DAY) return { ok: false, message: `You've used "Check sources for all claims" ${ALL_PER_PERSON_PER_DAY} times today, the daily limit. Try again tomorrow.` };
+  if (ALL_PER_PERSON_PER_DAY > 0 && mine >= ALL_PER_PERSON_PER_DAY) return { ok: false, message: `You've used "Check sources for all statements" ${ALL_PER_PERSON_PER_DAY} times today, the daily limit. Try again tomorrow.` };
   if (ALL_SITE_PER_HOUR > 0 && site >= ALL_SITE_PER_HOUR) return { ok: false, message: "Lots of people are checking sources right now. Try again in a few minutes." };
 
   const { data: reqRow } = await db.from("source_requests")

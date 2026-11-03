@@ -127,10 +127,10 @@ class SupabaseStore:
         return r.data[0] if r.data else None
 
     async def list_batch_claims(self, episode_id):
-        """Claims "Check sources for all" may take: factual, not redacted, no sources yet, not already running."""
+        """Statements "Check sources for all" may take: any type, not redacted, no sources yet, not already running."""
         r = (self.db.table("claims")
              .select("id, idx, start_s, claim_text, pestle_area, topic, topics, statement_type, policy_tier, sources_status")
-             .eq("episode_id", episode_id).eq("statement_type", "factual_claim")
+             .eq("episode_id", episode_id)
              .in_("sources_status", ["not_requested", "failed"]).neq("policy_tier", "never")
              .or_("not_checked_reason.is.null,not_checked_reason.neq.outside_policy").order("start_s").limit(200).execute())
         return r.data or []

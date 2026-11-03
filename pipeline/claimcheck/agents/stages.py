@@ -31,13 +31,11 @@ def _event(agent: BaseAgent, ctx: InvocationContext, delta: dict[str, Any], text
 def classify_statement(claim: ExtractedClaim, policy: dict[str, Any]) -> tuple[str, Optional[str]]:
     """Content policy in code: (tier, not_checked_reason). A None reason means sources can be looked up.
 
-    Never-show topics are redacted whatever the statement type; other non-factual statements are tagged with their
-    type and have no sources button.
+    Never-show topics are redacted whatever the statement type; every other statement, whatever its type, can
+    have sources looked up.
     """
     if is_never(claim.policy_tier, claim.topics, policy):
         return "never", "outside_policy"
-    if not claim.sourceable:
-        return "normal", claim.statement_type  # opinion / forecast / other
     return "normal", None
 
 
@@ -126,7 +124,7 @@ class Publisher(BaseAgent):
         for r in records:
             t = r.claim.statement_type or "other"
             statement_counts[t] = statement_counts.get(t, 0) + 1
-        auto = ec.settings.auto_sources and any(r.claim.sourceable and not r.not_checked_reason for r in records)
+        auto = ec.settings.auto_sources and any(r.not_checked_reason != "outside_policy" for r in records)
         await ec.store.update_episode(ec.episode_id, {
             **base, "status": "done", "statement_counts": statement_counts,
             # Set in the same write that publishes the statements, so the page never shows a gap before the batch starts.

@@ -1,11 +1,11 @@
 export type StatementType = "factual_claim" | "opinion" | "forecast" | "other";
-/** Looking up sources for one statement. Only factual claims can leave "not_eligible". */
+/** Looking up sources for one statement (any type). Only statements redacted by the content policy stay "not_eligible". */
 export type SourcesStatus = "not_eligible" | "not_requested" | "queued" | "searching" | "done" | "failed";
 /** How directly a claim's sources address its specific point (relevance, never agreement). */
 export type SourcesMatch = "high" | "medium" | "low";
 export type Pestle = "political" | "economic" | "social" | "technological" | "legal" | "environmental";
 
-/** One web search result for a claim, as the search returned it: shown for context, not checked or judged. */
+/** One web search result for a statement, as the search returned it: shown for context, not checked or judged. */
 export interface Source {
   url: string;
   title: string | null;
@@ -61,7 +61,7 @@ export interface Episode {
   published_at: string | null;
   status: string;
   skip_reason?: string | null;
-  sources_batch?: string | null; // "running" while "Check sources for all claims" works through the video
+  sources_batch?: string | null; // "running" while "Check sources for all statements" works through the video
   summary?: string | null; // 2-3 sentences on what the video covers, written by the AI
   created_at: string;
   statement_counts: Partial<Record<StatementType, number>>; // every tagged statement, by type

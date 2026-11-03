@@ -19,7 +19,7 @@ export const SEARCHING: SourcesStatus[] = ["queued", "searching"];
 
 /** Whether a "Check sources" button makes sense for this statement right now. */
 export function canCheckSources(c: { statement_type: string; sources_status: SourcesStatus; not_checked_reason: string | null }): boolean {
-  return c.statement_type === "factual_claim" && c.not_checked_reason !== "outside_policy"
+  return c.not_checked_reason !== "outside_policy"
     && (c.sources_status === "not_requested" || c.sources_status === "failed");
 }
 

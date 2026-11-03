@@ -78,6 +78,11 @@ def inject_pages(callback_context: CallbackContext, llm_request: LlmRequest) -> 
 
 
 def summarizer_agent(s: Settings, name: str = "source_summarizer") -> LlmAgent:
+    # Gemini 3 models are meant to run at their default temperature (lower can loop), so none is set here.
+    cfg = types.GenerateContentConfig()
+    level = (s.summary_thinking or "default").strip().upper()
+    if level != "DEFAULT":
+        cfg.thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel(level))
     return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.SUMMARIZE,
                     include_contents="none", output_schema=SourcesSummary, output_key="summary",
-                    generate_content_config=_cfg(0.0), before_model_callback=inject_pages)
+                    generate_content_config=cfg, before_model_callback=inject_pages)

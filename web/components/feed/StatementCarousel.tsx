@@ -17,7 +17,7 @@ function Card({ videoId, c, active, onPlay }: {
   const [busy, setBusy] = useState(false);
   const onBusy = useCallback((b: boolean) => setBusy(b), []);
   const t = STATEMENT_TYPES[typeOf(c.statement_type)];
-  const isClaim = typeOf(c.statement_type) === "factual_claim";
+  const sourceable = c.sources_status !== "not_eligible"; // any type, unless redacted
   const cls = `ccard ccard-statement${active ? " is-active" : ""}${busy ? " is-verifying" : ""}`;
   return (
     <article className={cls} role="listitem" style={{ ["--stype" as string]: t.cssVar }}>
@@ -31,7 +31,7 @@ function Card({ videoId, c, active, onPlay }: {
         </span>
         <span className="ccard-text">{c.claim_text}</span>
       </button>
-      {isClaim && (
+      {sourceable && (
         <div className="ccard-foot">
           {c.sources_status === "done"
             ? <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} compact />
