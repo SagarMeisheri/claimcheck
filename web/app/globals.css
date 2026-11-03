@@ -404,8 +404,13 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
   background: var(--paper); border: 1px solid var(--rule); }
 .src-label { margin: 0; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
 .src-summary { margin: 0; font-size: 0.98rem; line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
-.src-nums { list-style: none; margin: 0.15rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.3rem; max-width: 100%; }
-.src-nums li { min-width: 0; max-width: 100%; }
+/* one row of source chips that scrolls sideways */
+.src-nums { list-style: none; margin: 0.15rem 0 0; padding: 0 0 0.3rem; display: flex; flex-wrap: nowrap; gap: 0.3rem; max-width: 100%;
+  overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+.src-nums li { flex: none; }
+.src-nums li:last-child { padding-right: 1.2rem; }
+.is-compact .src-nums { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent); }
 .src-nums a { display: inline-flex; align-items: center; gap: 0.35rem; max-width: 100%; padding: 0.15rem 0.5rem 0.15rem 0.2rem; border: 1px solid var(--rule);
   border-radius: 6px; background: var(--paper-raised); font-size: 0.78rem; color: var(--ink); text-decoration: none; cursor: pointer; }
 .src-nums a:hover { border-color: var(--ink-soft); background: var(--paper); }
@@ -423,7 +428,7 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .source-none { font-size: 0.86rem; margin: 0.5rem 0 0; }
 .ccard-foot { min-width: 0; }
 .ccard-foot .source-list { margin-top: 0; padding: 0.5rem 0.6rem; gap: 0.3rem; }
-.ccard-foot .src-summary { font-size: 0.86rem; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+.ccard-foot .src-summary { font-size: 0.86rem; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 10; -webkit-box-orient: vertical; overflow: hidden; }
 .ccard-foot .ccard-play { border-top: 0; padding: 0.35rem 0 0; }
 .tick-sourced::before { content: ""; position: absolute; top: -0.45rem; left: 50%; width: 5px; height: 5px; border-radius: 50%; background: var(--ink); transform: translateX(-50%); }
 .topic-src { display: block; }
