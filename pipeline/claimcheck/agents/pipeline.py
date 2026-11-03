@@ -133,10 +133,18 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
         final = await runner.session_service.get_session(app_name=APP, user_id="pipeline", session_id=session.id)
         st = final.state
         gate = st.get("gate", {})
-        return {"episode_id": episode_id, "status": "skipped" if gate.get("skip") else "published",
-                "skip_reason": gate.get("reason"), "tally": st.get("tally"), "not_checked": st.get("not_checked"),
-                "pending_review": st.get("pending_review", 0), "cost_usd": round(ec.budget.spent_usd, 4),
-                "guardrail_events": [e.model_dump() for e in ec.events]}
+        result = {"episode_id": episode_id, "status": "skipped" if gate.get("skip") else "published",
+                  "skip_reason": gate.get("reason"), "tally": st.get("tally"), "not_checked": st.get("not_checked"),
+                  "pending_review": st.get("pending_review", 0), "cost_usd": round(ec.budget.spent_usd, 4),
+                  "guardrail_events": [e.model_dump() for e in ec.events]}
+        if result["status"] == "published" and settings.auto_verify:
+            # The statements are already on screen. Now check the most check-worthy claims, each one appearing as it finishes.
+            from .video_verifier import run_video_verification
+            try:
+                result["auto_verify"] = await run_video_verification(episode_id, settings=settings, store=store)
+            except Exception:
+                log.exception("automatic verification crashed for %s", episode_id)
+        return result
     except Exception as e:
         if is_budget_error(e):
             reason = f"Stopped by the per-episode cost cap (${settings.max_cost_usd_per_episode:.2f})."

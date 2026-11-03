@@ -20,6 +20,7 @@ export interface Verdict {
   evidence_grade: string;
   score?: number | null; // 0-100 truthfulness computed in code; null for Unverifiable
   correction?: string | null; // False verdicts: the correct fact according to the sources
+  basis?: "sources" | "model_knowledge"; // model_knowledge: answered from general knowledge, no source searched
   review_status: "not_needed" | "pending" | "approved" | "changed";
   escalated: boolean;
   downgrades?: string[];
@@ -63,6 +64,7 @@ export interface PreviewClaim {
   claim_text: string;
   speaker: string | null;
   verdict: VerdictName | null; // null = not checked, or with a reviewer
+  basis?: "sources" | "model_knowledge";
   not_checked_reason: string | null;
   awaiting_review: boolean;
   source_line: string | null; // "Publisher: what it says", shortened
@@ -101,6 +103,7 @@ export interface Episode {
   published_at: string | null;
   status: string;
   skip_reason?: string | null;
+  auto_verify?: string | null; // "running" while the automatic verifier works through the video's claims
   summary?: string | null; // 2-3 sentences on what the video covers, written by the extractor
   guest?: string | null;
   import_note?: string | null; // set when verdicts came from an outside analysis, not the pipeline

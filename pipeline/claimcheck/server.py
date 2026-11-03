@@ -38,6 +38,10 @@ def _fail_orphaned_runs() -> None:
     except Exception:
         logging.getLogger("claimcheck").exception("could not clean up orphaned runs")
     try:
+        _store.db.table("episodes").update({"auto_verify_status": None}).eq("auto_verify_status", "running").execute()
+    except Exception:
+        logging.getLogger("claimcheck").exception("could not clear interrupted automatic verifications")
+    try:
         _store.reset_interrupted_verifications()
     except Exception:
         logging.getLogger("claimcheck").exception("could not clean up interrupted verifications")
@@ -96,6 +100,26 @@ async def cancel(episode_id: str, x_pipeline_secret: Optional[str] = Header(defa
     _store.db.table("episodes").update({"status": "skipped", "skip_reason": "Cancelled."}
                                        ).eq("id", episode_id).in_("status", ["queued", "processing"]).execute()
     return {"cancelled": True, "was_running": was_running}
+
+
+@app.post("/episodes/{episode_id}/verify-all")
+async def verify_all(episode_id: str, wait: bool = False, x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
+    """Runs the automatic whole-video verifier on a video that has finished its first pass (also useful to retry)."""
+    _auth(x_pipeline_secret)
+    from .agents.video_verifier import run_video_verification
+
+    key = f"auto:{episode_id}"
+    running = _running.get(key)
+    if running and not running.done():
+        raise HTTPException(409, "Already verifying this video.")
+    if not await _store.get_episode(episode_id):
+        raise HTTPException(404, "Video not found.")
+    if wait:
+        return await run_video_verification(episode_id, settings=_settings, store=_store, manual=True)
+    task = asyncio.create_task(run_video_verification(episode_id, settings=_settings, store=_store, manual=True))
+    _running[key] = task
+    task.add_done_callback(lambda t, k=key: _running.pop(k, None) if _running.get(k) is t else None)
+    return {"accepted": True, "episode_id": episode_id}
 
 
 class VerifyRequest(BaseModel):

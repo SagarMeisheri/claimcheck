@@ -420,3 +420,27 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .topic-tag .tag-n { font-size: 1em; opacity: 0.6; margin-left: 0.15em; font-variant-numeric: tabular-nums; }
 .topic-chip { font-size: 0.78rem; padding: 0.1rem 0.55rem; }
 .topic-clear { background: transparent; border-color: var(--rule); color: var(--ink-soft); }
+
+/* Carousel pager: stay on the home page and page through a video's statements. */
+.pager { display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; margin-top: 0.3rem; }
+.pager-btn { font: inherit; font-size: 0.82rem; min-width: 1.9rem; padding: 0.15rem 0.5rem; border: 1px solid var(--rule); background: transparent; color: inherit; border-radius: 6px; cursor: pointer; }
+.pager-btn:hover:not(:disabled) { border-color: var(--ink); }
+.pager-btn[aria-current="page"] { background: var(--ink); color: var(--paper-raised); border-color: var(--ink); }
+.pager-btn:disabled { opacity: 0.4; cursor: default; }
+.pager-gap { padding: 0 0.15rem; color: var(--ink-soft); }
+.pager-count { margin-left: 0.5rem; font-size: 0.8rem; }
+.ccard-empty { padding: 1rem 0; }
+
+.basis-note { margin-left: 0.45rem; font-size: 0.72rem; color: var(--ink-soft); border: 1px dashed var(--rule); border-radius: 999px; padding: 0 0.4rem; white-space: nowrap; }
+
+/* Verify all claims button and its circular progress ring */
+.verify-all { margin: 0.5rem 0 0; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.verify-all-btn { display: inline-flex; align-items: center; gap: 0.5rem; }
+.verify-all-btn.is-running { opacity: 1; cursor: default; }
+.verify-all-msg { font-size: 0.85rem; }
+.ring { flex: none; transform: rotate(-90deg); }
+.ring-track { fill: none; stroke: var(--rule); stroke-width: 2.5; }
+.ring-fill { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; transition: stroke-dashoffset 0.4s ease; }
+.ring-spin { animation: ring-turn 0.9s linear infinite; }
+@keyframes ring-turn { to { transform: rotate(270deg); } }
+@media (prefers-reduced-motion: reduce) { .ring-spin { animation-duration: 3s; } }

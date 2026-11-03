@@ -161,6 +161,53 @@ export async function requestVerification(claimId: string): Promise<VerifyResult
   return { ok: true, status: "verifying", message: "Verifying. This usually takes a minute or two." };
 }
 
+// "Verify all claims": one press runs the whole-video verifier. Limited per person and for the site (the pipeline
+// adds its own claim, search and cost caps). Rows go into verify_requests with ":all" on the requester, so they are
+// counted apart from single-claim Verify presses.
+const VERIFY_ALL_PER_PERSON_PER_DAY = Number(process.env.VERIFY_ALL_PER_PERSON_PER_DAY ?? 3);
+const VERIFY_ALL_SITE_PER_HOUR = Number(process.env.VERIFY_ALL_SITE_PER_HOUR ?? 20);
+
+export async function requestVerifyAll(videoId: string): Promise<{ ok: boolean; message: string }> {
+  if (!/^[\w-]{6,20}$/.test(videoId)) return { ok: false, message: "Unknown video." };
+  const db = serviceDb();
+  const { data: ep } = await db.from("episodes").select("id, status, auto_verify_status").eq("youtube_video_id", videoId).maybeSingle();
+  if (!ep) return { ok: false, message: "Unknown video." };
+  if (!["done", "in_review"].includes(ep.status)) return { ok: false, message: "This video is still being analysed. Try again when it's finished." };
+  if (ep.auto_verify_status === "running") return { ok: true, message: "Already verifying this video." };
+
+  const { data: eligible } = await db.from("claims").select("id").eq("episode_id", ep.id).eq("statement_type", "factual_claim")
+    .is("verdict_id", null).in("verification_status", ["not_requested", "failed"]).neq("policy_tier", "never").limit(1);
+  if (!eligible?.length) return { ok: false, message: "Every claim in this video has already been checked." };
+
+  const who = `${await submitterHash()}:all`;
+  const dayAgo = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const hourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
+  const [{ count: mine }, { count: site }] = await Promise.all([
+    db.from("verify_requests").select("id", { count: "exact", head: true }).eq("requester", who).eq("outcome", "queued").gte("created_at", dayAgo),
+    db.from("verify_requests").select("id", { count: "exact", head: true }).like("requester", "%:all").eq("outcome", "queued").gte("created_at", hourAgo),
+  ]);
+  if ((mine ?? 0) >= VERIFY_ALL_PER_PERSON_PER_DAY) return { ok: false, message: `You've used "Verify all claims" ${VERIFY_ALL_PER_PERSON_PER_DAY} times today, the daily limit. Try again tomorrow.` };
+  if ((site ?? 0) >= VERIFY_ALL_SITE_PER_HOUR) return { ok: false, message: "Lots of people are verifying videos right now. Try again in a few minutes." };
+
+  const { data: reqRow } = await db.from("verify_requests")
+    .insert({ claim_id: eligible[0].id, episode_id: ep.id, requester: who, outcome: "queued" }).select("id").single();
+  await db.from("episodes").update({ auto_verify_status: "running" }).eq("id", ep.id); // the button shows progress straight away
+
+  const res = await fetch(`${process.env.PIPELINE_URL}/episodes/${encodeURIComponent(ep.id)}/verify-all`, {
+    method: "POST", headers: { "x-pipeline-secret": process.env.PIPELINE_SHARED_SECRET ?? "" },
+  }).catch(() => null);
+  if (!res || !res.ok) {
+    const detail = res ? String((await res.json().catch(() => ({})))?.detail ?? "") : "";
+    if (res?.status === 409) return { ok: true, message: detail || "Already verifying this video." }; // it is running: keep the state
+    await db.from("episodes").update({ auto_verify_status: null }).eq("id", ep.id);
+    if (reqRow) await db.from("verify_requests").update({ outcome: "failed" }).eq("id", reqRow.id);
+    return { ok: false, message: detail || "The checking service didn't respond. Try again in a few minutes." };
+  }
+  revalidatePath("/");
+  revalidatePath(`/v/${videoId}`);
+  return { ok: true, message: "Verifying all claims. Each result appears as soon as it is ready." };
+}
+
 async function assertReviewer(): Promise<string> {
   const h = await headers();
   const auth = h.get("authorization") ?? "";

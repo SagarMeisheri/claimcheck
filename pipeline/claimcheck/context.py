@@ -64,6 +64,7 @@ class EpisodeContext:
     cached_ids: dict[int, str] = field(default_factory=dict)
     # Returns the plugin list for each ADK runner (budget, Model Armor, ...)
     plugins_factory: Callable[[], list] = field(default=lambda: [])
+    auto: dict[str, Any] = field(default_factory=dict)  # state of the automatic whole-video verifier
     duration_s: int = 0  # video length, used to turn a statement's timestamp into progress
 
     def log(self, stage: str, rule: str, action: str, detail: str = "", claim_index: Optional[int] = None) -> None:

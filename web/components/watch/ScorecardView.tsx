@@ -6,9 +6,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VerdictStrip } from "@/components/MiniBar";
 import { Avatar, Thumb } from "@/components/Thumb";
 import type { Claim, EpisodeDetail, StatementType, VerdictName } from "@/lib/types";
-import { CORE_TYPES, STATEMENT_TYPES, TYPE_ORDER, VERIFYING, breakdownParts, typeOf } from "@/lib/statements";
+import { CORE_TYPES, STATEMENT_TYPES, TYPE_ORDER, VERIFYING, breakdownParts, canRequestVerify, typeOf } from "@/lib/statements";
 import { VERDICTS, clock, topicHue, topicLabel } from "@/lib/verdicts";
 import { CheckProgress } from "@/components/CheckProgress";
+import { VerifyAllButton } from "@/components/VerifyAllButton";
 import { ClaimCard, StatementCard, type CardPhase } from "./ClaimCard";
 import { ClaimTrack } from "./ClaimTrack";
 import { YouTubePlayer, type PlayerHandle } from "./YouTubePlayer";
@@ -311,6 +312,10 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
 
         {ep.import_note && <p className="notice import-note">{ep.import_note}</p>}
         {checking && <CheckProgress videoId={ep.youtube_video_id} />}
+        {!checking && (
+          <VerifyAllButton videoId={ep.youtube_video_id} running={ep.auto_verify === "running"}
+                           eligible={ep.claims.some((c) => canRequestVerify(c))} />
+        )}
 
         {ep.claims.length > 0 && (
           <section className="score-summary" aria-label="Summary">

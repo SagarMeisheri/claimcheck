@@ -141,6 +141,51 @@ class JudgeResult(BaseModel):
     citations: list[JudgeCitation] = Field(default_factory=list)
 
 
+# --- Automatic whole-video verification (agents/video_verifier.py) -------------------------
+class TriageItem(BaseModel):
+    n: int = Field(description="The claim's number from the list")
+    route: Literal["knowledge", "search", "skip"] = Field(
+        description="knowledge = a stable, well-known fact; search = needs a source (numbers, recent or specific facts); skip = too vague or trivial")
+    priority: int = Field(default=2, ge=1, le=3, description="1 = most important and most checkable, 3 = least")
+    group: str = Field(default="", description="Short label shared by claims that one web search can settle together, e.g. 'mp land purchases'")
+    query: str = Field(default="", description="For search: one self-contained web search query (entity, metric, period, geography)")
+
+
+class BatchTriage(BaseModel):
+    items: list[TriageItem]
+
+
+class KnowledgeItem(BaseModel):
+    n: int
+    tag: Literal["TRUE", "FALSE", "UNSURE"]
+    confidence: float = Field(ge=0, le=1)
+    explanation: str = Field(description="One or two neutral sentences")
+
+
+class KnowledgeResult(BaseModel):
+    items: list[KnowledgeItem]
+
+
+class BatchVerdict(BaseModel):
+    n: int = Field(description="The claim's number from the list")
+    tag: FinalTag
+    confidence: float = Field(ge=0, le=1)
+    explanation: str
+    correction: str = ""
+    evidence_grade: Optional[Literal["rct_or_review", "observational", "animal_or_lab", "expert_opinion", "not_applicable"]] = "not_applicable"
+    citations: list[JudgeCitation] = Field(default_factory=list)
+    follow_up_query: str = Field(default="", description="UNVERIFIABLE only: one better web search that could settle it, else empty")
+
+    def to_result(self) -> "JudgeResult":
+        return JudgeResult(verdict=_TAG_TO_VERDICT[self.tag], confidence=self.confidence, reasoning=self.explanation,  # type: ignore[arg-type]
+                           correction=self.correction if self.tag == "FALSE" else "", evidence_grade=self.evidence_grade,
+                           citations=self.citations)
+
+
+class BatchJudgeOutput(BaseModel):
+    verdicts: list[BatchVerdict]
+
+
 # --- Internal records (not LLM output) ------------------------------------------
 class Citation(BaseModel):
     url: str
@@ -160,6 +205,7 @@ class FinalVerdict(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
     escalated: bool = False
     from_cache: bool = False
+    basis: Literal["sources", "model_knowledge"] = "sources"  # model_knowledge = answered from general knowledge, no source
     review_status: Literal["not_needed", "pending", "approved", "changed"] = "not_needed"
     downgrades: list[str] = Field(default_factory=list)
 

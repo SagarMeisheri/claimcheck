@@ -46,6 +46,7 @@ function Card({ videoId, c, videoPending, active, topic, onTopic, onPlay }: {
           <span className="ccard-verdict">
             <span className="vbadge" style={{ background: v.cssVar }}>{v.label.toUpperCase()}</span>
             {score && <span className="vscore">{score}</span>}
+            {c.basis === "model_knowledge" && <span className="basis-note" title="Answered from general knowledge; no source was searched">General knowledge</span>}
           </span>
         )}
         <span className="ccard-text">{c.claim_text}</span>
@@ -87,43 +88,65 @@ function TypeTabs({ counts, tab, onTab, verified }: { counts: Counts; tab: Tab; 
   );
 }
 
-/** Row under a video: tabs by statement type, then that type's statements (verified claims first). */
+const PAGE_SIZE = 8;
+
+/** Page numbers with gaps: 1 … 4 5 6 … 12 */
+function pageList(page: number, pages: number): (number | "gap")[] {
+  const keep = new Set([1, pages, page - 1, page, page + 1].filter((n) => n >= 1 && n <= pages));
+  const out: (number | "gap")[] = [];
+  let last = 0;
+  for (const n of [...keep].sort((x, y) => x - y)) { if (n - last > 1) out.push("gap"); out.push(n); last = n; }
+  return out;
+}
+
+/** Row under a video: tabs by statement type, subject chips, then that selection's statements, a page at a time. */
 export function StatementCarousel({ videoId, statements, verifiedCount, counts, videoPending = false, activeId = null, onPlay }: {
   videoId: string; statements: PreviewClaim[]; verifiedCount: number; counts: Counts;
   videoPending?: boolean; activeId?: string | null; onPlay(c: PreviewClaim): void;
 }) {
   const [tab, setTab] = useState<Tab>("all");
   const [topic, setTopic] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
   const total = totalStatements(counts);
   if (!total && !statements.length) return null;
   const inTab = tab === "all" ? statements : statements.filter((c) => typeOf(c.statement_type) === tab);
   const topicCounts = new Map<string, number>();
   for (const c of inTab) for (const t of c.topics ?? []) topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
   const chips = [...topicCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  // With a subject chosen, show every match; otherwise the first 14 of "All".
-  const list = topic ? inTab.filter((c) => c.topics?.includes(topic)) : tab === "all" ? inTab.slice(0, 14) : inTab;
-  const hidden = topic ? 0 : (tab === "all" ? total : counts[tab] ?? 0) - list.length;
-  const pick = (t: string) => setTopic((cur) => (cur === t ? null : t));
+  const list = topic ? inTab.filter((c) => c.topics?.includes(topic)) : inTab;
+  const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const cur = Math.min(page, pages);
+  const shown = list.slice((cur - 1) * PAGE_SIZE, cur * PAGE_SIZE);
+  const pick = (t: string) => { setTopic((c) => (c === t ? null : t)); setPage(1); };
+  const changeTab = (t: Tab) => { setTab(t); setTopic(null); setPage(1); };
   return (
     <div className="stmt-carousel">
-      <TypeTabs counts={counts} tab={tab} onTab={setTab} verified={verifiedCount} />
+      <TypeTabs counts={counts} tab={tab} onTab={changeTab} verified={verifiedCount} />
       {chips.length > 1 && (
         <div className="topic-filters stmt-topics" role="group" aria-label="Filter by subject">
           {chips.map(([t, n]) => (
             <button key={t} type="button" className="topic-tag" aria-pressed={topic === t} onClick={() => pick(t)}
-                      style={{ ["--th" as string]: topicHue(t) }}>
+                    style={{ ["--th" as string]: topicHue(t) }}>
               {topicLabel(t)} <span className="tag-n">{n}</span>
             </button>
           ))}
-          {topic && <button type="button" className="topic-tag topic-clear" onClick={() => setTopic(null)}>Clear ×</button>}
+          {topic && <button type="button" className="topic-tag topic-clear" onClick={() => { setTopic(null); setPage(1); }}>Clear ×</button>}
         </div>
       )}
       <div className="carousel" role="list" aria-label="Statements in this video">
-        {list.map((c) => <Card key={c.id} videoId={videoId} c={c} videoPending={videoPending} active={activeId === c.id} topic={topic} onTopic={pick} onPlay={onPlay} />)}
-        <Link href={`/v/${videoId}`} className="ccard ccard-more" role="listitem">
-          {hidden > 0 ? `See ${hidden} more` : "Open the video page"}
-        </Link>
+        {shown.map((c) => <Card key={c.id} videoId={videoId} c={c} videoPending={videoPending} active={activeId === c.id} topic={topic} onTopic={pick} onPlay={onPlay} />)}
+        {shown.length === 0 && <p className="meta ccard-empty">No statements match.</p>}
       </div>
+      {pages > 1 && (
+        <nav className="pager" aria-label="Statement pages">
+          <button type="button" className="pager-btn" disabled={cur === 1} onClick={() => setPage(cur - 1)} aria-label="Previous page">‹</button>
+          {pageList(cur, pages).map((n, i) => n === "gap"
+            ? <span key={`g${i}`} className="pager-gap" aria-hidden="true">…</span>
+            : <button key={n} type="button" className="pager-btn" aria-current={n === cur ? "page" : undefined} onClick={() => setPage(n)}>{n}</button>)}
+          <button type="button" className="pager-btn" disabled={cur === pages} onClick={() => setPage(cur + 1)} aria-label="Next page">›</button>
+          <span className="meta pager-count">{(cur - 1) * PAGE_SIZE + 1}–{Math.min(cur * PAGE_SIZE, list.length)} of {list.length}</span>
+        </nav>
+      )}
     </div>
   );
 }

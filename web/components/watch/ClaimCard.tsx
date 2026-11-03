@@ -122,6 +122,7 @@ export function ClaimCard({ claim: c, videoId, expanded, active, phase, countdow
       {v ? <p className="cc-verdict">
              <span className="vbadge" style={{ background: color }}>{VERDICTS[v.verdict].label.toUpperCase()}</span>
              {scoreLabel(v.score) && <span className="vscore" title="Truthfulness score, computed from the verdict, the judge's confidence and the sources">{scoreLabel(v.score)}</span>}
+             {v.basis === "model_knowledge" && <span className="basis-note" title="Answered from well-established general knowledge. No source was searched.">General knowledge</span>}
            </p>
          : <p className="cc-verdict"><span className="pending-word">With a reviewer</span></p>}
 

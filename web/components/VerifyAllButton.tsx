@@ -1,0 +1,80 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { requestVerifyAll } from "@/app/actions";
+
+type Live = { auto_verify: string | null; verified: number; verifying: number; label: string | null; pct: number };
+
+/** A circular progress ring: fills with pct, or spins when the progress isn't known yet. */
+function Ring({ pct }: { pct: number | null }) {
+  const r = 7, c = 2 * Math.PI * r;
+  return (
+    <svg className={`ring${pct === null ? " ring-spin" : ""}`} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <circle cx="9" cy="9" r={r} className="ring-track" />
+      <circle cx="9" cy="9" r={r} className="ring-fill" strokeDasharray={c} strokeDashoffset={c * (1 - (pct === null ? 0.28 : pct / 100))} />
+    </svg>
+  );
+}
+
+/**
+ * "Verify all claims": starts the whole-video verifier. While it runs the button turns into a ring with
+ * "Verifying 3 of 10", polls the video, and refreshes the page whenever another claim has a verdict, so every
+ * result shows up the moment it exists.
+ */
+export function VerifyAllButton({ videoId, running: initialRunning, eligible, compact = false }: {
+  videoId: string; running: boolean; eligible: boolean; compact?: boolean;
+}) {
+  const router = useRouter();
+  const [running, setRunning] = useState(initialRunning);
+  const [live, setLive] = useState<Live | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const seen = useRef<number | null>(null);
+
+  useEffect(() => setRunning(initialRunning), [initialRunning]);
+
+  useEffect(() => {
+    if (!running) return;
+    let stop = false;
+    async function tick() {
+      try {
+        const r = await fetch(`/api/progress/${videoId}`, { cache: "no-store" });
+        if (!r.ok || stop) return;
+        const j = (await r.json()) as Live;
+        setLive(j);
+        if (seen.current !== null && j.verified !== seen.current) router.refresh();
+        seen.current = j.verified;
+        if (j.auto_verify !== "running" && j.verifying === 0) { stop = true; window.clearInterval(id); setRunning(false); router.refresh(); }
+      } catch { /* try again next tick */ }
+    }
+    const id = window.setInterval(tick, 2500);
+    tick();
+    return () => { stop = true; window.clearInterval(id); };
+  }, [running, videoId, router]);
+
+  const go = () => start(async () => {
+    const r = await requestVerifyAll(videoId);
+    setMessage(r.ok ? null : r.message);
+    if (r.ok) { setRunning(true); router.refresh(); }
+  });
+
+  if (running || pending) {
+    const pct = live?.pct ?? 0;
+    return (
+      <p className={`verify-all${compact ? " compact" : ""}`} role="status" aria-live="polite">
+        <button type="button" className="btn secondary small verify-all-btn is-running" disabled>
+          <Ring pct={live && live.pct > 0 ? pct : null} />
+          {live?.label ? live.label.replace("Verifying claims: ", "Verifying ") : "Starting…"}
+        </button>
+      </p>
+    );
+  }
+  if (!eligible) return null;
+  return (
+    <p className={`verify-all${compact ? " compact" : ""}`}>
+      <button type="button" className="btn small verify-all-btn" onClick={go}>Verify all claims</button>
+      {message && <span className="meta verify-all-msg" role="status">{message}</span>}
+    </p>
+  );
+}

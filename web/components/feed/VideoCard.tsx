@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { Avatar, Thumb } from "@/components/Thumb";
 import { CheckProgress } from "@/components/CheckProgress";
+import { VerifyAllButton } from "@/components/VerifyAllButton";
 import { VerdictStrip } from "@/components/MiniBar";
 import { YouTubePlayer, type PlayerHandle } from "@/components/watch/YouTubePlayer";
 import type { Episode, PreviewClaim } from "@/lib/types";
-import { totalStatements } from "@/lib/statements";
+import { canRequestVerify, totalStatements } from "@/lib/statements";
 import { clock, timeAgo } from "@/lib/verdicts";
 import { StatementCarousel } from "./StatementCarousel";
 
@@ -85,6 +86,10 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
         </div>
       </div>
       {checking ? <CheckProgress videoId={ep.youtube_video_id} compact /> : <VerdictStrip tally={ep.tally} checking={false} />}
+      {!checking && !ep.video_pending && (
+        <VerifyAllButton videoId={ep.youtube_video_id} running={ep.auto_verify === "running"} compact
+                         eligible={(ep.preview_claims ?? []).some((c) => canRequestVerify(c))} />
+      )}
       <p className="vcard-summary">
         {checking
           ? <Link href="/review#videos">Stop or remove</Link>

@@ -173,6 +173,9 @@ class Publisher(BaseAgent):
         await ec.store.update_episode(ec.episode_id, {
             **base, "status": "in_review" if pending else "done", "tally": tally, "not_checked": not_checked,
             "statement_counts": statement_counts,
+            # Set in the same write that publishes the statements, so the page never shows a gap before the
+            # automatic verifier starts (agents/video_verifier.py clears it when it finishes).
+            "auto_verify_status": "running" if ec.settings.auto_verify and any(r.claim.verifiable and not r.not_checked_reason for r in records) else None,
             "summary": ((st.get("extraction") or {}).get("summary") or "").strip()[:1200] or None,
             "cost_usd": round(ec.budget.spent_usd, 4), "tokens_in": ec.budget.tokens_in, "tokens_out": ec.budget.tokens_out,
         })

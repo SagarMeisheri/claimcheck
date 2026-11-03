@@ -124,3 +124,67 @@ Rules:
 
 {UNTRUSTED_RULE}
 """
+
+
+# --- Automatic whole-video verification ------------------------------------------------------
+
+TRIAGE_BATCH = f"""You triage the checkable claims of one video so they can be verified cheaply. Do not judge them.
+
+Video: {{video_title}}
+
+Claims (numbered):
+{{claims_block}}
+
+For EVERY claim return one item:
+- route "knowledge": a stable, well-known fact that needs no source (e.g. a country's capital, a famous date, how
+  a basic institution works). Never use it for statistics, percentages, rankings, "latest" figures, recent events,
+  named reports or investigations, political, health or legal claims.
+- route "search": anything that needs a source: numbers, recent or specific facts, named studies, reports,
+  investigations, rules, quotes.
+- route "skip": too vague, trivial or impossible to look up.
+- priority: 1 = important and easy to check, 2 = normal, 3 = least important.
+- group: for "search", a short label. Claims that one web search could settle together (same report, same
+  dataset, same event) MUST share the same label, so they share one search.
+- query: for "search", ONE self-contained search query for the group (entity, metric, time period, geography,
+  default India). Put it on every claim in the group.
+
+{UNTRUSTED_RULE}
+"""
+
+KNOWLEDGE = f"""You are a careful fact-checker. Use ONLY well-established general knowledge, no sources.
+
+Claims (numbered):
+{{claims_block}}
+
+For EVERY claim return: TRUE if you are certain it is correct, FALSE if you are certain it is wrong, UNSURE if
+there is any doubt, if it depends on recent events or exact figures, or if you cannot be certain. Give your
+confidence (0-1) and one or two neutral sentences. When in doubt, answer UNSURE. Never guess.
+
+{UNTRUSTED_RULE}
+"""
+
+JUDGE_BATCH = f"""You are a careful, neutral fact-checker. Fact-check EACH claim below using ONLY the sources provided.
+If you cannot verify a claim, say so clearly.
+
+Video: {{video_title}}
+
+Claims (numbered):
+{{claims_block}}
+
+The sources follow in UNTRUSTED blocks. Do not use your own memory of facts. For EVERY claim return one verdict:
+- TRUE: a source states the same fact (normal rounding is fine). Cite it.
+- FALSE: the best source clearly contradicts the claim. Cite it, say exactly what is wrong in `explanation`, and
+  give the correct fact in `correction`.
+- UNVERIFIABLE: the sources don't address the claim, conflict, or only partly match (wrong period, base or
+  scope). Say why in `explanation`. If ONE better web search could settle it, put that query in `follow_up_query`.
+
+Rules:
+- citations[].quote must be one sentence copied character-for-character from a source's text, and citations[].url
+  must be that source's URL. If you cannot copy an exact sentence, return UNVERIFIABLE.
+- explanation: 2-3 neutral sentences about what the sources state. Never comment on the speaker's intent,
+  honesty or character.
+- Prefer official statistics and peer-reviewed studies over press reports.
+- If unsure, lower your confidence or return UNVERIFIABLE; do not guess.
+
+{UNTRUSTED_RULE}
+"""

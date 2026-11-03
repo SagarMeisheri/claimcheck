@@ -14,7 +14,7 @@ from .. import prompts
 from ..config import Settings
 from ..context import get_context
 from ..guardrails.injection import wrap_untrusted
-from ..schemas import ExtractionResult, JudgeOutput, SearchPlan, TriageResult
+from ..schemas import BatchJudgeOutput, BatchTriage, ExtractionResult, JudgeOutput, KnowledgeResult, SearchPlan, TriageResult
 
 
 def _model(name: str, settings: Settings) -> Any:
@@ -114,3 +114,36 @@ def judge_agent(s: Settings, name: str = "judge") -> LlmAgent:
     return LlmAgent(name=name, model=_model(s.judge_model, s), instruction=prompts.JUDGE,
                     include_contents="none", output_schema=JudgeOutput, output_key=name,
                     generate_content_config=_cfg(0.0), before_model_callback=inject_sources)
+
+
+# --- Automatic whole-video verification (agents/video_verifier.py). Cheap model; claims arrive through state. ---
+
+def inject_group_sources(callback_context: CallbackContext, llm_request: LlmRequest) -> None:
+    """before_model_callback on the batch judge: the fetched sources for this group, as untrusted blocks."""
+    ctx = get_context()
+    docs = ctx.evidence.get(callback_context.state["claim_key"], {})
+    if not docs:
+        blocks = "No sources were found."
+    else:
+        blocks = "\n\n".join(
+            wrap_untrusted(f"SOURCE {i + 1}", f"URL: {url}\nTitle: {d.get('title', '')}\nPublished: {d.get('publish_date') or 'unknown'}\n\n{d['text']}")
+            for i, (url, d) in enumerate(docs.items()))
+    llm_request.contents.append(types.Content(role="user", parts=[types.Part(text=f"Sources:\n\n{blocks}\n\nReturn a verdict for every claim.")]))
+
+
+def batch_triage_agent(s: Settings) -> LlmAgent:
+    return LlmAgent(name="batch_triage", model=_model(s.lite_model, s), instruction=prompts.TRIAGE_BATCH,
+                    include_contents="none", output_schema=BatchTriage, output_key="batch_triage",
+                    generate_content_config=_cfg(0.0))
+
+
+def knowledge_agent(s: Settings) -> LlmAgent:
+    return LlmAgent(name="knowledge", model=_model(s.lite_model, s), instruction=prompts.KNOWLEDGE,
+                    include_contents="none", output_schema=KnowledgeResult, output_key="knowledge",
+                    generate_content_config=_cfg(0.0))
+
+
+def batch_judge_agent(s: Settings, name: str = "batch_judge") -> LlmAgent:
+    return LlmAgent(name=name, model=_model(s.auto_judge_model, s), instruction=prompts.JUDGE_BATCH,
+                    include_contents="none", output_schema=BatchJudgeOutput, output_key="batch_judge",
+                    generate_content_config=_cfg(0.0), before_model_callback=inject_group_sources)

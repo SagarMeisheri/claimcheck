@@ -28,7 +28,7 @@ const NOTABLE: VerdictName[] = ["false", "misleading", "disputed", "outdated"];
 function toPreview(c: Claim): PreviewClaim {
   const s = c.verdict?.citations[0];
   return {
-    id: c.id, start_s: c.start_s, claim_text: c.claim_text, speaker: c.speaker, verdict: c.verdict?.verdict ?? null,
+    id: c.id, start_s: c.start_s, claim_text: c.claim_text, speaker: c.speaker, verdict: c.verdict?.verdict ?? null, basis: c.verdict?.basis,
     not_checked_reason: c.not_checked_reason, awaiting_review: c.awaiting_review,
     source_line: s ? `${s.title ?? "Source"}: ${s.quote}` : null, pestle_area: c.pestle_area, topic: c.topic, topics: c.topics,
     statement_type: c.statement_type, verification_status: c.verification_status,
@@ -50,7 +50,7 @@ export function carouselOrder(published: Claim[]): Claim[] {
 }
 
 /** Feed fields. `claims` holds only claims with a verdict row (public, or hidden while awaiting review). */
-const PER_TYPE = 10; // statements per type kept for the home carousel tabs
+const PER_TYPE = 30; // statements per type kept for the home carousel tabs
 
 /** Carousel content: verified claims first, then the other statements in the order they were said; at most PER_TYPE per type. */
 export function carouselStatements(published: Claim[], unverified: Claim[]): Claim[] {
@@ -87,12 +87,12 @@ export function deriveFeedFields(ep: Episode, claims: Claim[], unverified: Claim
 type EpisodeRow = {
   id: string; youtube_video_id: string; title: string | null; duration_s: number | null; published_at: string | null;
   status: string; skip_reason?: string | null; tally: Record<string, number>; not_checked: Record<string, number>;
-  created_at: string; channel_id: string | null; statement_counts?: Record<string, number> | null; summary?: string | null;
+  created_at: string; channel_id: string | null; statement_counts?: Record<string, number> | null; summary?: string | null; auto_verify_status?: string | null;
   channels: { name: string; track: string; avatar_url: string | null } | null;
 };
 
-const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, tally, not_checked, statement_counts, summary, created_at, channel_id, channels(name, track, avatar_url)";
-const CLAIM_COLS = "id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, topics, claim_type, statement_type, tag_note, verification_status, verify_error, policy_tier, checkworthiness, not_checked_reason, verdict_id, episode_id, verdicts(id, verdict, confidence, reasoning, score, correction, evidence_grade, review_status, escalated, citations(url, title, tier, quote))";
+const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, tally, not_checked, statement_counts, summary, auto_verify_status, created_at, channel_id, channels(name, track, avatar_url)";
+const CLAIM_COLS = "id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, topics, claim_type, statement_type, tag_note, verification_status, verify_error, policy_tier, checkworthiness, not_checked_reason, verdict_id, episode_id, verdicts(id, verdict, confidence, reasoning, score, correction, basis, evidence_grade, review_status, escalated, citations(url, title, tier, quote))";
 
 function toEpisode(r: EpisodeRow): Episode {
   return {
@@ -101,7 +101,7 @@ function toEpisode(r: EpisodeRow): Episode {
     channel_avatar: r.channels?.avatar_url ?? null,
     channel_track: (r.channels?.track as Episode["channel_track"]) ?? "finance_health",
     duration_s: r.duration_s ?? 0, published_at: r.published_at, status: r.status, skip_reason: r.skip_reason,
-    tally: r.tally ?? {}, not_checked: r.not_checked ?? {}, statement_counts: r.statement_counts ?? {}, summary: r.summary ?? null, created_at: r.created_at,
+    tally: r.tally ?? {}, not_checked: r.not_checked ?? {}, statement_counts: r.statement_counts ?? {}, summary: r.summary ?? null, auto_verify: r.auto_verify_status ?? null, created_at: r.created_at,
   };
 }
 

@@ -35,6 +35,8 @@ class Store(Protocol):
     async def save_guardrail_events(self, episode_id: str, events: list[GuardrailEvent]) -> None: ...
     # On-demand verification of one claim
     async def get_claim_for_verification(self, claim_id: str) -> Optional[dict[str, Any]]: ...
+    async def get_episode(self, episode_id: str) -> Optional[dict[str, Any]]: ...
+    async def list_auto_verify_claims(self, episode_id: str) -> list[dict[str, Any]]: ...
     async def start_claim_verification(self, claim_id: str) -> bool: ...
     async def set_claim_status(self, claim_id: str, status: str, error: Optional[str] = None) -> None: ...
     async def save_claim_verdict(self, claim_id: str, verdict: FinalVerdict, cached_id: Optional[str], embedding: Optional[list[float]], judge_model: str) -> str: ...
@@ -84,7 +86,7 @@ class SupabaseStore:
         now = dt.datetime.now(dt.timezone.utc)
         vrow = {"verdict": v.verdict, "confidence": v.confidence, "reasoning": v.reasoning,
                 "evidence_grade": v.evidence_grade, "model": judge_model, "escalated": v.escalated,
-                "score": v.score, "correction": v.correction or None,
+                "score": v.score, "correction": v.correction or None, "basis": v.basis,
                 "review_status": v.review_status, "downgrades": v.downgrades,
                 "recheck_after": (now + dt.timedelta(days=90)).isoformat()}
         verdict_id = self.db.table("verdicts").insert(vrow).execute().data[0]["id"]
@@ -134,6 +136,21 @@ class SupabaseStore:
                      "episodes(id, youtube_video_id, title, status, cost_usd, tokens_in, tokens_out, channels(track))")
              .eq("id", claim_id).limit(1).execute())
         return r.data[0] if r.data else None
+
+    async def get_episode(self, episode_id):
+        r = (self.db.table("episodes").select("id, youtube_video_id, title, status, cost_usd, channels(track)")
+             .eq("id", episode_id).limit(1).execute())
+        return r.data[0] if r.data else None
+
+    async def list_auto_verify_claims(self, episode_id):
+        """Claims the automatic verifier may take: verifiable, not redacted, no verdict yet, not already running."""
+        r = (self.db.table("claims")
+             .select("id, idx, start_s, speaker, claim_text, context_quote, pestle_area, topic, topics, statement_type, policy_tier, "
+                     "checkworthiness, verification_status")
+             .eq("episode_id", episode_id).eq("statement_type", "factual_claim").is_("verdict_id", "null")
+             .in_("verification_status", ["not_requested", "failed"]).neq("policy_tier", "never")
+             .or_("not_checked_reason.is.null,not_checked_reason.neq.outside_policy").order("start_s").limit(200).execute())
+        return r.data or []
 
     async def start_claim_verification(self, claim_id):
         """Moves a claim to 'verifying' only if no other run holds it. Returns False if it was taken."""

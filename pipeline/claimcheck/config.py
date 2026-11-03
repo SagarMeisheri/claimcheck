@@ -25,6 +25,12 @@ class Settings:
     # Models
     fast_model: str = field(default_factory=lambda: _env("CLAIMCHECK_FAST_MODEL", "gemini-3.8-flash"))
     judge_model: str = field(default_factory=lambda: _env("CLAIMCHECK_JUDGE_MODEL", "gemini-4-argon"))
+    # The cheap model used by the automatic whole-video verifier (triage, general-knowledge pass, batch judge).
+    # Set CLAIMCHECK_LITE_MODEL to the Flash-Lite model id your key has access to.
+    lite_model: str = field(default_factory=lambda: _env("CLAIMCHECK_LITE_MODEL", "gemini-3.5-flash-lite"))
+    # Model for the batch judge inside the automatic verifier. Defaults to the lite model: every verdict still
+    # has to pass the quote, number and source checks in code.
+    auto_judge_model: str = field(default_factory=lambda: _env("CLAIMCHECK_AUTO_JUDGE_MODEL", "") or _env("CLAIMCHECK_LITE_MODEL", "gemini-3.5-flash-lite"))
     embedding_model: str = field(default_factory=lambda: _env("CLAIMCHECK_EMBEDDING_MODEL", "gemini-embedding-001"))
     embedding_dims: int = int(_env("CLAIMCHECK_EMBEDDING_DIMS", "768"))
     # "agentic" (default): model reads the transcript first and loads frames on demand. "static": fixed low-fps fallback.
@@ -50,6 +56,15 @@ class Settings:
     max_cost_usd_per_episode: float = float(_env("CLAIMCHECK_MAX_COST_USD", "3.0"))
     # Hard cap on web searches per Verify click. The planner proposes searches; code truncates to this (never above 3).
     max_searches_per_claim: int = min(3, int(_env("CLAIMCHECK_MAX_SEARCHES_PER_CLAIM", "3")))
+    # Whole-video verification (agents/video_verifier.py). auto_verify = run it by itself right after extraction (off by
+    # default: for now a viewer starts it with the "Verify all claims" button, which calls POST /episodes/{id}/verify-all).
+    auto_verify: bool = _env("CLAIMCHECK_AUTO_VERIFY", "0") == "1"
+    # Limits for one press of "Verify all claims" (the per-video cost cap still applies on top).
+    verify_all_max_claims: int = int(_env("CLAIMCHECK_VERIFY_ALL_MAX_CLAIMS", "40"))
+    verify_all_max_searches: int = int(_env("CLAIMCHECK_VERIFY_ALL_MAX_SEARCHES", "15"))
+    auto_verify_max_claims: int = int(_env("CLAIMCHECK_AUTO_VERIFY_MAX_CLAIMS", "12"))   # claims checked per video
+    auto_verify_max_searches: int = int(_env("CLAIMCHECK_AUTO_VERIFY_MAX_SEARCHES", "8"))  # web searches per video
+    knowledge_min_confidence: float = float(_env("CLAIMCHECK_KNOWLEDGE_MIN_CONFIDENCE", "0.9"))
     tool_timeout_s: float = float(_env("CLAIMCHECK_TOOL_TIMEOUT_S", "60"))
     cache_similarity: float = float(_env("CLAIMCHECK_CACHE_SIMILARITY", "0.92"))
     cache_max_age_days: int = int(_env("CLAIMCHECK_CACHE_MAX_AGE_DAYS", "90"))
@@ -58,6 +73,7 @@ class Settings:
 
     # USD per 1M tokens (input, output). Argon is an ASSUMPTION until Google publishes pricing.
     prices: dict = field(default_factory=lambda: {
+        "flash-lite": (0.10, 0.40),  # any Flash-Lite model. ASSUMPTION until the price is confirmed
         "gemini-3.8-flash": (0.75, 3.75),
         "gemini-4-argon": (2.50, 15.0),
     })
