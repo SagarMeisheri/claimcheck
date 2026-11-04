@@ -49,7 +49,7 @@ export function topicHue(key: string): number {
 
 export function topicLabel(key: string): string {
   if (TOPIC_LABELS[key]) return TOPIC_LABELS[key];
-  const s = key.replaceAll("_", " ");
+  const s = key.replaceAll("_", " ").replace(/\b(ai|gpu|gpus|ipo|upi|gdp|api|us|uk|eu|nvidia|ev|ml|llm)\b/gi, (w) => (w.toLowerCase() === "nvidia" ? "Nvidia" : w.toUpperCase()));
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
