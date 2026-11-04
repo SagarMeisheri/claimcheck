@@ -32,8 +32,13 @@ type EpisodeRow = {
 
 const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, statement_counts, summary, sources_batch_status, created_at, channel_id, creator_id, sections, progress, channels(name)";
 const SOURCE_COLS = "claim_sources(url, title, tier, excerpt, publish_date, rank, kind)";
-const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, section_idx, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, ${SOURCE_COLS}`;
+const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, section_idx, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, sources_checked_at, ${SOURCE_COLS}`;
 const CREATOR_COLS = "id, podcast, youtube_channel_name, youtube_handles, country, summary, public_profile";
+const SPEAKER_COLS = "episode_id, label, role, statements, speakers(id, name, summary, sources, public_profile)";
+
+function toSpeaker(r: any): EpisodeSpeaker {
+  return { label: r.label, role: r.role, statements: r.statements, speaker: r.speakers ?? null };
+}
 const PUBLIC_STATUSES = ["done", "in_review", "processing", "queued"];
 
 function toEpisode(r: EpisodeRow): Episode {
@@ -70,7 +75,7 @@ function toPreview(c: Claim): PreviewClaim {
     topics: c.topics, statement_type: c.statement_type, sources_status: c.sources_status,
     sources: c.sources.map((s) => ({ ...s, excerpt: "" })), sources_summary: c.sources_summary ?? null, sources_match: c.sources_match ?? null,
     sources_route: c.sources_route ?? null, counter_sources: c.counter_sources.map((s) => ({ ...s, excerpt: "" })),
-    counter_summary: c.counter_summary ?? null,
+    counter_summary: c.counter_summary ?? null, section_idx: c.section_idx ?? null, statement_context: c.statement_context ?? null,
   };
 }
 
@@ -87,10 +92,18 @@ export function carouselStatements(claims: Claim[]): Claim[] {
     });
 }
 
+/** The latest time sources were looked up for any of these statements. */
+function lastChecked(claims: Claim[]): string | null {
+  let last: string | null = null;
+  for (const c of claims) if (c.sources_checked_at && (!last || c.sources_checked_at > last)) last = c.sources_checked_at;
+  return last;
+}
+
 export function deriveFeedFields(ep: Episode, claims: Claim[]): Episode {
   const visible = claims.filter((c) => c.not_checked_reason !== "outside_policy");
   return {
     ...ep,
+    sources_checked_at: lastChecked(visible),
     pestle_areas: [...new Set(visible.map((c) => c.pestle_area))] as Pestle[],
     claim_texts: visible.map((c) => c.claim_text),
     preview_claims: carouselStatements(visible).map(toPreview),
@@ -107,14 +120,24 @@ export async function getFeed(limit = 40): Promise<Episode[]> {
   if (error) throw error;
   const eps = (data as unknown as EpisodeRow[]).map(toEpisode);
   if (!eps.length) return [];
-  const { data: claims } = await db.from("claims").select(CLAIM_COLS).in("episode_id", eps.map((e) => e.id))
-    .order("start_s").limit(4000);
+  const creatorIds = [...new Set(eps.map((e) => e.creator_id).filter(Boolean))] as string[];
+  const [{ data: claims }, { data: creators }, { data: speakers }] = await Promise.all([
+    db.from("claims").select(CLAIM_COLS).in("episode_id", eps.map((e) => e.id)).order("start_s").limit(4000),
+    creatorIds.length ? db.from("creators").select(CREATOR_COLS).in("id", creatorIds) : Promise.resolve({ data: [] as any[] }),
+    db.from("episode_speakers").select(SPEAKER_COLS).in("episode_id", eps.map((e) => e.id)).order("statements", { ascending: false }),
+  ]);
   const byEp = new Map<string, Claim[]>();
   for (const c of (claims ?? []).map(toClaim)) {
     const key = (c as any).episode_id as string;
     byEp.set(key, [...(byEp.get(key) ?? []), c]);
   }
-  return eps.map((e) => deriveFeedFields(e, byEp.get(e.id) ?? []));
+  const creatorById = new Map((creators ?? []).map((c: any) => [c.id as string, c as CreatorProfile]));
+  const speakersByEp = new Map<string, EpisodeSpeaker[]>();
+  for (const r of speakers ?? []) speakersByEp.set((r as any).episode_id, [...(speakersByEp.get((r as any).episode_id) ?? []), toSpeaker(r)]);
+  return eps.map((e) => ({
+    ...deriveFeedFields(e, byEp.get(e.id) ?? []),
+    creator: e.creator_id ? creatorById.get(e.creator_id) ?? null : null, speakers: speakersByEp.get(e.id) ?? [],
+  }));
 }
 
 export async function getEpisodeByVideo(videoId: string): Promise<EpisodeDetail | null> {
@@ -126,14 +149,14 @@ export async function getEpisodeByVideo(videoId: string): Promise<EpisodeDetail 
   const [{ data: claims, error }, creator, { data: speakers }] = await Promise.all([
     db.from("claims").select(CLAIM_COLS).eq("episode_id", epId).order("start_s"),
     creatorId ? db.from("creators").select(CREATOR_COLS).eq("id", creatorId).maybeSingle().then((r) => r.data) : Promise.resolve(null),
-    db.from("episode_speakers").select("label, role, statements, speakers(id, name, summary, sources, public_profile)")
-      .eq("episode_id", epId).order("statements", { ascending: false }),
+    db.from("episode_speakers").select(SPEAKER_COLS).eq("episode_id", epId).order("statements", { ascending: false }),
   ]);
   if (error) throw error;
   return {
     ...toEpisode(ep as unknown as EpisodeRow), claims: (claims ?? []).map(toClaim),
+    sources_checked_at: lastChecked((claims ?? []).map(toClaim)),
     creator: (creator as CreatorProfile | null) ?? null,
-    speakers: (speakers ?? []).map((r: any) => ({ label: r.label, role: r.role, statements: r.statements, speaker: r.speakers ?? null })) as EpisodeSpeaker[],
+    speakers: (speakers ?? []).map(toSpeaker),
   };
 }
 

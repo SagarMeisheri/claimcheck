@@ -16,7 +16,7 @@ export const MATCH_NOTE =
   "Source match: how directly the excerpts address this claim's specific point, rated by AI. It is not whether they agree: a source giving a different figure for the same thing is a high match.";
 
 /** "Match: High" with a small three-bar meter. Neutral colour: relevance, not right or wrong. */
-function MatchBadge({ match }: { match: SourcesMatch }) {
+export function MatchBadge({ match }: { match: SourcesMatch }) {
   const bars = MATCH_BARS[match];
   return (
     <span className={`src-match is-${match}`} title={MATCH_NOTE} aria-label={`Source match: ${MATCH_LABEL[match]}`}>

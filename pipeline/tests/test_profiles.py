@@ -73,3 +73,35 @@ def test_the_checklist_marks_earlier_steps_done_when_a_step_starts():
     assert status == {"creator": "skipped", "ingest_gate": "done", "extractor": "done", "claim_filter": "running",
                       "speaker_profiler": "pending", "publisher": "pending"}
     set_step(ec, "nope", "done")  # unknown steps are ignored
+
+
+def test_an_unnamed_host_on_a_one_host_show_gets_that_hosts_profile():
+    import asyncio
+
+    from claimcheck.agents.speakers import profile_speakers
+    from claimcheck.config import Settings
+    from claimcheck.context import Budget, EpisodeContext, set_context
+    from claimcheck.schemas import ClaimRecord, ExtractedClaim
+
+    class Store:
+        def __init__(self):
+            self.rows = {}
+
+        async def get_speaker(self, key):
+            return self.rows.get(key)
+
+        async def save_speaker(self, row):
+            self.rows[row["name_key"]] = {"id": "sp-" + row["name_key"], **row}
+            return self.rows[row["name_key"]]
+
+    def rec(i, speaker):
+        c = ExtractedClaim(start_ts="0:10", speaker=speaker, claim="x", context_quote="x", pestle_area="economic",
+                           topic="t", topics=["t"], statement_type="opinion", policy_tier="normal")
+        return ClaimRecord(index=i, start_s=10, claim=c, effective_tier="normal")
+
+    one_host = {"id": "cr2", "podcast": "Huberman Lab", "profile": {"hosts": "Dr. Andrew Huberman", "host_bio": "Neuroscientist."}}
+    for creator, expect in [(one_host, "sp-andrew huberman"), (PBT, None)]:  # two hosts: can't tell which one
+        set_context(EpisodeContext(episode_id="e", video_id="v", settings=Settings(profile_speakers=False), policy={},
+                                   store=Store(), budget=Budget(cap_usd=1), creator=creator))
+        rows = asyncio.run(profile_speakers([rec(0, "Host"), rec(1, "Guest 1")], {}))
+        assert {r["label"]: (r["role"], r["speaker_id"]) for r in rows} == {"Host": ("host", expect), "Guest 1": ("guest", None)}

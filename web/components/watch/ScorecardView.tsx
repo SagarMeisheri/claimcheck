@@ -4,15 +4,20 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Thumb } from "@/components/Thumb";
-import type { Claim, EpisodeDetail, SourcesMatch, StatementType } from "@/lib/types";
+import type { Claim, EpisodeDetail, Section, SourcesMatch, StatementType } from "@/lib/types";
 import { STATEMENT_TYPES, SEARCHING, TYPE_ORDER, breakdownParts, canCheckSources, hasSources, typeOf } from "@/lib/statements";
 import { clock } from "@/lib/format";
 import { MatchFilter, matchCounts } from "@/components/MatchFilter";
 import { CheckProgress } from "@/components/CheckProgress";
 import { CheckAllSources } from "@/components/CheckAllSources";
-import { StatementCard, type CardPhase } from "./ClaimCard";
+import { CheckedAt } from "@/components/CheckedAt";
+import { type CardPhase } from "./ClaimCard";
+import { StatementDetail } from "./StatementDetail";
+import { TimelineItem, groupBySection } from "@/components/feed/StatementCarousel";
+import { Drawer, PaneNav } from "@/components/Drawer";
 import { ClaimTrack } from "./ClaimTrack";
 import { ProfileTabs } from "./ProfileTabs";
+import type { SourcesResult } from "@/components/CheckSources";
 import { YouTubePlayer, type PlayerHandle } from "./YouTubePlayer";
 
 /** Filter chips: every statement, one statement type, or claims that have sources. */
@@ -21,13 +26,36 @@ const CLIP_S = 20;
 const LEAD_S = 3;
 const CUE_LEAD_S = 5;
 const AUTO_NEXT_S = 4;
+const DOCK_QUERY = "(min-width: 1360px)"; // wide screens: the selected statement's detail is docked beside the list
+
+/** True while a media query matches (false on the server and the first render). */
+function useMedia(query: string): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const m = window.matchMedia(query);
+    const update = () => setOn(m.matches);
+    update();
+    m.addEventListener("change", update);
+    return () => m.removeEventListener("change", update);
+  }, [query]);
+  return on;
+}
 
 export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, initialMatch }: {
   ep: EpisodeDetail; initialT: number | null; autoplay: boolean; momentId: string | null; initialView: View | null; initialMatch?: SourcesMatch | null;
 }) {
   const router = useRouter();
   const player = useRef<PlayerHandle>(null);
-  const everything = useMemo(() => [...ep.claims].sort((a, b) => a.start_s - b.start_s), [ep.claims]);
+  // Lookups finished on this page since it loaded: their results, so the tag and the drawer show them at once.
+  const [looked, setLooked] = useState<Record<string, Claim>>({});
+  const everything = useMemo(() => ep.claims.map((c) => looked[c.id] ?? c).sort((a, b) => a.start_s - b.start_s), [ep.claims, looked]);
+  // The statement whose detail is shown: docked beside the list on wide screens, in a drawer otherwise.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const wide = useMedia(DOCK_QUERY);
+  // The docked panel opens when a statement is picked (or a link points at one), so the video leads on arrival; ✕ closes it.
+  const [dockOpen, setDockOpen] = useState(false);
+  const docked = wide && dockOpen;
   const visible = useMemo(() => everything.filter((c) => c.not_checked_reason !== "outside_policy"), [everything]);
   const withSources = useMemo(() => visible.filter((c) => c.sources.length > 0), [visible]);
   const typeCounts = useMemo(() => {
@@ -66,9 +94,10 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const flash = (msg: string) => { setToast(msg); window.setTimeout(() => setToast(null), 2500); };
   // Scroll a card to just below whatever is pinned at the top (the player and track on phones).
   // Runs after layout settles, because switching the player on changes the page height above the cards.
-  const scrollToCard = (id: string) => {
+  const scrollToCard = (id: string) => scrollToEl(`card-${id}`);
+  const scrollToEl = (elId: string) => {
     const go = () => {
-      const el = document.getElementById(`card-${id}`);
+      const el = document.getElementById(elId);
       if (!el) return;
       let pinned = 0;
       for (const sel of [".player-band.is-on", ".track-holder.is-on"]) {
@@ -99,6 +128,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   }, [seek]);
 
   const playMoment = useCallback((c: Claim) => {
+    setSelectedId(c.id); // the detail follows what is playing
     setFollowing(false);
     setCountdown(null);
     setClip({ id: c.id, end: c.start_s + CLIP_S, phase: "playing" });
@@ -116,6 +146,8 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
     const target = id ? ep.claims.find((c) => c.id === id) : null;
     if (target) {
       setView("all");
+      setSelectedId(target.id);
+      setDockOpen(true);
       setCue(Math.max(0, target.start_s - CUE_LEAD_S));
       setTime(target.start_s);
       window.setTimeout(() => scrollToCard(target.id), 60);
@@ -211,26 +243,49 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   // A link to the moment only: the text is the video title, never a characterisation of what was said.
   const shareClaim = (c: Claim) => share(`${window.location.origin}/v/${ep.youtube_video_id}#claim-${c.id}`, `${ep.title} at ${clock(c.start_s)}`);
 
-  // --- Rendering helpers ----------------------------------------------------------------------
-  const card = (c: Claim) => {
+  // --- Selection and detail --------------------------------------------------------------------
+  const lookedUp = (c: Claim, r: SourcesResult) => setLooked((m) => ({ ...m, [c.id]: { ...c, sources_status: "done", sources: r.sources ?? [],
+    sources_summary: r.summary ?? null, sources_match: r.match ?? null, counter_sources: r.counter ?? [],
+    counter_summary: r.counter_summary ?? null, sources_route: r.route ?? c.sources_route } }));
+  const select = (c: Claim) => { setSelectedId(c.id); if (wide) setDockOpen(true); else setDrawerOpen(true); };
+  const selected = visible.find((c) => c.id === selectedId) ?? (docked ? playable[0] ?? null : null);
+  const selAt = selected ? playable.findIndex((c) => c.id === selected.id) : -1;
+  const selectAt = (i: number) => { const c = playable[i]; if (c) { setSelectedId(c.id); scrollToCard(c.id); } };
+  const detail = (c: Claim, titleId: string) => {
     const isActive = activeId === c.id;
     return (
-      <StatementCard key={c.id} claim={c} videoId={ep.youtube_video_id} active={isActive}
-        phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"} canWatch
-        canLookUp={!checking} hasNext={!!nextIn(c)} countdown={isActive && autoAll ? countdown : null}
+      <StatementDetail claim={c} videoId={ep.youtube_video_id} titleId={titleId} canLookUp={!checking}
+        phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"} hasNext={!!nextIn(c)}
+        countdown={isActive && autoAll ? countdown : null}
         onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
         onKeepWatching={() => { setClip(null); setCountdown(null); setAutoAll(false); setFollowing(true); setScrollFollow(true); player.current?.play(); }}
         onNext={() => { const n = nextIn(c); if (n) { setCountdown(null); playMoment(n); scrollToCard(n.id); } }}
-        onShare={() => shareClaim(c)} />
+        onShare={() => shareClaim(c)} onLookedUp={(r) => lookedUp(c, r)} />
     );
+  };
+  const nav = <PaneNav hasPrev={selAt > 0} hasNext={selAt >= 0 && selAt < playable.length - 1} onPrev={() => selectAt(selAt - 1)} onNext={() => selectAt(selAt + 1)} />;
+  const groups = groupBySection(playable, ep.sections ?? []);
+  // A part of the conversation clicked in the Video tab: show every statement (a filter may hide that part), then
+  // scroll the list to its heading and select its first statement.
+  const goToSection = (sec: Section) => {
+    const first = visible.find((c) => (c.section_idx ?? -1) === sec.idx) ?? visible.find((c) => c.start_s >= sec.start_s);
+    if (!groups.some((g) => g.section?.idx === sec.idx)) { setView("all"); setMatch(null); }
+    if (first && wide) setSelectedId(first.id);
+    window.setTimeout(() => scrollToEl(`sec-${sec.idx}`), 60);
   };
 
   const chipTypes = TYPE_ORDER.filter((t) => t === "factual_claim" || typeCounts[t]);
   const lookupEligible = ep.claims.some((c) => canCheckSources(c));
 
   return (
-    <div className="score">
+    <div className={`score${docked ? " has-dock" : ""}`}>
       <div className="score-main">
+        <nav className="score-back" aria-label="Back">
+          <Link href="/" onClick={(e) => {
+            // Came from the feed: go back in history so the feed keeps its scroll position.
+            if (document.referrer.startsWith(window.location.origin) && window.history.length > 1) { e.preventDefault(); router.back(); }
+          }}>← All videos</Link>
+        </nav>
         <div className={`player-band${playerOn ? " is-on" : ""}`}>
           <div className="player-frame">
             {playerError !== null ? (
@@ -274,27 +329,28 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         {checking && <CheckProgress videoId={ep.youtube_video_id} initialSteps={ep.progress?.steps ?? []} />}
 
         <ProfileTabs summary={ep.summary} sections={ep.sections ?? []} creator={ep.creator} speakers={ep.speakers}
-                     onSeek={(s) => playFrom(s)} />
+                     onSeek={(s) => playFrom(s)} onSection={goToSection} />
 
+      </div>
+
+      <div className="score-side">
         {ep.claims.length > 0 && (
           <section className="score-summary" aria-label="Breakdown">
-            <p className="score-big">{ep.claims.length} statements</p>
+            <p className="score-line">
+              <strong>{ep.claims.length} statements</strong>
+              <span className="meta">
+                {withSources.length} with sources{searchingCount > 0 && ` · searching ${searchingCount} now`}
+                {ep.sources_checked_at && <> · <CheckedAt iso={ep.sources_checked_at} prefix="last checked" /></>}
+              </span>
+            </p>
             <p className="type-bar" aria-hidden="true">
               {TYPE_ORDER.filter((t) => typeCounts[t]).map((t) => (
                 <span key={t} style={{ flexGrow: typeCounts[t], background: STATEMENT_TYPES[t].cssVar }} />
               ))}
             </p>
-            <p className="meta">{breakdownParts(typeCounts).join(", ")}</p>
-            <p className="meta">
-              {withSources.length} {withSources.length === 1 ? "claim has" : "claims have"} sources
-              {searchingCount > 0 && `. Searching sources for ${searchingCount} now`}
-            </p>
+            {!checking && <CheckAllSources videoId={ep.youtube_video_id} running={ep.sources_batch === "running"} eligible={lookupEligible} />}
           </section>
         )}
-        {!checking && <CheckAllSources videoId={ep.youtube_video_id} running={ep.sources_batch === "running"} eligible={lookupEligible} />}
-      </div>
-
-      <div className="score-side">
         {ep.claims.length > 0 && (
           <>
             <div className="filters stmt-filters" role="group" aria-label="Show statements by type">
@@ -322,12 +378,30 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           </>
         )}
 
-        <div className="cards">
-          {viewList.length === 0
+        <div className="score-timeline">
+          {playable.length === 0
             ? <p className="meta pad">{view === "with_sources" ? "No sources looked up yet. Press Check sources on any claim."
                 : view !== "all" ? `No ${STATEMENT_TYPES[view].plural} in this video.`
                 : checking ? "Statements appear here as they are found." : "No statements for this video."}</p>
-            : viewList.map(card)}
+            : groups.map((g, gi) => (
+              <section key={`${g.key}-${gi}`} className="tl-group" id={g.section ? `sec-${g.section.idx}` : undefined}>
+                {g.section && (
+                  <header className="tl-head">
+                    <button type="button" className="tl-head-time" onClick={() => playFrom(g.section!.start_s)}
+                            aria-label={`Play this part from ${clock(g.section.start_s)}`}>{clock(g.section.start_s)}</button>
+                    <h3 className="tl-title">{g.section.title}</h3>
+                    {g.section.summary && <p className="tl-summary">{g.section.summary}</p>}
+                  </header>
+                )}
+                <ol className="tl-list">
+                  {g.items.map((c) => (
+                    <TimelineItem key={c.id} c={c} active={activeId === c.id} selected={selected?.id === c.id}
+                                  onPlay={() => playMoment(c)} onSelect={() => select(c)} onOpen={() => select(c)}
+                                  onLookedUp={(_, r) => lookedUp(c, r)} />
+                  ))}
+                </ol>
+              </section>
+            ))}
         </div>
 
         <details className="fold">
@@ -342,10 +416,31 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         </details>
       </div>
 
+      {docked && (
+        <aside className="score-detail" aria-label="Selected statement">
+          {selected ? (
+            <>
+              <div className="score-detail-bar">
+                {nav}
+                <button type="button" className="iconbtn" onClick={() => setDockOpen(false)} aria-label="Close the statement panel"
+                        title="Close (pick a statement to open it again)">✕</button>
+              </div>
+              {detail(selected, "sdetail-title")}
+            </>
+          ) : <p className="meta pad">Select a statement to see its details and sources.</p>}
+        </aside>
+      )}
+
       {following && playing && !scrollFollow && (
         <button className="back-to-now" onClick={() => { setScrollFollow(true); if (current) scrollToCard(current.id); }}>Back to now</button>
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
+      {!wide && drawerOpen && selected && (
+        <Drawer onClose={() => setDrawerOpen(false)} labelledBy="sdetail-title-drawer" accent={STATEMENT_TYPES[typeOf(selected.statement_type)].cssVar}
+                nav={nav} onPrev={() => selectAt(selAt - 1)} onNext={() => selectAt(selAt + 1)}>
+          {detail(selected, "sdetail-title-drawer")}
+        </Drawer>
+      )}
     </div>
   );
 }

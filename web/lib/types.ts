@@ -42,6 +42,7 @@ export interface Claim {
   sources_route: SourcesRoute | null;
   counter_sources: Source[]; // from the second search (data / contested statements)
   counter_summary: string | null;
+  sources_checked_at?: string | null;
 }
 
 /** A statement as shown in the home-page carousel and the Topics tab. */
@@ -61,6 +62,8 @@ export interface PreviewClaim {
   sources_route: SourcesRoute | null;
   counter_sources: Source[];
   counter_summary: string | null;
+  section_idx: number | null;
+  statement_context: string | null;
 }
 
 export interface Episode {
@@ -79,12 +82,15 @@ export interface Episode {
   creator_id?: string | null;
   sections?: Section[];
   progress?: Progress | null;
+  creator?: CreatorProfile | null; // the show's profile, if the channel is a known creator
+  speakers?: EpisodeSpeaker[];
   statement_counts: Partial<Record<StatementType, number>>; // every tagged statement, by type
   // Derived for the feed
   pestle_areas?: Pestle[];
   claim_texts?: string[];
   preview_claims?: PreviewClaim[]; // statements of every type, for the home carousel and the Topics tab
   with_sources?: number; // claims that have at least one source
+  sources_checked_at?: string | null; // when sources were last looked up for any statement of the video
 }
 
 export interface EpisodeDetail extends Episode {

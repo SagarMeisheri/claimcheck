@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { CheckSources } from "@/components/CheckSources";
+import { CheckSources, type SourcesResult } from "@/components/CheckSources";
+import { SourcesTag } from "@/components/SourcesTag";
 import { ReportForm } from "@/components/ReportForm";
-import { SourceList } from "@/components/SourceList";
 import type { Claim } from "@/lib/types";
 import { STATEMENT_TYPES, SEARCHING, canCheckSources, hasSources, typeOf } from "@/lib/statements";
 import { clock, ytLink } from "@/lib/format";
@@ -34,11 +34,13 @@ export function TypeTag({ type }: { type: string }) {
  * and "Check sources" or the sources already found. Nothing here judges the statement or the speaker.
  */
 export function StatementCard({ claim: c, videoId, active, phase, canWatch, canLookUp = true, hasNext, countdown,
-  onSeek, onWatch, onKeepWatching, onNext, onShare }: {
+  onSeek, onWatch, onKeepWatching, onNext, onShare, onOpenSources, onLookedUp }: {
   claim: Claim; videoId: string; active: boolean; phase: CardPhase; canWatch: boolean;
   canLookUp?: boolean; // false while the video is still being analysed
   hasNext: boolean; countdown: number | null;
   onSeek(): void; onWatch(): void; onKeepWatching(): void; onNext(): void; onShare(): void;
+  onOpenSources(): void; // sources open in the drawer, so the card never grows
+  onLookedUp(r: SourcesResult): void;
 }) {
   const [showQuote, setShowQuote] = useState(false);
   const hidden = c.not_checked_reason === "outside_policy"; // text and moment stay unpublished
@@ -67,11 +69,17 @@ export function StatementCard({ claim: c, videoId, active, phase, canWatch, canL
           : <button type="button" className="linkish said-toggle" onClick={() => setShowQuote(true)}>What was said</button>
       )}
 
-      {sourceable && c.sources_status === "done" && (
-        <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} counter={c.counter_sources}
-                    counterSummary={c.counter_summary} route={c.sources_route} />
+      {sourceable && (c.sources_status === "done" || showSources) && (
+        <div className="cc-sources">
+          {c.sources_status === "done"
+            ? <SourcesTag c={c} onOpen={onOpenSources} label />
+            : (
+              <span className={`tl-check${c.sources_route === "skip" ? " is-skip" : ""}`}>
+                <CheckSources claimId={c.id} status={c.sources_status} error={c.sources_error} route={null} compact onDone={onLookedUp} />
+              </span>
+            )}
+        </div>
       )}
-      {showSources && <CheckSources claimId={c.id} status={c.sources_status} error={c.sources_error} route={c.sources_route} />}
 
       {!hidden && (
         <div className="cc-actions">

@@ -5,11 +5,15 @@ import { useRef, useState } from "react";
 import { Avatar, Thumb } from "@/components/Thumb";
 import { CheckProgress } from "@/components/CheckProgress";
 import { CheckAllSources } from "@/components/CheckAllSources";
+import { CheckedAt } from "@/components/CheckedAt";
 import { YouTubePlayer, type PlayerHandle } from "@/components/watch/YouTubePlayer";
 import type { Episode, PreviewClaim } from "@/lib/types";
 import { breakdownParts, canCheckSources, totalStatements } from "@/lib/statements";
 import { clock, timeAgo } from "@/lib/format";
+import { CreatorPanel, PeoplePanel } from "@/components/watch/ProfileTabs";
 import { StatementCarousel } from "./StatementCarousel";
+
+type CardTab = "summary" | "creator" | "speakers";
 
 // Only one card plays at a time: starting a video closes whichever card was playing before.
 let closeOther: (() => void) | null = null;
@@ -27,6 +31,13 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
   const [start, setStart] = useState(0);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [tab, setTab] = useState<CardTab>("summary");
+  const speakers = ep.speakers ?? [];
+  const tabs: { key: CardTab; label: string }[] = [
+    { key: "summary", label: checking ? "Progress" : "AI summary" },
+    ...(ep.creator ? [{ key: "creator" as CardTab, label: "Creator" }] : []),
+    ...(speakers.length ? [{ key: "speakers" as CardTab, label: `People ${speakers.length}` }] : []),
+  ];
 
   const play = (seconds: number, claimId: string | null) => {
     setActiveId(claimId);
@@ -74,16 +85,27 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
             {ep.channel_id ? <Link href={`/c/${ep.channel_id}`} className="vcard-channel-name">{ep.channel_name}</Link> : <span>{ep.channel_name}</span>}
           </div>
           <div className="vcard-when">{ep.published_at ? timeAgo(ep.published_at) : ""}</div>
-          {checking
-            ? <p className="vcard-blurb"><span className="spinner" aria-hidden="true" /> Reading the video and tagging statements. The title, summary and statements appear as soon as they are ready.</p>
-            : ep.summary && <p className="vcard-blurb"><span className="ai-note">AI summary: </span>{ep.summary}</p>}
+          <div className="vcard-about">
+            {tabs.length > 1 && (
+              <div className="tabs vcard-tabs" role="tablist" aria-label="About this video">
+                {tabs.map((t) => (
+                  <button key={t.key} role="tab" className="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}>{t.label}</button>
+                ))}
+              </div>
+            )}
+            {tab === "summary" && (checking
+              ? <CheckProgress videoId={ep.youtube_video_id} compact showSteps initialSteps={ep.progress?.steps ?? []} />
+              : ep.summary && <p className="vcard-blurb"><span className="ai-note">AI summary: </span>{ep.summary}</p>)}
+            {tab === "creator" && ep.creator && <div className="vcard-panel profile" role="tabpanel"><CreatorPanel creator={ep.creator} /></div>}
+            {tab === "speakers" && <div className="vcard-panel" role="tabpanel"><PeoplePanel people={speakers} creator={ep.creator ?? null} /></div>}
+          </div>
         </div>
       </div>
-      {checking && <CheckProgress videoId={ep.youtube_video_id} compact />}
       {!checking && (
         <p className="vcard-summary">
           {total ? <><strong>{total} statements</strong>: {breakdownParts(ep.statement_counts).join(", ")}</> : "No statements found."}
           {!!ep.with_sources && <span className="meta">. {ep.with_sources} with sources</span>}
+          {ep.sources_checked_at && <span className="meta"> · <CheckedAt iso={ep.sources_checked_at} /></span>}
         </p>
       )}
       {!checking && (
@@ -91,7 +113,7 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
                          eligible={(ep.preview_claims ?? []).some((c) => canCheckSources({ ...c, not_checked_reason: null }))} />
       )}
       {(!checking || (ep.preview_claims?.length ?? 0) > 0) && (
-        <StatementCarousel videoId={ep.youtube_video_id} statements={ep.preview_claims ?? []} withSources={ep.with_sources ?? 0}
+        <StatementCarousel videoId={ep.youtube_video_id} statements={ep.preview_claims ?? []} sections={ep.sections ?? []} withSources={ep.with_sources ?? 0}
                            counts={ep.statement_counts ?? {}} activeId={activeId} onPlay={(c: PreviewClaim) => play(c.start_s, c.id)} />
       )}
     </article>

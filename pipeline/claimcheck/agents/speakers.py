@@ -32,7 +32,7 @@ from google.genai import types
 
 from ..context import get_context, is_budget_error
 from ..policy import domain_of
-from ..profiles import is_role_label, match_host, name_key, search_location
+from ..profiles import host_groups, is_role_label, match_host, name_key, search_location
 from ..schemas import ClaimRecord, SpeakerProfileOut
 from ..tools.evidence import search_sources
 
@@ -66,8 +66,6 @@ def host_profile(host: str, creator: dict[str, Any]) -> dict[str, Any]:
 
 def _host_summary(host: str, creator: dict[str, Any]) -> str:
     """'Host of Breaking Points, with Krystal Ball.' The show's bio describes all hosts together, so it isn't used here."""
-    from ..profiles import host_groups
-
     others = [g[-1] for g in host_groups(creator) if host not in g]
     podcast = creator.get("podcast") or "the show"
     return f"Host of {podcast}" + (f", with {', '.join(others[:3])}" if others else "") + "."
@@ -135,6 +133,15 @@ async def profile_speakers(records: list[ClaimRecord], meta: dict[str, Any]) -> 
         row: dict[str, Any] = {"label": label, "statements": n, "speaker_id": None, "role": role_of(label)}
         rows.append(row)
         if is_role_label(label):
+            # "Host" on a show with one host is that host: use their profile (context for the source searches too).
+            groups = host_groups(ec.creator) if row["role"] == "host" else []
+            if len(groups) == 1:
+                try:
+                    host = groups[0][-1]
+                    sp = await store.get_speaker(name_key(host)) or await store.save_speaker(host_profile(host, ec.creator))
+                    row["speaker_id"] = (sp or {}).get("id")
+                except Exception:
+                    log.exception("host lookup failed for %r", label)
             continue
         try:
             host = match_host(label, ec.creator)

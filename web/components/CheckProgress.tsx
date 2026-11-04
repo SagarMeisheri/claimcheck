@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { DEFAULT_STEPS } from "@/lib/steps";
 import type { Step } from "@/lib/types";
 
 type Status = { status: string; skip_reason: string | null; label: string | null; pct: number; statements: number; steps?: Step[] };
@@ -13,7 +14,9 @@ const SR: Record<Step["status"], string> = { done: "Done", running: "In progress
  * Progress for a video being analysed: a bar, and the list of steps with the ones already done ticked, the current
  * one spinning and the rest waiting. Polls every 3 s and refreshes the page when the analysis ends.
  */
-export function CheckProgress({ videoId, compact = false, initialSteps = [] }: { videoId: string; compact?: boolean; initialSteps?: Step[] }) {
+export function CheckProgress({ videoId, compact = false, showSteps, initialSteps = [] }: {
+  videoId: string; compact?: boolean; showSteps?: boolean; initialSteps?: Step[];
+}) {
   const router = useRouter();
   const [s, setS] = useState<Status | null>(null);
   const seen = useRef(0);
@@ -38,7 +41,8 @@ export function CheckProgress({ videoId, compact = false, initialSteps = [] }: {
 
   const pct = s?.pct ?? 0;
   const label = s?.status === "queued" || !s?.label ? "Waiting to start" : s.label;
-  const steps = s?.steps?.length ? s.steps : initialSteps;
+  // Every step is listed from the start (waiting), then ticked off as the pipeline reports it.
+  const steps = s?.steps?.length ? s.steps : initialSteps.length ? initialSteps : DEFAULT_STEPS;
   return (
     <div className={`cprogress${compact ? " compact" : ""}`}>
       <div className="cprogress-top">
@@ -48,7 +52,7 @@ export function CheckProgress({ videoId, compact = false, initialSteps = [] }: {
       <div className="cprogress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={label}>
         <span style={{ width: `${Math.max(pct, 2)}%` }} />
       </div>
-      {!compact && steps.length > 0 && (
+      {(showSteps ?? !compact) && steps.length > 0 && (
         <ol className="steps" aria-label="Analysis steps">
           {steps.map((st) => (
             <li key={st.key} className={`step is-${st.status}`}>

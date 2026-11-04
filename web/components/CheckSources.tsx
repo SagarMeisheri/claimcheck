@@ -16,15 +16,18 @@ const NONE: Source[] = []; // stable default: a fresh [] each render would re-ru
  *
  * full: the video page (summary and the numbered list). compact: the home carousel (summary and numbered site links).
  */
-type Result = { status: SourcesStatus; error: string | null; sources: Source[]; summary: string | null; match: SourcesMatch | null;
+export type SourcesResult = { status: SourcesStatus; error: string | null; sources: Source[]; summary: string | null; match: SourcesMatch | null;
   counter?: Source[]; counter_summary?: string | null; route?: SourcesRoute | null };
 
 export function CheckSources({ claimId, status: initial, error: initialError, sources: initialSources = NONE, summary: initialSummary = null,
   match: initialMatch = null, counter: initialCounter = NONE, counterSummary: initialCounterSummary = null, route: initialRoute = null,
-  compact = false, onBusy }: {
+  compact = false, onBusy, onDone }: {
   claimId: string; status: SourcesStatus; error: string | null; sources?: Source[]; summary?: string | null;
   match?: SourcesMatch | null; counter?: Source[]; counterSummary?: string | null; route?: SourcesRoute | null; compact?: boolean;
   onBusy?(busy: boolean): void;
+  /** Called with the result when a lookup finishes. With it, the button doesn't show the sources itself: the caller
+   *  shows them (e.g. in a drawer), so nothing on the page grows. */
+  onDone?(r: SourcesResult): void;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState<SourcesStatus>(initial);
@@ -35,7 +38,7 @@ export function CheckSources({ claimId, status: initial, error: initialError, so
   const [counter, setCounter] = useState<Source[]>(initialCounter);
   const [counterSummary, setCounterSummary] = useState<string | null>(initialCounterSummary);
   const [route, setRoute] = useState<SourcesRoute | null>(initialRoute);
-  const apply = (j: Result | null) => {
+  const apply = (j: SourcesResult | null) => {
     setSources(j?.sources ?? []); setSummary(j?.summary ?? null); setMatch(j?.match ?? null);
     setCounter(j?.counter ?? []); setCounterSummary(j?.counter_summary ?? null); setRoute(j?.route ?? null);
   };
@@ -55,17 +58,19 @@ export function CheckSources({ claimId, status: initial, error: initialError, so
       try {
         const r = await fetch(`/api/claims/${claimId}/sources`, { cache: "no-store" });
         if (!r.ok || stop) return;
-        const j = (await r.json()) as Result;
+        const j = (await r.json()) as SourcesResult;
         if (SEARCHING.includes(j.status)) return;
         stop = true;
         window.clearInterval(id);
         setStatus(j.status);
         setMessage(j.error);
         apply(j);
+        if (j.status === "done") onDone?.(j);
         if (!compact) router.refresh();
       } catch { /* try again next tick */ }
     }, POLL_MS);
     return () => { stop = true; window.clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, claimId, compact, router]);
 
   const go = () => start(async () => {
@@ -75,9 +80,11 @@ export function CheckSources({ claimId, status: initial, error: initialError, so
     if (r.status === "done") {
       const j = await fetch(`/api/claims/${claimId}/sources`, { cache: "no-store" }).then((x) => x.json()).catch(() => null);
       apply(j);
+      if (j?.status === "done") onDone?.(j);
     }
   });
 
+  if (status === "done" && onDone) return null;
   if (status === "done") {
     return <SourceList sources={sources} summary={summary} match={match} counter={counter} counterSummary={counterSummary} route={route} compact={compact} />;
   }
