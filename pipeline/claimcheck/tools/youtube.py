@@ -36,7 +36,7 @@ def _parse(it: dict[str, Any]) -> dict[str, Any]:
     return {
         "video_id": it["id"],
         "title": sn.get("title", ""),
-        "description": (sn.get("description") or "")[:3000],
+        "description": (sn.get("description") or "")[:5000],  # YouTube's maximum; guest lists often sit at the end
         "channel_id": sn.get("channelId", ""),
         "channel_title": sn.get("channelTitle", ""),
         "published_at": sn.get("publishedAt"),

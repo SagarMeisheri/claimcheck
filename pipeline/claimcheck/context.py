@@ -58,6 +58,7 @@ class EpisodeContext:
     plugins_factory: Callable[[], list] = field(default=lambda: [])
     duration_s: int = 0  # video length, used to turn a statement's timestamp into progress
     creator: Optional[dict[str, Any]] = None  # the matched `creators` row, if the channel is a known show
+    listed_people: list[dict[str, str]] = field(default_factory=list)  # guests / hosts named in the video description
     # The steps shown to the viewer while the video is analysed: [{"key", "label", "status", "detail"}].
     steps: list[dict[str, Any]] = field(default_factory=list)
 

@@ -14,11 +14,13 @@ from google.adk.agents.invocation_context import InvocationContext
 from google.adk.events import Event, EventActions
 from google.genai import types
 
+from .. import prompts
 from ..context import get_context
+from ..description import match_listed, parse_chapters, parse_people, people_context
 from ..guardrails.injection import find_injections, wrap_untrusted
 from ..guardrails.input_checks import validate_metadata
 from ..policy import is_never, normalize_topics
-from ..profiles import extraction_context
+from ..profiles import extraction_context, is_role_label, match_host
 from ..schemas import ClaimRecord, ExtractedClaim, sources_status
 from ..store import ts_to_seconds
 from ..tools.youtube import fetch_metadata
@@ -68,6 +70,16 @@ def normalize_sections(raw: list[dict[str, Any]], duration_s: int = 0) -> list[d
     return out
 
 
+def speaker_label(label: str, ec: Any) -> str:
+    """When the description lists who appears, a speaker name must be one of them (written in full) or the show's host;
+    any other name was someone only talked about, so it becomes "Speaker". Role labels are kept as they are."""
+    label = (label or "").strip()
+    people = getattr(ec, "listed_people", None) or []
+    if not people or is_role_label(label) or match_host(label, ec.creator):
+        return label
+    return match_listed(label, people) or "Speaker"
+
+
 def build_record(i: int, raw: dict[str, Any], ec: Any, log: bool = True) -> Optional[ClaimRecord]:
     """One extracted statement -> ClaimRecord, with the content policy applied in code. None if it is malformed.
 
@@ -81,6 +93,7 @@ def build_record(i: int, raw: dict[str, Any], ec: Any, log: bool = True) -> Opti
         if log:
             ec.log("extract", "claim_schema_invalid", "skipped", str(e)[:200], i)
         return None
+    claim.speaker = speaker_label(claim.speaker, ec)
     tier, reason = classify_statement(claim, ec.policy)
     rec = ClaimRecord(index=i, start_s=ts_to_seconds(claim.start_ts), claim=claim, effective_tier=tier, not_checked_reason=reason)
     if log and reason == "outside_policy":
@@ -98,6 +111,13 @@ class IngestGate(BaseAgent):
         delta: dict[str, Any] = {"metadata": meta}
         # Our own data, not the video's: the show and its hosts, so the extractor can name the host.
         delta["creator_context"] = extraction_context(ec.creator)
+        # What the creator already wrote: chapters and who appears (description.py). Reused, not asked of the model.
+        description = meta.get("description", "") or ""
+        chapters = parse_chapters(description, int(meta.get("duration_s") or 0))
+        ec.listed_people = parse_people(description)
+        delta["description_chapters"] = chapters
+        delta["people_context"] = people_context(ec.listed_people)
+        delta["sections_instruction"] = prompts.SECTIONS_FROM_DESCRIPTION if chapters else prompts.SECTIONS_WRITE
         if not ok:
             ec.log("ingest", "invalid_input", "skipped", reason)
             delta["gate"] = {"skip": True, "stage": "ingest", "reason": reason}
@@ -132,7 +152,7 @@ class ClaimFilter(BaseAgent):
             if rec is not None:
                 records.append(rec.model_dump())
         claims = sum(1 for r in records if sources_status(ClaimRecord.model_validate(r)) == "not_requested")
-        sections = normalize_sections((st.get("extraction") or {}).get("sections", []), ec.duration_s)
+        sections = st.get("description_chapters") or normalize_sections((st.get("extraction") or {}).get("sections", []), ec.duration_s)
         yield _event(self, ctx, {"claim_records": records, "sections": sections},
                      f"{claims} of {len(records)} statements can have sources; {len(sections)} sections")
 
