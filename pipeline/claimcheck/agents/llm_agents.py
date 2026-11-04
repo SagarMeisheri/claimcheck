@@ -1,5 +1,6 @@
-"""LlmAgents: the extractor (reads the video, tags statements) and the source summarizer (what the web
-sources found for a claim say, in 1-2 sentences). Neither has tools; searches run in code (tools/evidence.py)."""
+"""LlmAgents: the extractor (reads the video, tags statements), the source summarizer (what the web sources found for
+a claim say, in 1-2 sentences), and the speaker profiler (who a named speaker is, from search excerpts). None has
+tools; searches run in code (tools/evidence.py). The source triage classifier is built here too."""
 
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from .. import prompts
 from ..config import Settings
 from ..context import get_context
 from ..guardrails.injection import screen_text, wrap_untrusted
-from ..schemas import ExtractionResult, SourcesSummary
+from ..schemas import ExtractionResult, SourcesSummary, SpeakerProfileOut
 
 
 def _model(name: str, settings: Settings) -> Any:
@@ -72,7 +73,8 @@ def extractor_agent(s: Settings) -> LlmAgent:
 def inject_pages(callback_context: CallbackContext, llm_request: LlmRequest) -> None:
     """before_model_callback on the summarizer: the pages, numbered, as untrusted data (instruction-like lines removed)."""
     blocks = "\n\n".join(
-        wrap_untrusted(f"PAGE {p['n']}", f"Title: {p['title']}\nSite: {p['site']}\nExcerpt: {screen_text(p['text'])[0]}")
+        wrap_untrusted(f"{p.get('group', 'RELATED')} PAGE {p['n']}",
+                       f"Title: {p['title']}\nSite: {p['site']}\nExcerpt: {screen_text(p['text'])[0]}")
         for p in callback_context.state["pages"])
     llm_request.contents.append(types.Content(role="user", parts=[types.Part(text=f"Pages:\n\n{blocks}\n\nSummarize what these excerpts say.")]))
 
@@ -86,3 +88,27 @@ def summarizer_agent(s: Settings, name: str = "source_summarizer") -> LlmAgent:
     return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.SUMMARIZE,
                     include_contents="none", output_schema=SourcesSummary, output_key="summary",
                     generate_content_config=cfg, before_model_callback=inject_pages)
+
+
+# --- Speaker profiles ------------------------------------------------------------------------------
+
+def speaker_profiler_agent(s: Settings, name: str = "speaker_profiler") -> LlmAgent:
+    cfg = types.GenerateContentConfig()
+    cfg.thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel("LOW"))
+    return LlmAgent(name=name, model=_model(s.profile_model, s), instruction=prompts.PROFILE_SPEAKER,
+                    include_contents="none", output_schema=SpeakerProfileOut, output_key="profile",
+                    generate_content_config=cfg, before_model_callback=inject_pages)
+
+
+# --- Source triage -----------------------------------------------------------------------------------
+
+def triage_classifier(s: Settings) -> Any:
+    """The classifier behind the triage ClassifierNode: ADK's LlmClassifier on a Gemini model that counts its own
+    tokens (the classifier calls the model directly, outside the budget plugin). A seam for tests."""
+    from google.adk.labs.classifiers import LlmClassifier
+
+    from ..guardrails.budget import metered_gemini
+
+    return LlmClassifier(model=metered_gemini(s.triage_model),
+                         generate_content_config=types.GenerateContentConfig(
+                             thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel("LOW"))))

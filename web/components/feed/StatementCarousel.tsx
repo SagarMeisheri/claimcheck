@@ -35,9 +35,10 @@ function Card({ videoId, c, active, onPlay }: {
       {sourceable && (
         <div className="ccard-foot">
           {c.sources_status === "done"
-            ? <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} compact />
+            ? <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} counter={c.counter_sources}
+                          counterSummary={c.counter_summary} route={c.sources_route} compact />
             : (c.sources_status === "not_requested" || c.sources_status === "failed" || c.sources_status === "queued" || c.sources_status === "searching")
-              && <CheckSources claimId={c.id} status={c.sources_status} error={null} compact onBusy={onBusy} />}
+              && <CheckSources claimId={c.id} status={c.sources_status} error={null} route={c.sources_route} compact onBusy={onBusy} />}
           <Link href={`/v/${videoId}#claim-${c.id}`} className="ccard-play">Open in the video page</Link>
         </div>
       )}

@@ -55,3 +55,33 @@ def _price_for(model: str, prices: dict) -> tuple[float, float]:
             return p
     # Unknown model: assume the highest known price so the cap errs on the safe side.
     return max(prices.values(), key=lambda p: p[1])
+
+
+def charge_usage(model: str, usage) -> None:
+    """Adds one model response's tokens to the video's budget (same prices as BudgetPlugin)."""
+    if usage is None:
+        return
+    ctx = get_context()
+    price_in, price_out = _price_for(model, ctx.settings.prices)
+    tin = (usage.prompt_token_count or 0) + (getattr(usage, "tool_use_prompt_token_count", None) or 0)
+    tout = (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0)
+    ctx.budget.add(tin / 1e6 * price_in + tout / 1e6 * price_out, tin, tout)
+
+
+def metered_gemini(model: str):
+    """A Gemini model that checks the cost cap and counts its tokens itself.
+
+    For callers that use a model outside an agent runner, so BudgetPlugin never sees the call: ADK's LlmClassifier
+    (the source triage) calls the model directly.
+    """
+    from google.adk.models.google_llm import Gemini
+
+    class MeteredGemini(Gemini):
+        async def generate_content_async(self, llm_request, stream=False):
+            get_context().budget.check()
+            async for resp in super().generate_content_async(llm_request, stream):
+                if not getattr(resp, "partial", False):
+                    charge_usage(self.model, resp.usage_metadata)
+                yield resp
+
+    return MeteredGemini(model=model)

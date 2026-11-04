@@ -18,6 +18,7 @@ from ..context import get_context
 from ..guardrails.injection import find_injections, wrap_untrusted
 from ..guardrails.input_checks import validate_metadata
 from ..policy import is_never, normalize_topics
+from ..profiles import extraction_context
 from ..schemas import ClaimRecord, ExtractedClaim, sources_status
 from ..store import ts_to_seconds
 from ..tools.youtube import fetch_metadata
@@ -37,6 +38,34 @@ def classify_statement(claim: ExtractedClaim, policy: dict[str, Any]) -> tuple[s
     if is_never(claim.policy_tier, claim.topics, policy):
         return "never", "outside_policy"
     return "normal", None
+
+
+MAX_SECTIONS = 30
+
+
+def normalize_sections(raw: list[dict[str, Any]], duration_s: int = 0) -> list[dict[str, Any]]:
+    """The extractor's sections, cleaned in code: valid, in time order, one per start time, the first starting at 0,
+    each ending where the next begins (the last at the end of the video)."""
+    out: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for r in raw or []:
+        if not isinstance(r, dict):
+            continue
+        title = " ".join(str(r.get("title") or "").split())[:120]
+        summary = " ".join(str(r.get("summary") or "").split())[:400]
+        start = ts_to_seconds(str(r.get("start_ts") or "0"))
+        if not (title or summary) or start in seen or (duration_s and start > duration_s):
+            continue
+        seen.add(start)
+        out.append({"start_s": start, "title": title, "summary": summary})
+    out.sort(key=lambda x: x["start_s"])
+    out = out[:MAX_SECTIONS]
+    if out:
+        out[0]["start_s"] = 0
+    for i, sec in enumerate(out):
+        sec["idx"] = i
+        sec["end_s"] = out[i + 1]["start_s"] if i + 1 < len(out) else max(duration_s, sec["start_s"])
+    return out
 
 
 def build_record(i: int, raw: dict[str, Any], ec: Any, log: bool = True) -> Optional[ClaimRecord]:
@@ -67,6 +96,8 @@ class IngestGate(BaseAgent):
         meta = await fetch_metadata(ec.video_id, ec.settings)
         ok, reason = validate_metadata(meta, ec.policy)
         delta: dict[str, Any] = {"metadata": meta}
+        # Our own data, not the video's: the show and its hosts, so the extractor can name the host.
+        delta["creator_context"] = extraction_context(ec.creator)
         if not ok:
             ec.log("ingest", "invalid_input", "skipped", reason)
             delta["gate"] = {"skip": True, "stage": "ingest", "reason": reason}
@@ -78,6 +109,7 @@ class IngestGate(BaseAgent):
             delta["gate"] = {"skip": False}
             delta["video_title"] = wrap_untrusted("TITLE", meta.get("title", ""))
             delta["channel_title"] = wrap_untrusted("CHANNEL", meta.get("channel_title", ""))
+
         yield _event(self, ctx, delta, reason or "metadata ok")
 
 
@@ -99,8 +131,10 @@ class ClaimFilter(BaseAgent):
             rec = build_record(i, c, ec)
             if rec is not None:
                 records.append(rec.model_dump())
-        claims = sum(1 for r in records if r["not_checked_reason"] is None)
-        yield _event(self, ctx, {"claim_records": records}, f"{claims} of {len(records)} statements are factual claims")
+        claims = sum(1 for r in records if sources_status(ClaimRecord.model_validate(r)) == "not_requested")
+        sections = normalize_sections((st.get("extraction") or {}).get("sections", []), ec.duration_s)
+        yield _event(self, ctx, {"claim_records": records, "sections": sections},
+                     f"{claims} of {len(records)} statements can have sources; {len(sections)} sections")
 
 
 class Publisher(BaseAgent):
@@ -119,6 +153,9 @@ class Publisher(BaseAgent):
             return
         records = [ClaimRecord.model_validate(r) for r in st.get("claim_records", [])]
         await ec.store.save_statements(ec.episode_id, records)
+        sections = st.get("sections") or []
+        if sections:
+            await ec.store.save_sections(ec.episode_id, sections)
         await ec.store.save_guardrail_events(ec.episode_id, ec.events)
         statement_counts: dict[str, int] = {}
         for r in records:

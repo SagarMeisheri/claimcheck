@@ -57,15 +57,39 @@ class EpisodeContext:
     # Returns the plugin list for each ADK runner (budget, Model Armor, ...)
     plugins_factory: Callable[[], list] = field(default=lambda: [])
     duration_s: int = 0  # video length, used to turn a statement's timestamp into progress
+    creator: Optional[dict[str, Any]] = None  # the matched `creators` row, if the channel is a known show
+    # The steps shown to the viewer while the video is analysed: [{"key", "label", "status", "detail"}].
+    steps: list[dict[str, Any]] = field(default_factory=list)
 
     def log(self, stage: str, rule: str, action: str, detail: str = "", claim_index: Optional[int] = None) -> None:
         self.events.append(GuardrailEvent(stage=stage, rule=rule, action=action, detail=detail[:500], claim_index=claim_index))
 
 
+STEP_STATUSES = ("pending", "running", "done", "skipped")
+
+
+def set_step(ec: "EpisodeContext", key: str, status: str, detail: Optional[str] = None) -> None:
+    """Marks one step. Starting a step marks every earlier step that is still pending or running as done."""
+    keys = [s["key"] for s in ec.steps]
+    if key not in keys:
+        return
+    i = keys.index(key)
+    if status == "running":
+        for s in ec.steps[:i]:
+            if s["status"] in ("pending", "running"):
+                s["status"] = "done"
+    ec.steps[i]["status"] = status
+    if detail is not None:
+        ec.steps[i]["detail"] = detail
+
+
 async def report_progress(ec: "EpisodeContext", label: str, pct: int) -> None:
-    """Writes the current step to the episode row so the web app can show a progress bar. Never raises."""
+    """Writes the current step, the % done and the step list to the episode row, for the progress view. Never raises."""
     try:
-        await ec.store.update_episode(ec.episode_id, {"progress": {"label": label, "pct": max(0, min(100, int(pct)))}})
+        progress: dict[str, Any] = {"label": label, "pct": max(0, min(100, int(pct)))}
+        if ec.steps:
+            progress["steps"] = [dict(s) for s in ec.steps]
+        await ec.store.update_episode(ec.episode_id, {"progress": progress})
     except Exception:
         pass
 

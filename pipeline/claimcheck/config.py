@@ -80,6 +80,17 @@ class Settings:
     sources_concurrency: int = int(_env("CLAIMCHECK_SOURCES_CONCURRENCY", "5"))
     auto_sources: bool = _env("CLAIMCHECK_AUTO_SOURCES", "0") == "1"  # run it right after extraction
     tool_timeout_s: float = float(_env("CLAIMCHECK_TOOL_TIMEOUT_S", "60"))
+    # Before a lookup, a classifier (ADK ClassifierNode, agents/sources.py) decides how to look the statement up:
+    # skip (background, self-description, vague), related (one search), data or contested (one more search for
+    # different figures or other perspectives, aimed with the speaker's and creator's profiles).
+    triage_sources: bool = _env("CLAIMCHECK_TRIAGE_SOURCES", "1") == "1"
+    counter_search: bool = _env("CLAIMCHECK_COUNTER_SEARCH", "1") == "1"
+    triage_model: str = field(default_factory=lambda: _env("CLAIMCHECK_TRIAGE_MODEL", "gemini-3.8-flash"))
+    # Speaker profiles (agents/speakers.py): one web search + one model call per new named speaker, then reused.
+    profile_speakers: bool = _env("CLAIMCHECK_PROFILE_SPEAKERS", "1") == "1"
+    max_speaker_profiles: int = int(_env("CLAIMCHECK_MAX_SPEAKER_PROFILES", "6"))  # new profiles per video
+    profile_model: str = field(default_factory=lambda: _env("CLAIMCHECK_PROFILE_MODEL", "gemini-3.8-flash"))
+    default_search_location: str = field(default_factory=lambda: _env("CLAIMCHECK_SEARCH_LOCATION", "in"))
     # YouTube API data older than this is refreshed (YouTube allows at most 30 days).
     youtube_refresh_days: int = int(_env("CLAIMCHECK_YOUTUBE_REFRESH_DAYS", "25"))
 
@@ -89,10 +100,21 @@ class Settings:
     # (the real cost is counted from tokens). ~$0.003 on Gemini 3.8 Flash with low thinking.
     summary_cost_estimate_usd: float = float(_env("CLAIMCHECK_SUMMARY_COST_ESTIMATE_USD", "0.003"))
 
+    # Rough cost of one triage call (~$0.0015 measured on Flash with low thinking). The real cost is counted from tokens.
+    triage_cost_estimate_usd: float = float(_env("CLAIMCHECK_TRIAGE_COST_ESTIMATE_USD", "0.0015"))
+
+    @property
+    def counter_enabled(self) -> bool:
+        """The second search needs the classifier: without it there is no way to pick the statements that get one."""
+        return self.triage_sources and self.counter_search
+
     @property
     def lookup_cost_estimate_usd(self) -> float:
-        """One search plus its summary, for planning a "Check sources for all statements" press."""
-        return self.search_cost_usd + (self.summary_cost_estimate_usd if self.summarize_sources else 0.0)
+        """The most one lookup can cost (triage, both searches, the summary), for planning a "Check sources for all
+        statements" press. Statements the classifier routes to one search or skips cost less."""
+        searches = 2 if self.counter_enabled else 1
+        return (self.search_cost_usd * searches + (self.summary_cost_estimate_usd if self.summarize_sources else 0.0)
+                + (self.triage_cost_estimate_usd if self.triage_sources else 0.0))
 
 
 def get_settings() -> Settings:

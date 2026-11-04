@@ -57,6 +57,9 @@ export function StatementCard({ claim: c, videoId, active, phase, canWatch, canL
         {active && phase === "playing" && <span className="cc-playing">Playing</span>}
       </div>
       <p className="cc-claim">{hidden ? "A statement that isn't shown under our content policy" : c.claim_text}</p>
+      {!hidden && c.statement_context && (
+        <p className="cc-context" title="What was being discussed, written by AI"><span className="ai-note">Context</span> {c.statement_context}</p>
+      )}
 
       {!hidden && c.context_quote && (
         showQuote
@@ -64,8 +67,11 @@ export function StatementCard({ claim: c, videoId, active, phase, canWatch, canL
           : <button type="button" className="linkish said-toggle" onClick={() => setShowQuote(true)}>What was said</button>
       )}
 
-      {sourceable && c.sources_status === "done" && <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} />}
-      {showSources && <CheckSources claimId={c.id} status={c.sources_status} error={c.sources_error} />}
+      {sourceable && c.sources_status === "done" && (
+        <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} counter={c.counter_sources}
+                    counterSummary={c.counter_summary} route={c.sources_route} />
+      )}
+      {showSources && <CheckSources claimId={c.id} status={c.sources_status} error={c.sources_error} route={c.sources_route} />}
 
       {!hidden && (
         <div className="cc-actions">

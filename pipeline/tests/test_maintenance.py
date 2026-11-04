@@ -42,8 +42,25 @@ def test_fetch_many_batches_50_ids_per_call_and_marks_missing_videos(monkeypatch
 
 
 class FakeStore:
-    def __init__(self):
+    def __init__(self, unlinked=()):
         self.refreshed, self.removed, self.channels = [], [], []
+        self.unlinked, self.rows, self.updates = list(unlinked), {}, []
+
+    async def list_episodes_without_channel(self, limit=500):
+        return self.unlinked
+
+    async def get_channel(self, yt_id):
+        return self.rows.get(yt_id)
+
+    async def add_channel(self, row):
+        self.rows[row["youtube_channel_id"]] = {"id": "ch-" + row["youtube_channel_id"], **row}
+        return self.rows[row["youtube_channel_id"]]
+
+    async def get_creator_by_channel(self, yt_id):
+        return {"id": "cr1", "podcast": "Show"} if yt_id == "UC1" else None
+
+    async def update_episode(self, eid, fields):
+        self.updates.append((eid, fields))
 
     async def list_stale_episodes(self, days, limit=500):
         assert days == 25
@@ -71,7 +88,16 @@ def test_refresh_updates_stale_data_and_hides_videos_youtube_no_longer_serves(mo
     _mock(monkeypatch, handler)
     store = FakeStore()
     counts = asyncio.run(maintenance.refresh_youtube_data(store, SETTINGS))
-    assert counts == {"videos": 1, "removed": 2, "channels": 2}
+    assert counts == {"videos": 1, "removed": 2, "channels": 2, "relinked": 0, "creators": 0}
     assert store.refreshed == [("e1", "T aaaaaaaaaaa")] and store.removed == ["e2", "e3"]  # private and deleted
     assert store.channels == [("c1", {"name": "New name", "active": True}),
                               ("c2", {"name": "Unavailable channel", "active": False})]
+
+
+def test_videos_saved_without_a_channel_get_their_channel_and_creator(monkeypatch):
+    _mock(monkeypatch, lambda request: httpx.Response(200, json={"items": [_video("aaaaaaaaaaa")]}))
+    store = FakeStore(unlinked=[{"id": "e1", "youtube_video_id": "aaaaaaaaaaa"}, {"id": "e2", "youtube_video_id": "zzzzzzzzzzz"}])
+    counts = asyncio.run(maintenance.relink_channels(store, SETTINGS))
+    assert counts == {"relinked": 1, "creators": 1}  # the deleted video has no channel to link
+    assert store.updates == [("e1", {"channel_id": "ch-UC1", "creator_id": "cr1"})]
+    assert store.rows["UC1"]["name"] == "C" and "track" not in store.rows["UC1"]

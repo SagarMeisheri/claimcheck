@@ -9,7 +9,31 @@ from __future__ import annotations
 
 from typing import Any
 
+from .channels import resolve_channel
 from .tools.youtube import fetch_channels, fetch_many
+
+
+async def relink_channels(store: Any, settings: Any) -> dict[str, int]:
+    """Videos saved without a channel (e.g. when creating the channel row failed) get their channel, and their creator
+    profile if the channel is a known show. One videos.list call per 50 videos."""
+    counts = {"relinked": 0, "creators": 0}
+    eps = await store.list_episodes_without_channel()
+    if not eps:
+        return counts
+    meta = await fetch_many([e["youtube_video_id"] for e in eps], settings)
+    for e in eps:
+        m = meta[e["youtube_video_id"]]
+        channel = await resolve_channel(store, m)
+        if not channel:
+            continue
+        fields: dict[str, Any] = {"channel_id": channel["id"]}
+        creator = await store.get_creator_by_channel(m.get("channel_id") or "")
+        if creator:
+            fields["creator_id"] = creator["id"]
+            counts["creators"] += 1
+        await store.update_episode(e["id"], fields)
+        counts["relinked"] += 1
+    return counts
 
 
 async def refresh_youtube_data(store: Any, settings: Any) -> dict[str, int]:
@@ -18,6 +42,7 @@ async def refresh_youtube_data(store: Any, settings: Any) -> dict[str, int]:
     Videos YouTube no longer serves publicly are marked 'removed' (hidden from the site, title cleared).
     """
     counts = {"videos": 0, "removed": 0, "channels": 0}
+    counts.update(await relink_channels(store, settings))
     eps = await store.list_stale_episodes(settings.youtube_refresh_days)
     if eps:
         meta = await fetch_many([e["youtube_video_id"] for e in eps], settings)

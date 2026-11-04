@@ -12,6 +12,7 @@ import { CheckProgress } from "@/components/CheckProgress";
 import { CheckAllSources } from "@/components/CheckAllSources";
 import { StatementCard, type CardPhase } from "./ClaimCard";
 import { ClaimTrack } from "./ClaimTrack";
+import { ProfileTabs } from "./ProfileTabs";
 import { YouTubePlayer, type PlayerHandle } from "./YouTubePlayer";
 
 /** Filter chips: every statement, one statement type, or claims that have sources. */
@@ -270,14 +271,10 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           </div>
         </header>
 
-        {checking && <CheckProgress videoId={ep.youtube_video_id} />}
+        {checking && <CheckProgress videoId={ep.youtube_video_id} initialSteps={ep.progress?.steps ?? []} />}
 
-        {ep.summary && (
-          <section className="ai-summary" aria-label="AI summary">
-            <p className="ai-note">AI summary</p>
-            <p>{ep.summary}</p>
-          </section>
-        )}
+        <ProfileTabs summary={ep.summary} sections={ep.sections ?? []} creator={ep.creator} speakers={ep.speakers}
+                     onSeek={(s) => playFrom(s)} />
 
         {ep.claims.length > 0 && (
           <section className="score-summary" aria-label="Breakdown">
@@ -336,9 +333,9 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         <details className="fold">
           <summary>How this video was analysed</summary>
           <ul className="nclist">
-            <li>An AI watched the video, listed {ep.claims.length} statements with their timestamps, and tagged each one as a claim, opinion, forecast or other.</li>
+            <li>An AI watched the video, listed {ep.claims.length} statements with their timestamps and what was being discussed, and tagged each one as a claim, opinion, forecast, advice, story, question or other.</li>
             <li>The wording of each statement, the transcript, the speaker names and the tags are AI output and can be wrong. Use &quot;Watch 20 s&quot; to hear the original, and &quot;Report a problem&quot; if something is off.</li>
-            <li>Nothing is judged true or false. On any statement except questions and stories, &quot;Check sources&quot; runs a web search and shows the top results with an AI summary of their excerpts.</li>
+            <li>Nothing is judged true or false. On any statement except questions and stories, &quot;Check sources&quot; runs a web search and shows the top results with an AI summary of their excerpts. Statements with figures or on disputed subjects also get a second search for official data, other figures or other viewpoints, aimed using public profiles of the speaker and the show.</li>
             <li><Link href="/method">How it works</Link></li>
             <li><a href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}&t=${Math.floor(time)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube from {clock(time)}</a></li>
           </ul>

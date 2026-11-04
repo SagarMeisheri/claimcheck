@@ -15,7 +15,7 @@ from claimcheck.tools.evidence import best_excerpt, clean_excerpt, search_source
 
 POLICY = load_policy()
 SETTINGS = Settings(max_cost_usd_per_episode=3.0, sources_per_claim=5, sources_concurrency=3, search_cost_usd=0.005,
-                    summarize_sources=False)  # summaries: see the tests at the end
+                    summarize_sources=False, triage_sources=False)  # summaries and triage: see the tests at the end
 
 
 def hit(url, title="t", excerpts=("Some text from the page.",), date=None):
@@ -112,7 +112,22 @@ class FakeStore:
     async def set_sources_status(self, cid, status, error=None):
         self.status[cid] = (status, error)
 
-    async def save_claim_sources(self, cid, found, summary="", match=""):
+    async def get_creator(self, creator_id):
+        return getattr(self, "creator", None)
+
+    async def get_episode_speakers(self, eid):
+        return getattr(self, "speakers", [])
+
+    async def save_sources_route(self, cid, route, triage=None):
+        self.routes = getattr(self, "routes", {})
+        self.routes[cid] = route
+        self.status[cid] = ("not_requested", None)
+
+    async def save_claim_sources(self, cid, found, summary="", match="", *, counter=None, counter_summary="", route=None, triage=None):
+        self.routes = getattr(self, "routes", {})
+        self.routes[cid] = route
+        self.counter = getattr(self, "counter", {})
+        self.counter[cid] = ([s.url for s in counter or []], counter_summary)
         self.match = getattr(self, "match", {})
         self.match[cid] = match
         self.saved[cid] = [s.url for s in found]
@@ -185,7 +200,7 @@ def test_all_claims_each_get_their_own_search_a_few_at_a_time(monkeypatch):
     t0 = time.time()
     out = asyncio.run(run_video_sources("e1", settings=SETTINGS, store=store))
     took = time.time() - t0
-    assert out == {"status": "done", "searched": 6, "claims": 6, "remaining": 0, "cost_usd": 0.03}
+    assert out == {"status": "done", "searched": 6, "skipped": 0, "claims": 6, "remaining": 0, "cost_usd": 0.03}
     assert sorted(q["search_queries"][0] for q in fake.calls) == [f"claim {i}" for i in range(6)]  # one search per claim, no grouping
     assert 0.35 < took < 1.0  # 6 searches of 0.2 s, 3 at a time: about 0.4 s, not 1.2 s
     assert set(store.saved) == {f"id{i}" for i in range(6)} and store.cost == [pytest.approx(0.03)]
@@ -197,7 +212,8 @@ def test_all_claims_stop_at_the_budget_and_return_the_rest(monkeypatch):
     monkeypatch.setattr(evidence, "_client", lambda s: FakeParallel([hit("https://a.example/x")]))
     store = FakeStore(batch=claims(10))
     out = asyncio.run(run_video_sources("e1", settings=Settings(max_cost_usd_per_episode=0.02, search_cost_usd=0.005,
-                                                                 sources_concurrency=3, summarize_sources=False), store=store))
+                                                                 sources_concurrency=3, summarize_sources=False,
+                                                                 triage_sources=False), store=store))
     assert out["searched"] == 4 and len(store.saved) == 4  # $0.02 pays for 4 searches; earliest claims first
     assert set(store.saved) == {"id9", "id8", "id7", "id6"}
 
@@ -223,7 +239,7 @@ def test_nothing_to_do():
 def test_lookups_for_one_video_are_serialised(monkeypatch):
     active = {"n": 0, "max": 0}
 
-    async def slow(claim_text, settings, policy):
+    async def slow(claim_text, settings, policy, **kw):
         active["n"] += 1
         active["max"] = max(active["max"], active["n"])
         await asyncio.sleep(0.01)
@@ -242,7 +258,8 @@ def test_lookups_for_one_video_are_serialised(monkeypatch):
 def test_each_press_is_capped_and_the_rest_wait_for_the_next_press(monkeypatch):
     monkeypatch.setattr(evidence, "_client", lambda s: FakeParallel([hit("https://a.example/x")]))
     store = FakeStore(batch=claims(10))
-    out = asyncio.run(run_video_sources("e1", settings=Settings(sources_all_max_searches=3, search_cost_usd=0.005, summarize_sources=False), store=store))
+    out = asyncio.run(run_video_sources("e1", settings=Settings(sources_all_max_searches=3, search_cost_usd=0.005, summarize_sources=False,
+                                                                triage_sources=False), store=store))
     assert out["searched"] == 3 and out["remaining"] == 7 and set(store.saved) == {"id9", "id8", "id7"}
     assert not any(f"id{i}" in store.status for i in range(7))  # never touched: they keep "Check sources"
 
@@ -268,7 +285,8 @@ from google.genai import types  # noqa: E402
 from claimcheck.agents import llm_agents  # noqa: E402
 from claimcheck.agents.sources import acceptable_summary, summarize_missing  # noqa: E402
 
-SUMMARY_SETTINGS = Settings(max_cost_usd_per_episode=3.0, sources_per_claim=5, search_cost_usd=0.005, summarize_sources=True)
+SUMMARY_SETTINGS = Settings(max_cost_usd_per_episode=3.0, sources_per_claim=5, search_cost_usd=0.005, summarize_sources=True,
+                            triage_sources=False)
 
 
 class SummaryLlm(BaseLlm):
@@ -282,7 +300,7 @@ class SummaryLlm(BaseLlm):
             raise RuntimeError("model down")
         assert "never judge the statement" in str(llm_request.config.system_instruction)
         sent = str(llm_request.contents[-1])
-        assert "UNTRUSTED PAGE 3" in sent  # every source with an excerpt is given to the model
+        assert "UNTRUSTED RELATED PAGE 3" in sent  # every source with an excerpt is given to the model
         assert "Excerpt: India's share stood at 2.98 percent" in sent  # the excerpt the reader sees, nothing more
         yield LlmResponse(content=types.Content(role="model", parts=[types.Part(text=json.dumps({"summary": self.text, "match": self.match}))]))
 
@@ -379,3 +397,86 @@ def test_questions_and_stories_have_no_sources_to_look_up():
     for kind in ("question", "story"):
         ok, msg, code = precheck(row(statement_type=kind), SETTINGS)
         assert not ok and code == 409 and "Questions and personal stories" in msg
+
+
+# --- Triage (ClassifierNode) and the second search -------------------------------------------------------
+from google.adk.labs.classifiers import BaseClassifier, ChoiceAnswer, ClassifierResponse  # noqa: E402
+
+from claimcheck.agents import llm_agents as _llm_agents  # noqa: E402
+
+TRIAGE_SETTINGS = Settings(max_cost_usd_per_episode=3.0, sources_per_claim=5, sources_concurrency=3, search_cost_usd=0.005,
+                           summarize_sources=False, triage_sources=True, counter_search=True)
+
+
+class FakeClassifier(BaseClassifier):
+    model: str = "fake"
+    labels: dict = {}
+    fail: bool = False
+    seen: list = []
+
+    async def classify(self, *, input, questions):
+        self.seen.append(input)
+        if self.fail:
+            raise ValueError("model returned junk")
+        label = self.labels.get(input["statement"], "related")
+        return ClassifierResponse(answers={n: ChoiceAnswer(choice=label, probabilities={k: float(k == label) for k in q.criteria})
+                                           for n, q in questions.items()})
+
+
+def _triage(monkeypatch, labels=None, fail=False, results=None):
+    clf = FakeClassifier(labels=labels or {}, fail=fail, seen=[])
+    monkeypatch.setattr(_llm_agents, "triage_classifier", lambda s: clf)
+    fake = FakeParallel(results or [hit("https://a.example/x"), hit("https://b.example/y")])
+    monkeypatch.setattr(evidence, "_client", lambda s: fake)
+    return clf, fake
+
+
+def test_data_and_contested_statements_get_a_second_search_with_new_links_only(monkeypatch):
+    clf, fake = _triage(monkeypatch, {"GDP grew 7.4%": "data"})
+    store = FakeStore(row(speaker="Raj Shamani", episodes={"creator_id": "cr1"}))
+    store.creator = {"id": "cr1", "podcast": "Figuring Out", "country": "India", "profile": {"biases": "Hustle optimism.", "criticism": "Softballs."}}
+    store.speakers = [{"label": "Raj Shamani", "speakers": {"status": "ready", "name": "Raj Shamani", "summary": "Host.",
+                                                             "profile": {"known_positions": "Bullish on India."}}}]
+    res = asyncio.run(run_claim_sources("c1", settings=TRIAGE_SETTINGS, store=store))
+    assert res["status"] == "done" and res["route"] == "data" and store.routes["c1"] == "data"
+    assert len(fake.calls) == 2 and store.cost == [pytest.approx(0.01)]  # both searches charged
+    related, counter = sorted(fake.calls, key=lambda c: len(c["search_queries"]))
+    assert "Said by Raj Shamani on Figuring Out" in related["objective"] and related["advanced_settings"]["location"] == "in"
+    assert counter["search_queries"] == ["GDP grew 7.4%", "GDP grew 7.4% official statistics data"]
+    assert "primary sources" in counter["objective"] and "Bullish on India" in counter["objective"] and "Softballs" in counter["objective"]
+    assert store.counter["c1"] == ([], "")  # the second search found only links the first already had
+    # The classifier saw the statement with its speaker and show profiles.
+    assert clf.seen[0]["speaker"]["known_positions"] == "Bullish on India." and clf.seen[0]["creator"]["podcast"] == "Figuring Out"
+
+
+def test_a_statement_triage_skips_gets_no_search_in_a_batch_but_one_when_pressed(monkeypatch):
+    _, fake = _triage(monkeypatch, {"claim 0": "skip", "claim 1": "related"})
+    store = FakeStore(batch=claims(2))
+    out = asyncio.run(run_video_sources("e1", settings=TRIAGE_SETTINGS, store=store))
+    assert out["searched"] == 1 and out["skipped"] == 1 and len(fake.calls) == 1
+    assert store.routes == {"id0": "skip", "id1": "related"} and store.status["id0"] == ("not_requested", None)
+    _, fake = _triage(monkeypatch, {"GDP grew 7.4%": "skip"})
+    store = FakeStore(row())
+    res = asyncio.run(run_claim_sources("c1", settings=TRIAGE_SETTINGS, store=store))
+    assert res["route"] == "related" and len(fake.calls) == 1 and store.saved["c1"]  # a viewer asked: one search
+
+
+def test_if_the_classifier_fails_the_second_search_still_runs(monkeypatch):
+    _, fake = _triage(monkeypatch, fail=True)
+    store = FakeStore(row())
+    res = asyncio.run(run_claim_sources("c1", settings=TRIAGE_SETTINGS, store=store))
+    assert res["route"] == "data" and len(fake.calls) == 2  # "GDP grew 7.4%" has a figure
+    assert sources.fallback_route("Modi is the best PM") == "contested"
+
+
+def test_a_failed_second_search_keeps_the_first(monkeypatch):
+    class HalfDown(FakeParallel):
+        def search(self, **kw):
+            if len(kw["search_queries"]) > 1:
+                raise RuntimeError("timeout")
+            return super().search(**kw)
+    _triage(monkeypatch, {"GDP grew 7.4%": "contested"})
+    monkeypatch.setattr(evidence, "_client", lambda s: HalfDown([hit("https://a.example/x")]))
+    store = FakeStore(row())
+    res = asyncio.run(run_claim_sources("c1", settings=TRIAGE_SETTINGS, store=store))
+    assert res["status"] == "done" and store.saved["c1"] == ["https://a.example/x"] and store.counter["c1"] == ([], "")

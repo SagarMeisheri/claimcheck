@@ -1,6 +1,7 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { ChannelPage, Claim, Episode, EpisodeDetail, OpenReport, Pestle, PreviewClaim, Source, SourcesMatch, SourcesStatus } from "./types";
+import type { ChannelPage, Claim, CreatorProfile, Episode, EpisodeDetail, EpisodeSpeaker, OpenReport, Pestle, PreviewClaim, Progress, Section, Source,
+  SourcesMatch, SourcesStatus } from "./types";
 import { mergeCounts, typeOf } from "./statements";
 
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -25,12 +26,14 @@ type EpisodeRow = {
   id: string; youtube_video_id: string; title: string | null; duration_s: number | null; published_at: string | null;
   status: string; skip_reason?: string | null; created_at: string; channel_id: string | null;
   statement_counts?: Record<string, number> | null; summary?: string | null; sources_batch_status?: string | null;
+  creator_id?: string | null; sections?: Section[] | null; progress?: Progress | null;
   channels: { name: string } | null;
 };
 
-const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, statement_counts, summary, sources_batch_status, created_at, channel_id, channels(name)";
-const SOURCE_COLS = "claim_sources(url, title, tier, excerpt, publish_date, rank)";
-const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, sources_match, ${SOURCE_COLS}`;
+const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, statement_counts, summary, sources_batch_status, created_at, channel_id, creator_id, sections, progress, channels(name)";
+const SOURCE_COLS = "claim_sources(url, title, tier, excerpt, publish_date, rank, kind)";
+const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, section_idx, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, ${SOURCE_COLS}`;
+const CREATOR_COLS = "id, podcast, youtube_channel_name, youtube_handles, country, summary, public_profile";
 const PUBLIC_STATUSES = ["done", "in_review", "processing", "queued"];
 
 function toEpisode(r: EpisodeRow): Episode {
@@ -40,12 +43,13 @@ function toEpisode(r: EpisodeRow): Episode {
     duration_s: r.duration_s ?? 0, published_at: r.published_at, status: r.status, skip_reason: r.skip_reason,
     statement_counts: mergeCounts(r.statement_counts ?? {}), summary: r.summary ?? null,
     sources_batch: r.sources_batch_status ?? null, created_at: r.created_at,
+    creator_id: r.creator_id ?? null, sections: r.sections ?? [], progress: r.progress ?? null,
   };
 }
 
-/** Sources in the search engine's own order (most relevant first). */
-function inSearchOrder(sources: Source[] | null | undefined): Source[] {
-  return [...(sources ?? [])].sort((a, b) => a.rank - b.rank);
+/** Sources in the search engine's own order (most relevant first), from one search: the related one by default. */
+function inSearchOrder(sources: Source[] | null | undefined, kind: "related" | "counter" = "related"): Source[] {
+  return [...(sources ?? [])].filter((s) => (s.kind ?? "related") === kind).sort((a, b) => a.rank - b.rank);
 }
 
 function toClaim(c: any): Claim {
@@ -55,6 +59,7 @@ function toClaim(c: any): Claim {
     statement_type: typeOf(c.statement_type),
     sources_status: (c.sources_status as SourcesStatus) ?? "not_eligible",
     sources: inSearchOrder(c.claim_sources),
+    counter_sources: inSearchOrder(c.claim_sources, "counter"),
     claim_sources: undefined,
   };
 }
@@ -64,6 +69,8 @@ function toPreview(c: Claim): PreviewClaim {
     id: c.id, start_s: c.start_s, claim_text: c.claim_text, speaker: c.speaker, pestle_area: c.pestle_area, topic: c.topic,
     topics: c.topics, statement_type: c.statement_type, sources_status: c.sources_status,
     sources: c.sources.map((s) => ({ ...s, excerpt: "" })), sources_summary: c.sources_summary ?? null, sources_match: c.sources_match ?? null,
+    sources_route: c.sources_route ?? null, counter_sources: c.counter_sources.map((s) => ({ ...s, excerpt: "" })),
+    counter_summary: c.counter_summary ?? null,
   };
 }
 
@@ -114,9 +121,20 @@ export async function getEpisodeByVideo(videoId: string): Promise<EpisodeDetail 
   const db = publicDb();
   const { data: ep } = await db.from("episodes").select(EP_COLS).eq("youtube_video_id", videoId).maybeSingle();
   if (!ep) return null;
-  const { data: claims, error } = await db.from("claims").select(CLAIM_COLS).eq("episode_id", (ep as any).id).order("start_s");
+  const epId = (ep as any).id as string;
+  const creatorId = (ep as any).creator_id as string | null;
+  const [{ data: claims, error }, creator, { data: speakers }] = await Promise.all([
+    db.from("claims").select(CLAIM_COLS).eq("episode_id", epId).order("start_s"),
+    creatorId ? db.from("creators").select(CREATOR_COLS).eq("id", creatorId).maybeSingle().then((r) => r.data) : Promise.resolve(null),
+    db.from("episode_speakers").select("label, role, statements, speakers(id, name, summary, sources, public_profile)")
+      .eq("episode_id", epId).order("statements", { ascending: false }),
+  ]);
   if (error) throw error;
-  return { ...toEpisode(ep as unknown as EpisodeRow), claims: (claims ?? []).map(toClaim) };
+  return {
+    ...toEpisode(ep as unknown as EpisodeRow), claims: (claims ?? []).map(toClaim),
+    creator: (creator as CreatorProfile | null) ?? null,
+    speakers: (speakers ?? []).map((r: any) => ({ label: r.label, role: r.role, statements: r.statements, speaker: r.speakers ?? null })) as EpisodeSpeaker[],
+  };
 }
 
 export async function getVideoIdForEpisode(id: string): Promise<string | null> {
@@ -160,15 +178,17 @@ export async function getOpenReports(): Promise<OpenReport[]> {
 
 export type ClaimSources = {
   id: string; sources_status: SourcesStatus; sources_error: string | null; video_id: string | null; sources: Source[]; sources_summary: string | null; sources_match: SourcesMatch | null;
+  counter_sources: Source[]; counter_summary: string | null; sources_route: string | null;
 };
 
 /** Live state of one claim's source lookup, polled by the "Check sources" button. */
 export async function getClaimSources(id: string): Promise<ClaimSources | null> {
   const { data } = await publicDb().from("claims")
-    .select(`id, sources_status, sources_error, sources_summary, sources_match, episodes(youtube_video_id), ${SOURCE_COLS}`)
+    .select(`id, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, episodes(youtube_video_id), ${SOURCE_COLS}`)
     .eq("id", id).maybeSingle();
   if (!data) return null;
   const d = data as any;
   return { id: d.id, sources_status: d.sources_status, sources_error: d.sources_error,
-           video_id: d.episodes?.youtube_video_id ?? null, sources: inSearchOrder(d.claim_sources), sources_summary: d.sources_summary ?? null, sources_match: d.sources_match ?? null };
+           video_id: d.episodes?.youtube_video_id ?? null, sources: inSearchOrder(d.claim_sources), sources_summary: d.sources_summary ?? null, sources_match: d.sources_match ?? null,
+           counter_sources: inSearchOrder(d.claim_sources, "counter"), counter_summary: d.counter_summary ?? null, sources_route: d.sources_route ?? null };
 }

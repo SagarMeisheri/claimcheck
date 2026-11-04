@@ -46,7 +46,18 @@ class Store(Protocol):
     async def list_batch_claims(self, episode_id: str) -> list[dict[str, Any]]: ...
     async def start_claim_sources(self, claim_id: str) -> bool: ...
     async def set_sources_status(self, claim_id: str, status: str, error: Optional[str] = None) -> None: ...
-    async def save_claim_sources(self, claim_id: str, sources: list[Source], summary: str = "", match: str = "") -> None: ...
+    async def save_claim_sources(self, claim_id: str, sources: list[Source], summary: str = "", match: str = "", *,
+                                 counter: Optional[list[Source]] = None, counter_summary: str = "",
+                                 route: Optional[str] = None, triage: Optional[dict[str, Any]] = None) -> None: ...
+    async def save_sources_route(self, claim_id: str, route: str, triage: Optional[dict[str, Any]] = None) -> None: ...
+    # Creators, speakers, sections
+    async def get_creator_by_channel(self, youtube_channel_id: str) -> Optional[dict[str, Any]]: ...
+    async def get_creator(self, creator_id: str) -> Optional[dict[str, Any]]: ...
+    async def get_speaker(self, key: str) -> Optional[dict[str, Any]]: ...
+    async def save_speaker(self, row: dict[str, Any]) -> Optional[dict[str, Any]]: ...
+    async def save_episode_speakers(self, episode_id: str, rows: list[dict[str, Any]]) -> None: ...
+    async def get_episode_speakers(self, episode_id: str) -> list[dict[str, Any]]: ...
+    async def save_sections(self, episode_id: str, sections: list[dict[str, Any]]) -> None: ...
     async def list_claims_missing_summary(self, limit: int) -> list[dict[str, Any]]: ...
     async def save_sources_summary(self, claim_id: str, summary: str, match: str = "") -> None: ...
     async def add_episode_cost(self, episode_id: str, usd: float, tokens_in: int, tokens_out: int) -> None: ...
@@ -75,6 +86,23 @@ class SupabaseStore:
         self.db.table("channels").upsert(row, on_conflict="youtube_channel_id", ignore_duplicates=True).execute()
         return await self.get_channel(row["youtube_channel_id"])
 
+    async def get_creator_by_channel(self, youtube_channel_id: str) -> Optional[dict[str, Any]]:
+        if not youtube_channel_id:
+            return None
+        r = self.db.table("creators").select("*").contains("youtube_channel_ids", [youtube_channel_id]).limit(1).execute()
+        return r.data[0] if r.data else None
+
+    async def get_creator(self, creator_id: str) -> Optional[dict[str, Any]]:
+        if not creator_id:
+            return None
+        r = self.db.table("creators").select("*").eq("id", creator_id).limit(1).execute()
+        return r.data[0] if r.data else None
+
+    async def list_episodes_without_channel(self, limit: int = 500) -> list[dict[str, Any]]:
+        r = (self.db.table("episodes").select("id, youtube_video_id").is_("channel_id", "null").neq("status", "removed")
+             .order("created_at").limit(limit).execute())
+        return r.data or []
+
     async def create_episode(self, row: dict[str, Any]) -> str:
         r = self.db.table("episodes").upsert(row, on_conflict="youtube_video_id").execute()
         return r.data[0]["id"]
@@ -93,6 +121,7 @@ class SupabaseStore:
             "episode_id": episode_id, "idx": rec.index, "start_s": rec.start_s, "speaker": None if hidden else c.speaker,
             "claim_text": "[Not shown: outside the content policy]" if hidden else c.claim,
             "context_quote": None if hidden else c.context_quote, "pestle_area": c.pestle_area,
+            "statement_context": None if hidden else (c.statement_context or None),
             "topic": c.topic, "topics": [] if hidden else c.topics, "claim_type": c.claim_type, "policy_tier": rec.effective_tier,
             "not_checked_reason": rec.not_checked_reason, "refers_to_visual": c.refers_to_visual,
             "statement_type": c.statement_type, "verification_status": "not_eligible",
@@ -115,25 +144,27 @@ class SupabaseStore:
 
     async def get_claim_for_sources(self, claim_id):
         r = (self.db.table("claims")
-             .select("id, idx, episode_id, start_s, speaker, claim_text, context_quote, pestle_area, topic, topics, "
-                     "statement_type, policy_tier, not_checked_reason, refers_to_visual, sources_status, "
-                     "episodes(id, youtube_video_id, title, status, cost_usd)")
+             .select("id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, section_idx, "
+                     "pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, refers_to_visual, sources_status, "
+                     "episodes(id, youtube_video_id, title, status, cost_usd, creator_id, sections)")
              .eq("id", claim_id).limit(1).execute())
         return r.data[0] if r.data else None
 
     async def get_episode(self, episode_id):
-        r = (self.db.table("episodes").select("id, youtube_video_id, title, status, cost_usd")
+        r = (self.db.table("episodes").select("id, youtube_video_id, title, status, cost_usd, creator_id, sections")
              .eq("id", episode_id).limit(1).execute())
         return r.data[0] if r.data else None
 
     async def list_batch_claims(self, episode_id):
-        """Statements "Check sources for all" may take: not a question or story, not redacted, no sources yet, not running."""
+        """Statements "Check sources for all" may take: not a question or story, not redacted, no sources yet, not running,
+        and not already set aside by the classifier (sources_route 'skip'; a viewer can still press Check sources)."""
         r = (self.db.table("claims")
-             .select("id, idx, start_s, claim_text, pestle_area, topic, topics, statement_type, policy_tier, sources_status")
+             .select("id, idx, start_s, speaker, claim_text, statement_context, section_idx, pestle_area, topic, topics, "
+                     "statement_type, policy_tier, sources_status, sources_route")
              .eq("episode_id", episode_id).not_.in_("statement_type", ["question", "story"])
              .in_("sources_status", ["not_requested", "failed"]).neq("policy_tier", "never")
              .or_("not_checked_reason.is.null,not_checked_reason.neq.outside_policy").order("start_s").limit(200).execute())
-        return r.data or []
+        return [c for c in (r.data or []) if c.get("sources_route") != "skip"]
 
     async def start_claim_sources(self, claim_id):
         """Moves a claim to 'searching' only if no other run holds it. Returns False if it was taken."""
@@ -144,12 +175,55 @@ class SupabaseStore:
     async def set_sources_status(self, claim_id, status, error=None):
         self.db.table("claims").update({"sources_status": status, "sources_error": error}).eq("id", claim_id).execute()
 
-    async def save_claim_sources(self, claim_id, sources, summary="", match=""):
+    async def save_claim_sources(self, claim_id, sources, summary="", match="", *, counter=None, counter_summary="",
+                                 route=None, triage=None):
+        """Both groups of sources (related, then counter) and the summaries, in one go."""
         self.db.table("claim_sources").delete().eq("claim_id", claim_id).execute()
-        if sources:
-            self.db.table("claim_sources").insert([{**s.model_dump(), "claim_id": claim_id} for s in sources]).execute()
-        self.db.table("claims").update({"sources_status": "done", "sources_error": None, "sources_summary": summary or None, "sources_match": match or None,
-                                        "sources_checked_at": _now()}).eq("id", claim_id).execute()
+        rows = [{**s.model_dump(), "kind": "related", "claim_id": claim_id} for s in sources]
+        rows += [{**s.model_dump(), "kind": "counter", "claim_id": claim_id} for s in (counter or [])]
+        if rows:
+            self.db.table("claim_sources").insert(rows).execute()
+        fields = {"sources_status": "done", "sources_error": None, "sources_summary": summary or None, "sources_match": match or None,
+                  "counter_summary": counter_summary or None, "sources_checked_at": _now()}
+        if route:
+            fields["sources_route"] = route
+        if triage is not None:
+            fields["sources_triage"] = triage
+        self.db.table("claims").update(fields).eq("id", claim_id).execute()
+
+    async def save_sources_route(self, claim_id, route, triage=None):
+        """The classifier set this statement aside: no search; it goes back to 'not requested' for the button."""
+        self.db.table("claims").update({"sources_route": route, "sources_triage": triage, "sources_status": "not_requested",
+                                        "sources_error": None}).eq("id", claim_id).execute()
+
+    # --- Speakers and sections ---------------------------------------------------------------------
+
+    async def get_speaker(self, key):
+        r = self.db.table("speakers").select("*").eq("name_key", key).limit(1).execute()
+        return r.data[0] if r.data else None
+
+    async def save_speaker(self, row):
+        r = self.db.table("speakers").upsert(row, on_conflict="name_key").execute()
+        return r.data[0] if r.data else await self.get_speaker(row["name_key"])
+
+    async def save_episode_speakers(self, episode_id, rows):
+        if rows:
+            self.db.table("episode_speakers").upsert([{**r, "episode_id": episode_id} for r in rows],
+                                                     on_conflict="episode_id,label").execute()
+
+    async def get_episode_speakers(self, episode_id):
+        r = (self.db.table("episode_speakers").select("label, role, statements, speaker_id, speakers(*)")
+             .eq("episode_id", episode_id).execute())
+        return r.data or []
+
+    async def save_sections(self, episode_id, sections):
+        """episodes.sections, and each statement's section_idx (the last section starting at or before it)."""
+        self.db.table("episodes").update({"sections": sections}).eq("id", episode_id).execute()
+        for i, s in enumerate(sections):
+            q = self.db.table("claims").update({"section_idx": s["idx"]}).eq("episode_id", episode_id).gte("start_s", s["start_s"])
+            if i + 1 < len(sections):
+                q = q.lt("start_s", sections[i + 1]["start_s"])
+            q.execute()
 
     async def list_claims_missing_summary(self, limit):
         """Claims whose sources were saved before summaries existed, with those sources in search order."""

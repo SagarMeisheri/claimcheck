@@ -1,16 +1,22 @@
-"""Sources for one claim: one Parallel web search on the claim's own words.
+"""Sources for one claim: Parallel web searches on the claim's own words.
+
+related search   the claim's words; the objective says who said it, on which show, while discussing what, so the
+                 search engine can tell which pages are about this statement
+counter search   (data / contested statements, agents/sources.py) the same words plus a second query, with an
+                 objective asking for official figures, different figures or other perspectives, aimed away from the
+                 speaker's and show's known positions. Links the related search already found are left out.
 
 Whatever Parallel returns is used, in Parallel's order (most relevant first): title, link, date and the excerpt
-Parallel took from the page. No model reads the pages and nothing is filtered afterwards. The only rule is in the
-request itself: social media and video sites are excluded (policy.yaml sources.blocklist), because a post is not
-a source.
+Parallel took from the page. No model reads the pages and nothing is filtered afterwards except duplicates. The only
+rule is in the request itself: social media and video sites are excluded (policy.yaml sources.blocklist), because a
+post is not a source.
 """
 
 from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any
+from typing import Any, Optional
 
 from ..policy import blocklist, source_tier
 from ..schemas import Source
@@ -91,21 +97,66 @@ def to_sources(results: list[Any], policy: dict[str, Any], limit: int, excerpt_c
     return out
 
 
-async def search_sources(claim_text: str, settings: Any, policy: dict[str, Any]) -> list[Source]:
+def _said_by(ctx: dict[str, Any]) -> str:
+    """'Said by Raj Shamani on Figuring Out, while discussing India's chip subsidies.' from the lookup context."""
+    who = (ctx.get("speaker") or {}).get("name") or (ctx.get("speaker") or {}).get("label") or ""
+    show = (ctx.get("creator") or {}).get("podcast") or ctx.get("channel") or ""
+    about = ctx.get("discussing") or ""
+    parts = [f"Said by {who}" if who else "Said", f"on {show}" if show else "", f"while discussing: {about}" if about else ""]
+    line = " ".join(p for p in parts if p).strip()
+    return "" if line == "Said" else line + "."
+
+
+def related_objective(query: str, ctx: Optional[dict[str, Any]] = None) -> str:
+    base = f"Find reports, data, official releases or news coverage about this statement: {query}"
+    said = _said_by(ctx or {})
+    return f"{base} Context: {said}" if said else base
+
+
+def counter_request(query: str, route: str, ctx: Optional[dict[str, Any]] = None) -> tuple[list[str], str]:
+    """Queries and objective for the second search. data: original figures and different numbers. contested: other
+    perspectives, aimed away from the speaker's and show's known positions (from their profiles)."""
+    ctx = ctx or {}
+    said = _said_by(ctx)
+    if route == "data":
+        queries = [query, f"{query} official statistics data"[:300]]
+        objective = ("Find primary sources for the figures in this statement: official statistics, the original study "
+                     "or dataset, regulators or international bodies, and sources that give different figures, periods "
+                     f"or definitions for the same thing. Statement: {query}")
+    else:
+        queries = [query, f"{query} criticism analysis"[:300]]
+        objective = ("Find independent analyses, official data and reporting that give other perspectives on, "
+                     f"qualify, or dispute this statement, from sources that do not share the speaker's viewpoint. Statement: {query}")
+    leanings = [x for x in [(ctx.get("speaker") or {}).get("known_positions"), (ctx.get("creator") or {}).get("biases")] if x]
+    criticism = [x for x in [(ctx.get("speaker") or {}).get("criticisms"), (ctx.get("creator") or {}).get("criticism")] if x]
+    if said:
+        objective += f" Context: {said}"
+    if leanings:
+        objective += " The speaker or show is described as: " + "; ".join(leanings)[:500] + "."
+    if criticism:
+        objective += " They are often criticised for: " + "; ".join(criticism)[:400] + ". Prefer sources that address this."
+    return queries, objective[:2000]
+
+
+async def search_sources(claim_text: str, settings: Any, policy: dict[str, Any], *, objective: Optional[str] = None,
+                         extra_queries: tuple[str, ...] | list[str] = (), location: Optional[str] = None,
+                         exclude_urls: frozenset[str] | set[str] = frozenset()) -> list[Source]:
     """One search. Raises on API errors or timeout (the caller marks the claim 'failed' so it can be retried)."""
     query = claim_text.strip()[:300]
     client = _client(settings)
+    queries = [query] + [q.strip()[:300] for q in extra_queries if q and q.strip() and q.strip() != query]
 
     def _run() -> list[Any]:
         res = client.search(
-            search_queries=[query],
-            objective=f"Find reports, data, official releases or news coverage about this statement: {query}",
+            search_queries=queries,
+            objective=objective or related_objective(query),
             mode=settings.sources_search_mode,
-            advanced_settings={"max_results": settings.sources_per_claim + 3, "location": "in",
+            advanced_settings={"max_results": settings.sources_per_claim + 3 + len(exclude_urls),
+                               "location": location or getattr(settings, "default_search_location", "in"),
                                "source_policy": {"exclude_domains": blocklist(policy)},
                                "excerpt_settings": {"max_chars_per_result": 1500}},
         )
-        return list(res.results)
+        return [r for r in res.results if (getattr(r, "url", "") or "") not in exclude_urls]
 
     results = await asyncio.wait_for(asyncio.to_thread(_run), timeout=settings.tool_timeout_s)
     return to_sources(results, policy, settings.sources_per_claim, settings.excerpt_chars, query)

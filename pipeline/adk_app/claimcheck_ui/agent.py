@@ -44,14 +44,16 @@ class UiSetup(BaseAgent):
         store = make_store(_settings)
         meta = await fetch_metadata(video_id, _settings)  # the one YouTube Data API call for this video
         channel = await resolve_channel(store, meta)
+        creator = await store.get_creator_by_channel(meta.get("channel_id") or "")
         episode_id = await store.create_episode({
             "youtube_video_id": video_id, "channel_id": (channel or {}).get("id"), "title": meta.get("title"),
-            "status": "queued", "submitted_by": "adk-web",
+            "status": "queued", "submitted_by": "adk-web", "creator_id": (creator or {}).get("id"),
         })
         await store.update_episode(episode_id, {"status": "processing"})
         ec = EpisodeContext(episode_id=episode_id, video_id=video_id, settings=_settings, policy=load_policy(),
                             store=store, budget=Budget(cap_usd=_settings.max_cost_usd_per_episode),
-                            plugins_factory=make_plugins_factory(_settings))
+                            plugins_factory=make_plugins_factory(_settings), duration_s=int(meta.get("duration_s") or 0),
+                            creator=creator)
         set_context(ec)
         yield _say(self, ctx, f"Analysing {video_id} (cost cap ${_settings.max_cost_usd_per_episode:.2f}). Episode {episode_id}.", {
             "video_url": f"https://www.youtube.com/watch?v={video_id}", "episode_id": episode_id})

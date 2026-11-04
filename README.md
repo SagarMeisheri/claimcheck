@@ -23,7 +23,7 @@ supabase/   Postgres schema, row-level security and column grants
 Needs Docker, the Supabase CLI, Python 3.11+, Node 20+. There is no demo data: the app shows only videos you submit.
 
 ```bash
-supabase start && supabase db reset        # local Postgres with migrations 0001-0017 (ports 55321-55329)
+supabase start && supabase db reset        # local Postgres with migrations 0001-0019 (ports 55321-55329)
 
 cd pipeline
 python3 -m venv .venv && . .venv/bin/activate
@@ -34,6 +34,7 @@ python -m claimcheck.cli "https://www.youtube.com/watch?v=VIDEO_ID"
 python -m claimcheck.cli --sources CLAIM_ID        # look up sources for one claim, as the button does
 python -m claimcheck.cli --sources-all EPISODE_ID  # "Check sources for all statements"
 python -m claimcheck.cli --summarize-missing       # summary + match for claims looked up before them
+python -m claimcheck.cli --relink-channels         # videos saved without a channel get it (and their creator)
 uvicorn claimcheck.server:app --port 8080  # the service the web app calls
 
 cd ../web
@@ -46,7 +47,7 @@ npm install && npm run dev                 # http://localhost:3000
 | Route | Screen |
 | --- | --- |
 | `/` | Feed of analysed videos: thumbnail, AI summary, breakdown by type, "Check sources for all statements", and a paged carousel of statements (tabs by type, subject chips). Each statement plays in place from its timestamp. Tabs: Latest, Topics (claims across videos by subject), Following (stored in the browser). Search and PESTLE filters |
-| `/v/VIDEO_ID` | Video page: player (loads only on tap, YouTube's own defaults), a track with one tick per statement, AI summary, filter chips (All, Claim, Opinion, Forecast, Other, With sources) and subject chips. Each statement card shows the AI's wording, the speaker "(identified by AI)", "What was said" (AI transcript, labelled), Watch 20 s, Share, Report a problem, and for claims Check sources / the sources found. "Play in order", J/K |
+| `/v/VIDEO_ID` | Video page: player (loads only on tap, YouTube's own defaults), a track with one tick per statement, AI summary, filter chips (All, Claim, Opinion, Forecast, Other, With sources) and subject chips. Each statement card shows the AI's wording, the speaker "(identified by AI)", "What was said" (AI transcript, labelled), Watch 20 s, Share, Report a problem, and for claims Check sources / the sources found. "Play in order", J/K. Tabs under the player: Video (AI summary, parts of the conversation), Creator, Speakers (neutral profile facts only). While a video is analysed: the step checklist. Each statement shows one AI line of context; data and contested claims show a second group of sources (Different figures / Other perspectives) |
 | `/v/VIDEO_ID#claim-ID` | Same, cued to that statement. `?moment=ID` plays its 20 s, `?view=all\|with_sources\|factual_claim\|opinion\|forecast\|other`, `?t=640`, `?play=1` |
 | `/c/CHANNEL_ID` | A channel's analysed videos and Follow |
 | `/submit` | Analyse a video (with link preview) |
@@ -59,17 +60,37 @@ it is never shrunk below 200x200, per YouTube's API policies.
 ## How a video is analysed
 
 ```
-EpisodePipeline (ADK SequentialAgent)                       POST /episodes
-  IngestGate      code   public and finished (not live); title/description treated as untrusted
-  ExtractorAgent  LLM    Gemini 3.8 Flash reads the YouTube URL (agentic video processing): every statement with
-                         timestamp, speaker (a name only if said or shown), tag (claim / opinion / forecast / advice / story / question / other;
-                         sponsor reads are skipped),
-                         1-2 subject tags, plus a neutral 2-3 sentence summary. Statements stream to the database as
-                         they are written
-  ClaimFilter     code   150-statement cap; never-show topics redacted in code whatever the model said
-  Publisher       code   the only writer; statement counts, summary, cost
+Before the pipeline: the channel row, and the creator profile if the channel is one of the 100 shows in `creators`
 
-Sources (agents/sources.py, tools/evidence.py): nothing filtered after the search
+EpisodePipeline (ADK SequentialAgent)                       POST /episodes
+  IngestGate       code   public and finished (not live); title/description treated as untrusted
+  ExtractorAgent   LLM    Gemini 3.8 Flash reads the YouTube URL (agentic video processing): every statement with
+                          timestamp, speaker (a name only if said or shown, or the show's host from the creator
+                          profile), tag (claim / opinion / forecast / advice / story / question / other; sponsor reads
+                          are skipped), one line on what was being discussed, 1-2 subject tags; then the sections of the
+                          conversation and a neutral 2-3 sentence summary. Statements stream to the database as they
+                          are written
+  ClaimFilter      code   150-statement cap; never-show topics redacted in code whatever the model said; sections
+                          cleaned (time order, no overlaps)
+  SpeakerProfiler  code   a profile per named speaker: hosts from the creator profile, known people from `speakers`,
+                          new ones from one Parallel search + one Flash call (at most 6 new per video, ~$0.01 each)
+  Publisher        code   the only writer; statements, sections, statement counts, summary, cost
+
+The viewer sees these steps as a checklist (done / running / waiting / skipped), from episodes.progress.steps.
+
+Creator and speaker profiles (profiles.py): their known positions and criticisms are used only to aim the second
+source search; the database never sends them to the browser (generated public_profile columns without them).
+
+Sources (agents/sources.py, tools/evidence.py): nothing filtered after the search except duplicates
+  Lookup workflow (ADK Workflow per statement)
+    prepare       the statement, what was being discussed, the speaker's and show's profiles
+    triage        ClassifierNode (Choice, Gemini Flash, ~$0.0015): skip / related / data / contested.
+                  skip = background, self-description, too vague: not searched by "Check all" (the button still works).
+                  If the classifier fails: figures -> data, else contested
+    lookup        related search (always) + for data / contested a second search at the same time: original figures
+                  and different numbers (data), or other perspectives aimed away from the speaker's / show's known
+                  positions (contested). Links the first search found are dropped from the second. Searches are
+                  geo-targeted to the creator's country (default India)
   One claim                                                   POST /claims/{id}/sources
     web app       rate limits (10 per person per day, 120 per hour site-wide), marks the claim queued
     precheck      any statement type, not redacted, no sources yet, video under its cost cap; one lookup per video at a time
@@ -83,7 +104,8 @@ Sources (agents/sources.py, tools/evidence.py): nothing filtered after the searc
                   the claim's specific point. Relevance only, never agreement: a different figure for the same thing
                   is "high". Describes, never judges: a summary with judging words (confirms, contradicts, true,
                   false, ...) is dropped in code. If it fails, the sources are saved without either. ~$0.003
-    save          on the claim for everyone (claim_sources rows + claims.sources_summary), or "no sources found"
+    save          on the claim for everyone (claim_sources rows with kind related / counter, claims.sources_summary,
+                  counter_summary, sources_route), or "no sources found"
   Every claim of a video                                      POST /episodes/{id}/sources-all
     the same search and summary for each statement without sources, 5 at a time, each saved as it lands. Up to 75 searches per
     press (earliest claims first; press again for more), never beyond the video's budget; claims with the same
@@ -109,18 +131,21 @@ Each claim has a `sources_status`: `not_eligible` (not a claim, or redacted), `n
 | YouTube data | Refreshed every 25 days by the daily maintenance cron (YouTube allows 30); videos no longer public are marked `removed` and hidden; no channel avatars stored |
 | Privacy | Salted IP hashes only, for rate limits; deleted after 30 days by the maintenance cron |
 
-All of these are covered by tests in `pipeline/tests/` (56 tests, offline).
+All of these are covered by tests in `pipeline/tests/` (69 tests, offline).
 
 ## Going live
 
 1. **Supabase**: create a project and run every migration in order (`supabase db push`, or the SQL editor):
-   `0001`–`0017`. An existing database only needs the ones it's missing. `0012_sources_only.sql` hides old verdicts,
+   `0001`–`0019`. An existing database only needs the ones it's missing. `0012_sources_only.sql` hides old verdicts,
    merges hearsay/analogy/loaded-language into "other", adds sources, rate-limit and YouTube-refresh columns;
    `0013_plain_search_sources.sql` stores search results as returned (excerpt, rank, any site) and reopens claims
    that came back empty; `0014_source_summaries.sql` adds `claims.sources_summary` and `0015_sources_match.sql`
    adds `claims.sources_match`;
    `0016_sources_for_all_statements.sql` opens sources up to opinions, forecasts and other statements;
-   `0017_podcast_statement_types.sql` allows the advice, story and question tags. If 0006–0011 were applied by hand
+   `0017_podcast_statement_types.sql` allows the advice, story and question tags;
+   `0018_creators.sql` adds the 100 creator profiles; `0019_profiles_and_counter_sources.sql` fixes channel creation
+   (`channels.track` optional), adds speakers, episode speakers, sections, statement context and the second search.
+   After 0019, run `python -m claimcheck.cli --relink-channels` once. If 0006–0011 were applied by hand
    (not through the CLI), apply 0012-0017 the same way:
    running `supabase migration up` would re-run 0006's backfill. Deploy order: migration, then pipeline, then web.
 2. **Pipeline (Cloud Run)**: `cd pipeline && gcloud run deploy claimcheck-pipeline --source . --set-env-vars ...` with

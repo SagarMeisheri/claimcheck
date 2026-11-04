@@ -39,6 +39,7 @@ class ExtractedClaim(BaseModel):
     speaker: str
     claim: str = Field(description="The statement, self-contained, speaker's numbers kept exactly")
     context_quote: str = Field(description="The spoken words as heard, up to ~40 words")
+    statement_context: str = ""  # what was being discussed when it was said, one neutral line
     pestle_area: PestleArea
     topic: str = Field(description="First subject tag; same as topics[0]")
     topics: list[str] = Field(default_factory=list, description="1-2 free-form subject tags")
@@ -73,6 +74,7 @@ class ExtractedStatement(BaseModel):
     speaker: str = Field(description="Name only if it is said or shown on screen in the video, otherwise a role (Host, Guest 1)")
     claim: str = Field(description="The statement, self-contained, speaker's numbers kept exactly")
     context_quote: str = Field(description="The spoken words as you heard them (Hindi or English as spoken), up to ~40 words")
+    statement_context: str = Field(description="Required: one neutral line (at most 20 words) on what was being discussed when this was said")
     statement_type: StatementType = Field(description="Required tag: factual_claim, opinion, forecast, advice, story, question or other")
     pestle_area: PestleArea
     topics: list[str] = Field(description="1-2 short subject names (plain words) saying what the statement is about, most relevant first")
@@ -80,8 +82,17 @@ class ExtractedStatement(BaseModel):
     refers_to_visual: bool = False
 
 
+class Section(BaseModel):
+    """A part of the conversation: when it starts and what was being discussed."""
+
+    start_ts: str = Field(description="HH:MM:SS or MM:SS where this part starts")
+    title: str = Field(description="3-8 plain words naming the subject")
+    summary: str = Field(description="1-2 neutral sentences on what was discussed in this part")
+
+
 class ExtractionResult(BaseModel):
     claims: list[ExtractedStatement]
+    sections: list[Section] = Field(default_factory=list, description="The parts of the conversation in order, written after the statements")
     summary: str = Field(default="", description="2-3 plain, neutral sentences on what the video covers, written after the statements")
 
 
@@ -95,6 +106,7 @@ class Source(BaseModel):
     publish_date: Optional[str] = None
     tier: int = 3                     # display label only: 1 official, 2 established news/research, 3 other
     rank: int = 0                     # Parallel's order, most relevant first
+    kind: Literal["related", "counter"] = "related"  # which search found it: the statement's subject, or other figures / views
 
 
 class SourcesSummary(BaseModel):
@@ -102,6 +114,27 @@ class SourcesSummary(BaseModel):
 
     summary: str = Field(default="", description="1-2 plain, neutral sentences (at most 45 words) summarising what the excerpts say, with their own figures and dates")
     match: Literal["high", "medium", "low"] = Field(default="low", description="How directly the excerpts address what the statement says (not whether they agree): high = the same specific point, medium = the same topic but not the specific point, low = loosely related or nothing relevant")
+    counter_summary: str = Field(default="", description="1-2 plain, neutral sentences (at most 45 words) on what the OTHER pages say, with their own figures and dates; empty if there are none")
+
+
+# --- Speaker profiles (agents/speakers.py) -------------------------------------------------------
+class SpeakerProfileOut(BaseModel):
+    """What the profile step returns about one named speaker, from web search excerpts only."""
+
+    identified: bool = Field(description="True only if the pages clearly describe one public person who fits the video context")
+    summary: str = Field(default="", description="1-2 neutral sentences: who they are and what they are known for")
+    role: str = Field(default="", description="Current main role, e.g. 'Economist, former RBI governor'")
+    background: str = Field(default="", description="Professional background in one or two sentences")
+    affiliations: list[str] = Field(default_factory=list, description="Organisations, parties, companies or shows they are tied to")
+    topics: list[str] = Field(default_factory=list, description="Subjects they usually speak on")
+    known_positions: str = Field(default="", description="Public positions or leanings as the pages describe them, attributed ('described as...'); empty if none")
+    criticisms: str = Field(default="", description="Main public criticisms as the pages report them, attributed; empty if none")
+
+
+# --- Source triage (agents/sources.py) ---------------------------------------------------------
+TriageRoute = Literal["skip", "related", "data", "contested"]
+TRIAGE_ROUTES: tuple[str, ...] = ("skip", "related", "data", "contested")
+COUNTER_ROUTES: frozenset[str] = frozenset({"data", "contested"})
 
 
 class ClaimRecord(BaseModel):

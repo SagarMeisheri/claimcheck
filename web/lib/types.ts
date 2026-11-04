@@ -3,6 +3,9 @@ export type StatementType = "factual_claim" | "opinion" | "forecast" | "advice" 
 export type SourcesStatus = "not_eligible" | "not_requested" | "queued" | "searching" | "done" | "failed";
 /** How directly a claim's sources address its specific point (relevance, never agreement). */
 export type SourcesMatch = "high" | "medium" | "low";
+/** How the classifier chose to look a statement up. skip: not looked up automatically; data / contested: a second
+ * search for different figures or other perspectives as well. */
+export type SourcesRoute = "skip" | "related" | "data" | "contested";
 export type Pestle = "political" | "economic" | "social" | "technological" | "legal" | "environmental";
 
 /** One web search result for a statement, as the search returned it: shown for context, not checked or judged. */
@@ -13,6 +16,7 @@ export interface Source {
   excerpt: string; // text the search took from the page (may be empty)
   publish_date: string | null;
   rank: number; // the search engine's order, most relevant first
+  kind?: "related" | "counter"; // which search found it: the statement's subject, or different figures / other views
 }
 
 export interface Claim {
@@ -22,6 +26,8 @@ export interface Claim {
   speaker: string | null; // as identified by the AI
   claim_text: string; // AI paraphrase of what was said
   context_quote: string | null; // AI transcript of the spoken words
+  statement_context: string | null; // AI: what was being discussed when it was said
+  section_idx: number | null;
   pestle_area: Pestle;
   topic: string | null;
   topics: string[]; // 1-2 subject tags (filter chips)
@@ -33,6 +39,9 @@ export interface Claim {
   sources: Source[];
   sources_summary: string | null; // AI summary of the excerpts. Never a judgement
   sources_match: SourcesMatch | null;
+  sources_route: SourcesRoute | null;
+  counter_sources: Source[]; // from the second search (data / contested statements)
+  counter_summary: string | null;
 }
 
 /** A statement as shown in the home-page carousel and the Topics tab. */
@@ -49,6 +58,9 @@ export interface PreviewClaim {
   sources: Source[]; // without excerpts, to keep the home page small
   sources_summary: string | null;
   sources_match: SourcesMatch | null;
+  sources_route: SourcesRoute | null;
+  counter_sources: Source[];
+  counter_summary: string | null;
 }
 
 export interface Episode {
@@ -64,6 +76,9 @@ export interface Episode {
   sources_batch?: string | null; // "running" while "Check sources for all statements" works through the video
   summary?: string | null; // 2-3 sentences on what the video covers, written by the AI
   created_at: string;
+  creator_id?: string | null;
+  sections?: Section[];
+  progress?: Progress | null;
   statement_counts: Partial<Record<StatementType, number>>; // every tagged statement, by type
   // Derived for the feed
   pestle_areas?: Pestle[];
@@ -74,6 +89,37 @@ export interface Episode {
 
 export interface EpisodeDetail extends Episode {
   claims: Claim[];
+  creator: CreatorProfile | null;
+  speakers: EpisodeSpeaker[];
+}
+
+/** A part of the conversation, written by the AI. */
+export interface Section { idx: number; start_s: number; end_s: number; title: string; summary: string }
+
+export type StepStatus = "pending" | "running" | "done" | "skipped";
+export interface Step { key: string; label: string; status: StepStatus; detail?: string | null }
+export interface Progress { label?: string; pct?: number; steps?: Step[] }
+
+/** The neutral parts of a creator profile (the database never sends the bias and criticism notes). */
+export interface CreatorProfile {
+  id: string;
+  podcast: string;
+  youtube_channel_name: string;
+  youtube_handles: string[];
+  country: string;
+  summary: string | null;
+  public_profile: { hosts?: string; host_background?: string; host_bio?: string; topics?: string[]; known_for?: string };
+}
+
+/** Who speaks in a video, and their profile if one was found (neutral parts only). */
+export interface EpisodeSpeaker {
+  label: string;
+  role: "host" | "guest" | null;
+  statements: number;
+  speaker: {
+    id: string; name: string; summary: string | null; sources: { url: string; title: string | null }[];
+    public_profile: { role?: string; background?: string; affiliations?: string[]; topics?: string[] };
+  } | null;
 }
 
 export interface ChannelPage {

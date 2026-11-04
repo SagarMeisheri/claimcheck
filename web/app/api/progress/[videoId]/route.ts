@@ -14,7 +14,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ videoId
   const { data } = await db.from("episodes").select("id, status, skip_reason, progress, statement_counts, sources_batch_status")
     .eq("youtube_video_id", videoId).maybeSingle();
   if (!data) {
-    return NextResponse.json({ status: "unknown", skip_reason: null, label: null, pct: 0, statements: 0, batch: null, looked_up: 0, searching: 0 },
+    return NextResponse.json({ status: "unknown", skip_reason: null, label: null, pct: 0, statements: 0, batch: null, looked_up: 0, searching: 0, steps: [] },
       { headers: { "Cache-Control": "no-store" } });
   }
   const { data: rows } = await db.from("claims").select("sources_status").eq("episode_id", data.id).limit(1000);
@@ -27,6 +27,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ videoId
   return NextResponse.json({
     status: data.status, skip_reason: data.skip_reason, label: data.progress?.label ?? null, pct: data.progress?.pct ?? 0,
     statements: Object.values((data.statement_counts ?? {}) as Record<string, number>).reduce((a, b) => a + (b || 0), 0),
-    batch: data.sources_batch_status ?? null, looked_up: lookedUp, searching,
+    batch: data.sources_batch_status ?? null, looked_up: lookedUp, searching, steps: data.progress?.steps ?? [],
   }, { headers: { "Cache-Control": "no-store" } });
 }

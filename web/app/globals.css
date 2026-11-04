@@ -459,3 +459,44 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .match-chip { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; }
 .match-chip:disabled { opacity: 0.45; cursor: default; }
 .match-chip[aria-pressed="true"] .src-bars i.on { background: currentColor; }
+
+/* ---------- Statement context, second source search ---------- */
+.cc-context { margin: 0.25rem 0 0; font-size: 0.9rem; color: var(--ink-soft); line-height: 1.4; }
+.cc-context .ai-note { text-transform: uppercase; letter-spacing: 0.04em; margin-right: 0.25rem; }
+.src-counter { display: grid; gap: 0.4rem; margin-top: 0.4rem; padding-top: 0.55rem; border-top: 1px dashed var(--src-rule); min-width: 0; }
+.src-counter-none { margin: 0.35rem 0 0; font-size: 0.85rem; }
+
+/* ---------- Analysis steps (while a video is analysed) ---------- */
+.steps { list-style: none; margin: 0.7rem 0 0.2rem; padding: 0; display: grid; gap: 0.35rem; font-size: 0.92rem; }
+.step { display: flex; gap: 0.55rem; align-items: flex-start; color: var(--ink-soft); }
+.step-icon { flex: none; display: inline-grid; place-items: center; width: 1.15rem; height: 1.15rem; margin-top: 0.15rem; border-radius: 50%;
+  border: 1.5px solid var(--rule); font-size: 0.7rem; line-height: 1; }
+.step-body { display: grid; min-width: 0; }
+.step-detail { font-size: 0.84rem; }
+.step.is-done { color: var(--ink); }
+.step.is-done .step-icon { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.step.is-running { color: var(--ink); font-weight: 600; }
+.step.is-running .step-icon { border: 0; }
+.step.is-running .step-detail { font-weight: 400; }
+.step.is-skipped .step-icon { border-style: dashed; }
+.step.is-skipped .step-label { text-decoration: line-through; text-decoration-color: var(--rule); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* ---------- Video / Creator / Speakers tabs ---------- */
+.ptabs { margin-top: 1rem; }
+.ptabs .tabs { margin-bottom: 0.6rem; }
+.ppanel > .ai-summary:first-child { margin-top: 0; }
+.ppanel > .ai-note { margin: 0.9rem 0 0.3rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.sections { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45rem; }
+.sections li { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); gap: 0.5rem; font-size: 0.94rem; line-height: 1.4; }
+.sections .cc-ts { justify-self: start; }
+.profile p, .speaker p { margin: 0.3rem 0 0; }
+.profile-name { font-size: 1.2rem; }
+.profile-k { font-size: 0.78rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; margin-right: 0.3rem; }
+.profile-topics { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.chip.static { cursor: default; font-size: 0.82rem; padding: 0.1rem 0.6rem; }
+.profile-note { margin-top: 0.8rem !important; font-size: 0.82rem; }
+.speakers { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.8rem; }
+.speaker { padding-bottom: 0.7rem; border-bottom: 1px solid var(--rule); }
+.speaker:last-child { border-bottom: 0; padding-bottom: 0; }
+.speaker-head { margin: 0 !important; }

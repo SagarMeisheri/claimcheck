@@ -14,9 +14,16 @@ type Props = {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const ep = await getEpisodeByVideo((await params).videoId);
   if (!ep) return { title: "Video not found" };
+  // Shared links show the channel too, not only the video title.
+  const channel = ep.channel_id ? ep.channel_name : ep.creator?.podcast ?? null;
+  const title = channel ? `${ep.title} · ${channel}` : ep.title;
+  const description = [channel && `From ${channel}.`, `${ep.claims.length} statements tagged by AI, with timestamps and web sources.`]
+    .filter(Boolean).join(" ");
   return {
-    title: ep.title,
-    openGraph: { title: ep.title, images: [`https://i.ytimg.com/vi/${ep.youtube_video_id}/hqdefault.jpg`] },
+    title,
+    description,
+    openGraph: { title, description, siteName: "ClaimCheck", images: [`https://i.ytimg.com/vi/${ep.youtube_video_id}/hqdefault.jpg`] },
+    twitter: { card: "summary_large_image", title, description },
   };
 }
 
