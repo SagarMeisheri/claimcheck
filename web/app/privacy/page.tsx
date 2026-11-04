@@ -36,7 +36,8 @@ export default function Privacy() {
       <p>
         Videos are analysed with Google Gemini, and sources are searched with Parallel. Only the public video and the
         statement being searched are sent to them, never anything about you. The site is hosted on Vercel, the analysis
-        service on Google Cloud, and the database on Supabase.
+        service on Google Cloud, and the database on Supabase. The small website icons next to sources come from
+        DuckDuckGo&apos;s icon service, fetched by our server, so it never sees anything about you.
       </p>
 
       <h2>Contact</h2>

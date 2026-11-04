@@ -16,7 +16,7 @@ const PROFILE_NOTE = "Compiled with AI from public web sources. It describes who
 export function ProfileTabs({ summary, sections, creator, speakers, onSeek, onSection }: {
   summary: string | null | undefined; sections: Section[]; creator: CreatorProfile | null; speakers: EpisodeSpeaker[];
   onSeek(s: number): void;
-  onSection?(s: Section): void; // jump the statement list to this part of the conversation
+  onSection?(s: Section): void; // play this chapter and jump the statement list to it
 }) {
   const tabs: { key: Tab; label: string }[] = [
     ...(summary ? [{ key: "summary" as Tab, label: "Summary" }] : []),
@@ -63,7 +63,7 @@ export function ProfileTabs({ summary, sections, creator, speakers, onSeek, onSe
                 </button>
                 {onSection ? (
                   <button type="button" className="section-body section-go" onClick={() => onSection(s)} title={s.summary || undefined}
-                          aria-label={`Go to the statements in "${s.title}"`}>
+                          aria-label={`Play "${s.title}" from ${clock(s.start_s)} and show its statements`}>
                     {s.title}
                   </button>
                 ) : (
@@ -72,7 +72,7 @@ export function ProfileTabs({ summary, sections, creator, speakers, onSeek, onSe
               </li>
             ))}
           </ol>
-          <p className="meta chapters-note">Chapters are written by AI. Click a time to play from there, or a title to see its statements.</p>
+          <p className="meta chapters-note">Chapters are written by AI. Click one to play it and see its statements.</p>
         </div>
       )}
 
