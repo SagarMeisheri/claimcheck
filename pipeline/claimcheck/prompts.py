@@ -18,6 +18,7 @@ can see at a glance what was said and when. You describe; you never evaluate.
 
 Video: {{video_title}} ({{channel_title}})
 {{creator_context}}
+{{people_context}}
 
 Use the spoken transcript. Look at video frames only when the speaker points at something on screen
 (a chart, a document, a label) and the statement depends on it; then set refers_to_visual=true.
@@ -45,7 +46,7 @@ For every statement:
   Describe the conversation, never judge it.
 - start_ts: when it starts (MM:SS or HH:MM:SS).
 - speaker: a person's name only if the name is said or shown on screen in the video, or if they are clearly the
-  show's host and the host is named above; otherwise a role (Host, Guest 1, Panellist 2). Never guess a name.
+  show's host or one of the people listed above; otherwise a role (Host, Guest 1, Panellist 2). Never guess a name.
 - pestle_area, and topics: 1-2 short subject names (1-3 plain words) saying what the statement is about,
   most relevant first: "middle class", "maritime trade", "income tax", "US dollar". Be specific, not generic.
   Use the same wording whenever statements in this video are about the same subject. Never tag who said it.
@@ -53,9 +54,7 @@ For every statement:
   private individuals or minors, merits of live court cases, attacks or disasters in the first 48 hours, satire;
   otherwise "normal".
 
-After the statements, write sections: the parts of the conversation in order (usually 4-20; each a few minutes or
-longer), each with start_ts, a 3-8 word title naming the subject, and summary: 1-2 neutral sentences on what was
-discussed. Then write summary: 2-3 plain sentences saying what the video covers and the main subjects discussed.
+After the statements, {{sections_instruction}} Then write summary: 2-3 plain sentences saying what the video covers and the main subjects discussed.
 Neutral tone. No judgements of the speakers or of whether anything said is right.
 
 Skip ads and sponsor reads entirely (never list them as statements). Skip greetings and small talk, and only the
@@ -65,6 +64,12 @@ a long interview usually has questions, stories and advice as well as claims and
 
 {UNTRUSTED_RULE}
 """
+
+# The extractor's sections step: its own chapters, or none when the description already has them (description.py).
+SECTIONS_WRITE = ("write sections: the parts of the conversation in order (usually 4-20; each a few minutes or longer), "
+                  "each with start_ts, a 3-8 word title naming the subject, and summary: 1-2 neutral sentences on what "
+                  "was discussed.")
+SECTIONS_FROM_DESCRIPTION = "return sections as an empty list: the video's own chapters from its description are used."
 
 
 SUMMARIZE = f"""You help a reader skim excerpts from web pages found for one statement from a video.

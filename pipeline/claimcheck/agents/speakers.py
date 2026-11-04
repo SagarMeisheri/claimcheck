@@ -71,19 +71,29 @@ def _host_summary(host: str, creator: dict[str, Any]) -> str:
     return f"Host of {podcast}" + (f", with {', '.join(others[:3])}" if others else "") + "."
 
 
-def appearance(meta: dict[str, Any], topics: list[str]) -> str:
+def appearance(meta: dict[str, Any], topics: list[str], described_as: str = "") -> str:
     title, channel = meta.get("title") or "", meta.get("channel_title") or ""
     where = f"the YouTube video \"{title}\"" + (f" on the channel {channel}" if channel else "")
+    if described_as:  # what the video's description says they are, so the search finds the right person
+        where += f", where the description introduces them as \"{described_as}\""
     return where + (f", speaking about {', '.join(topics[:5])}" if topics else "")
 
 
-async def build_profile(label: str, meta: dict[str, Any], topics: list[str]) -> dict[str, Any]:
-    """One search and one model call -> a speakers row ('ready' or 'not_found'). Raises on search or model errors."""
+def described_profile(name: str, described_as: str) -> dict[str, Any]:
+    """A speakers row from the video description alone, when the web search can't identify the person."""
+    role = " ".join(described_as.split())[:160]
+    return {"name": name, "name_key": name_key(name), "status": "ready", "summary": f"{role}.",
+            "profile": {"role": role}, "sources": []}
+
+
+async def build_profile(label: str, meta: dict[str, Any], topics: list[str], described_as: str = "") -> dict[str, Any]:
+    """One search and one model call -> a speakers row ('ready' or 'not_found'). Raises on search or model errors.
+    A person the description introduces is never 'not_found': the description's role is their profile then."""
     from .llm_agents import speaker_profiler_agent
 
     ec = get_context()
     s = ec.settings
-    where = appearance(meta, topics)
+    where = appearance(meta, topics, described_as)
     ec.budget.add(s.search_cost_usd)
     found = await search_sources(
         label, dataclasses.replace(s, excerpt_chars=700, sources_per_claim=5), ec.policy,
@@ -95,7 +105,7 @@ async def build_profile(label: str, meta: dict[str, Any], topics: list[str]) -> 
     pages = [{"n": i + 1, "group": "SEARCH", "title": x.title, "site": domain_of(x.url), "text": x.excerpt}
              for i, x in enumerate(found) if x.excerpt]
     if not pages:
-        return row
+        return {**described_profile(label, described_as), "sources": row["sources"]} if described_as else row
     runner = InMemoryRunner(agent=speaker_profiler_agent(s, name=f"speaker_profiler_{uuid.uuid4().hex[:6]}"),
                             app_name=APP, plugins=ec.plugins_factory())
     session = await runner.session_service.create_session(app_name=APP, user_id="speakers", state={
@@ -107,7 +117,7 @@ async def build_profile(label: str, meta: dict[str, Any], topics: list[str]) -> 
     raw = done.state.get("profile")
     out = SpeakerProfileOut.model_validate(raw) if raw else None
     if out is None or not out.identified or not out.summary.strip():
-        return row
+        return {**described_profile(label, described_as), "sources": row["sources"]} if described_as else row
     clip = lambda t, n: " ".join((t or "").split())[:n]  # noqa: E731
     row.update(status="ready", summary=clip(out.summary, 400), profile={k: v for k, v in {
         "role": clip(out.role, 160), "background": clip(out.background, 500),
@@ -127,10 +137,18 @@ async def profile_speakers(records: list[ClaimRecord], meta: dict[str, Any]) -> 
     topics_by: dict[str, Counter] = {}
     for r in records:
         topics_by.setdefault((r.claim.speaker or "").strip(), Counter()).update(r.claim.topics or [])
+    # People the description lists (description.py): their stated role, and they are shown even if no statement was
+    # attributed to them by name (the model may have used "Guest 1" for them).
+    listed = {name_key(p["name"]): p for p in ec.listed_people}
+    labels = [(label, n) for label, n in counts.most_common()]
+    named = {name_key(label) for label, _ in labels}
+    labels += [(p["name"], 0) for k, p in listed.items() if k not in named and not match_host(p["name"], ec.creator)]
     rows: list[dict[str, Any]] = []
     to_build: list[tuple[dict[str, Any], str]] = []
-    for label, n in counts.most_common():
-        row: dict[str, Any] = {"label": label, "statements": n, "speaker_id": None, "role": role_of(label)}
+    for label, n in labels:
+        lp = listed.get(name_key(label))
+        row: dict[str, Any] = {"label": label, "statements": n, "speaker_id": None,
+                               "role": ("host" if lp["is_host"] else "guest") if lp else role_of(label)}
         rows.append(row)
         if is_role_label(label):
             # "Host" on a show with one host is that host: use their profile (context for the source searches too).
@@ -151,8 +169,14 @@ async def profile_speakers(records: list[ClaimRecord], meta: dict[str, Any]) -> 
                 row.update(speaker_id=(sp or {}).get("id"), role="host")
                 continue
             existing = await store.get_speaker(name_key(label))
-            if existing:
-                row["speaker_id"] = existing["id"] if existing.get("status") == "ready" else None
+            if existing and existing.get("status") == "ready":
+                row["speaker_id"] = existing["id"]
+            elif existing and not lp:
+                row["speaker_id"] = None
+            elif lp and (existing or not s.profile_speakers or len(to_build) >= s.max_speaker_profiles):
+                # Searched before without a match, or no search left: the description's role is enough.
+                sp = await store.save_speaker(described_profile(label, lp["role"]))
+                row["speaker_id"] = (sp or {}).get("id")
             elif s.profile_speakers and len(to_build) < s.max_speaker_profiles:
                 to_build.append((row, label))
         except Exception:
@@ -167,7 +191,8 @@ async def profile_speakers(records: list[ClaimRecord], meta: dict[str, Any]) -> 
                 return
             try:
                 topics = [t.replace("_", " ") for t, _ in topics_by.get(label, Counter()).most_common(4)]
-                sp = await store.save_speaker(await build_profile(label, meta, topics))
+                described_as = (listed.get(name_key(label)) or {}).get("role", "")
+                sp = await store.save_speaker(await build_profile(label, meta, topics, described_as))
                 if sp and sp.get("status") == "ready":
                     row["speaker_id"] = sp["id"]
             except Exception as e:

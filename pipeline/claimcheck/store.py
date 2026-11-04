@@ -207,6 +207,8 @@ class SupabaseStore:
         return r.data[0] if r.data else await self.get_speaker(row["name_key"])
 
     async def save_episode_speakers(self, episode_id, rows):
+        """Replaces the video's speakers, so a re-run drops names the earlier run got wrong."""
+        self.db.table("episode_speakers").delete().eq("episode_id", episode_id).execute()
         if rows:
             self.db.table("episode_speakers").upsert([{**r, "episode_id": episode_id} for r in rows],
                                                      on_conflict="episode_id,label").execute()
