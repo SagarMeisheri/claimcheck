@@ -7,6 +7,7 @@
   --focus: #1d5fd1;
   --band: #0f1513;
   --highlight: #e4eee9;
+  --chapter: #dbe3df;     /* chapter headings in the statement list */
   --src-bg: #eaf1f9;      /* sources summary panel: a soft blue, set apart from the claim (not green: not "true") */
   --src-rule: #cddcec;
 
@@ -21,6 +22,11 @@
   --t-story: #a04a74;
   --t-question: #b0532c;
   --t-other: #7a8581;
+
+  /* Source match on statement text: blue, amber, grey (never green / red: relevance, not truth; safe for colour blindness) */
+  --m-high: #1d4f8a;
+  --m-medium: #8a5a0f;
+  --m-low: #626c68;
 
   --font-display: "Anek Latin", "Anek Devanagari", system-ui, sans-serif;
   --font-body: "Mukta", "Noto Sans Devanagari", system-ui, sans-serif;
@@ -38,6 +44,7 @@
     --focus: #7fa8ff;
     --band: #080c0b;
     --highlight: #1f2c28;
+    --chapter: #24322d;
     --src-bg: #18232f;
     --src-rule: #2a3a4c;
     --ok: #4cb582;
@@ -49,6 +56,9 @@
     --t-story: #e08cb2;
     --t-question: #e8916a;
     --t-other: #8f9a96;
+    --m-high: #93c0f2;
+    --m-medium: #e3ac5c;
+    --m-low: #8a9592;
   }
 }
 
@@ -160,7 +170,7 @@ section + section { margin-top: 2.5rem; }
 /* The video never moves: pinned to the top of the screen on phones, to the top of its column on wide screens. */
 .player-dock { position: sticky; top: 0; z-index: 20; background: var(--paper); }
 .player-band { background: var(--band); }
-.player-frame { aspect-ratio: 16 / 9; width: 100%; max-height: 45vh; margin: 0 auto; }
+.player-frame { aspect-ratio: 16 / 9; width: 100%; max-height: 40vh; margin: 0 auto; }
 .yt-host, .yt-host iframe { width: 100%; height: 100%; display: block; border: 0; }
 .facade { position: relative; display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
 .facade .thumb { height: 100%; border-radius: 0; aspect-ratio: auto; }
@@ -200,7 +210,7 @@ section + section { margin-top: 2.5rem; }
   .score-main { display: block; padding-right: 0.4rem; margin-right: -0.4rem; }
   .score-side { margin: 0; padding-right: 0.4rem; margin-right: -0.4rem; padding-bottom: 2rem; }
   .score-main > :not(.player-dock) { margin-inline: 0; }
-  .player-frame { max-height: 55vh; }
+  .player-frame { max-height: 50vh; }
   .player-band { border-radius: 10px; overflow: hidden; }
   .track-holder { padding-inline: 0; }
 }
@@ -401,10 +411,6 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .src-head { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; flex-wrap: wrap; }
 /* Source match: relevance, not truth, so one neutral blue for every level; only the bar count changes. */
 .src-match { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.72rem; font-weight: 600; color: var(--t-factual); white-space: nowrap; cursor: help; }
-.src-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 0.7rem; }
-.src-bars i { display: block; width: 3px; border-radius: 1px; background: var(--src-rule); }
-.src-bars i:nth-child(1) { height: 40%; } .src-bars i:nth-child(2) { height: 70%; } .src-bars i:nth-child(3) { height: 100%; }
-.src-bars i.on { background: var(--t-factual); }
 .src-label { margin: 0; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
 .src-summary { margin: 0; font-size: 0.98rem; line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
 /* source chips: one per row */
@@ -444,7 +450,6 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .match-filters { margin: 0.4rem 0 0.5rem; flex-wrap: wrap; gap: 0.35rem; }
 .match-chip { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; }
 .match-chip:disabled { opacity: 0.45; cursor: default; }
-.match-chip[aria-pressed="true"] .src-bars i.on { background: currentColor; }
 
 /* ---------- Statement context, second source search ---------- */
 .cc-context { margin: 0.25rem 0 0; font-size: 0.9rem; color: var(--ink-soft); line-height: 1.4; }
@@ -534,7 +539,7 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .tl-head, .tl-item { display: grid; grid-template-columns: 3rem 0.5rem minmax(0, 1fr) auto; column-gap: 0.5rem;
   grid-template-areas: "time dot text action"; }
 .tl-head { grid-template-areas: "time . title title" ". . summary summary"; align-items: baseline;
-  padding: 0 0.35rem 0.35rem; margin-bottom: 0.15rem; border-bottom: 1px solid var(--rule); }
+  padding: 0.6rem 0.6rem 0.65rem 0.35rem; margin-bottom: 0.4rem; background: var(--chapter); border-radius: 8px; }
 .tl-head-time { grid-area: time; background: none; border: 0; padding: 0; font: inherit; font-size: 0.8rem; font-variant-numeric: tabular-nums;
   color: var(--ink-soft); cursor: pointer; text-align: left; text-decoration: underline; text-decoration-color: var(--rule); }
 .tl-title { grid-area: title; font-size: 0.98rem; margin: 0; }
@@ -640,11 +645,11 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .sections li { grid-template-columns: 3.4rem minmax(0, 1fr); gap: 0.4rem; font-size: 0.9rem; }
 .section-go { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (min-width: 1180px) {
-  .score { grid-template-columns: minmax(0, 1.35fr) minmax(24rem, 1fr); }
+  .score { grid-template-columns: minmax(0, 1.15fr) minmax(24rem, 1fr); }
 }
 @media (min-width: 1600px) {
-  .score { grid-template-columns: minmax(0, 1.4fr) minmax(26rem, 1fr); }
-  .score.has-dock { grid-template-columns: minmax(0, 1.25fr) minmax(24rem, 1fr) 24rem; }
+  .score { grid-template-columns: minmax(0, 1.2fr) minmax(26rem, 1fr); }
+  .score.has-dock { grid-template-columns: minmax(0, 1.1fr) minmax(24rem, 1fr) 24rem; }
 }
 
 /* ---------- App shell: the list of videos on the left, the page on the right ---------- */
@@ -716,3 +721,24 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .home-types li { display: inline-flex; align-items: center; gap: 0.4rem; }
 .home-types li::before { content: ""; width: 0.6rem; height: 0.6rem; border-radius: 2px; background: var(--stype); }
 .chapters-note { margin: 0.8rem 0 0; font-size: 0.85rem; }
+
+/* Sources tag: each website's own icon, then "+N". */
+.tl-tag { gap: 0.35rem; padding: 0.1rem 0.45rem; }
+.site-icons { display: inline-flex; align-items: center; gap: 0.25rem; }
+.site-icon { width: 16px; height: 16px; border-radius: 3px; display: block; flex: none; background: var(--paper-raised); object-fit: contain; }
+.site-icon-letter { display: inline-grid; place-items: center; font-size: 0.62rem; font-weight: 700; background: var(--src-rule); color: var(--ink); }
+.site-more { font-size: 0.74rem; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+.tl-tag-none { font-weight: 400; color: var(--ink-soft); }
+
+/* Statement text coloured by how closely its sources match: blue (direct), amber (partial), grey (loose).
+   The Direct / Partial / Loose filter chips use the same colours, as the legend. */
+.tl-text.m-high { color: var(--m-high); }
+.tl-text.m-medium { color: var(--m-medium); }
+.tl-text.m-low { color: var(--m-low); }
+.match-chip.is-high { --m: var(--m-high); }
+.match-chip.is-medium { --m: var(--m-medium); }
+.match-chip.is-low { --m: var(--m-low); }
+.match-chip { color: var(--m); border-color: color-mix(in srgb, var(--m) 45%, transparent); }
+.match-chip::before { content: ""; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--m); }
+.match-chip[aria-pressed="true"] { background: var(--m); border-color: var(--m); color: var(--paper); }
+.match-chip[aria-pressed="true"]::before { background: var(--paper); }

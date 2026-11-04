@@ -1,32 +1,49 @@
 "use client";
 
-import type { PreviewClaim, SourcesMatch } from "@/lib/types";
-import { MATCH_NOTE } from "@/components/SourceList";
+import { useState } from "react";
+import type { PreviewClaim } from "@/lib/types";
+import { MATCH_MEANING, MATCH_WORD } from "@/components/SourceList";
+import { domain } from "@/lib/format";
 
-const BARS: Record<SourcesMatch, number> = { high: 3, medium: 2, low: 1 };
+const MAX_ICONS = 3;
 
-/** "5 + 3 figures", "5 + 2 views", "5": the related links, and what the second search found. */
-export function sourcesTagText(c: Pick<PreviewClaim, "sources" | "counter_sources" | "sources_route">): string {
-  if (!c.sources.length && !c.counter_sources.length) return "none found";
-  const n = c.counter_sources.length;
-  if (c.sources_route === "data") return `${c.sources.length} + ${n} ${n === 1 ? "figure" : "figures"}`;
-  if (c.sources_route === "contested") return `${c.sources.length} + ${n} ${n === 1 ? "view" : "views"}`;
-  return `${c.sources.length}`;
+/** A website's own icon (through /api/icon), or its first letter when it has none. */
+export function SiteIcon({ site }: { site: string }) {
+  const [failed, setFailed] = useState(false);
+  return failed ? (
+    <span className="site-icon site-icon-letter" title={site}>{site.slice(0, 1).toUpperCase()}</span>
+  ) : (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img className="site-icon" src={`/api/icon/${encodeURIComponent(site)}`} alt="" title={site} width={16} height={16}
+         loading="lazy" onError={() => setFailed(true)}
+         // The error can fire before the page is interactive, and then onError never runs: check once mounted too.
+         ref={(img) => { if (img?.complete && img.naturalWidth === 0) setFailed(true); }} />
+  );
 }
 
-/** A small tag for a statement whose sources are in: match bars and counts. Opens the sources drawer. */
+/**
+ * The sources of a statement whose lookup is done: the icons of the first few websites (search order), then "+N" for
+ * the rest. (The match shows as the colour of the statement text.) Opens the sources panel.
+ */
 export function SourcesTag({ c, onOpen, label = false }: {
   c: Pick<PreviewClaim, "sources" | "counter_sources" | "sources_route" | "sources_match">; onOpen(): void; label?: boolean;
 }) {
+  const all = [...c.sources, ...c.counter_sources];
+  const sites = [...new Set(all.map((s) => domain(s.url)))].slice(0, MAX_ICONS);
+  const shown = all.filter((s, i) => sites.includes(domain(s.url)) && all.findIndex((x) => domain(x.url) === domain(s.url)) === i).length;
+  const more = all.length - shown;
+  const match = c.sources_match;
+  const what = `${all.length} ${all.length === 1 ? "source" : "sources"}${match ? `, ${MATCH_WORD[match].toLowerCase()} match` : ""}`;
   return (
-    <button type="button" className="tl-tag" onClick={onOpen} title={MATCH_NOTE}
-            aria-label={`Sources: ${c.sources_match ?? "no"} match, ${sourcesTagText(c)}. Open`}>
+    <button type="button" className={`tl-tag${match ? ` is-${match}` : ""}`} onClick={onOpen}
+            title={match ? `${what}. ${MATCH_MEANING[match]}` : what} aria-label={`Sources: ${all.length ? what : "none found"}. Open`}>
       {label && <span className="tl-tag-label">Sources</span>}
-      {c.sources_match && (
-        <span className="src-bars" aria-hidden="true">{[1, 2, 3].map((i) => <i key={i} className={i <= BARS[c.sources_match!] ? "on" : ""} />)}</span>
+      {all.length === 0 ? <span className="tl-tag-none">No sources found</span> : (
+        <span className="site-icons" aria-hidden="true">
+          {sites.map((s) => <SiteIcon key={s} site={s} />)}
+          {more > 0 && <span className="site-more">+{more}</span>}
+        </span>
       )}
-      <span>{sourcesTagText(c)}</span>
-      <span aria-hidden="true">›</span>
     </button>
   );
 }

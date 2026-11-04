@@ -280,11 +280,12 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const nav = <PaneNav hasPrev={selAt > 0} hasNext={selAt >= 0 && selAt < playable.length - 1} onPrev={() => selectAt(selAt - 1)} onNext={() => selectAt(selAt + 1)} />;
   const groups = groupBySection(playable, ep.sections ?? []);
   // A chapter clicked in the Chapters tab: show every statement (a filter may hide that part), then
-  // scroll the list to its heading and select its first statement.
+  // play the video from its start, scroll the list to its heading and select its first statement.
   const goToSection = (sec: Section) => {
     const first = visible.find((c) => (c.section_idx ?? -1) === sec.idx) ?? visible.find((c) => c.start_s >= sec.start_s);
     if (!groups.some((g) => g.section?.idx === sec.idx)) { setView("all"); setMatch(null); }
     if (first && wide) setSelectedId(first.id);
+    playFrom(sec.start_s);
     window.setTimeout(() => scrollToEl(`sec-${sec.idx}`), 60);
   };
 
@@ -308,7 +309,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
                                onPlayingChange={setPlaying} onError={setPlayerError} />
               ) : (
                 <button className="facade" onClick={() => { setStartPlaying(true); setPlayerOn(true); }} aria-label={`Play video from ${clock(cue)}`}>
-                  <Thumb videoId={ep.youtube_video_id} title={ep.title} eager duration={ep.duration_s ? clock(ep.duration_s) : undefined} />
+                  <Thumb videoId={ep.youtube_video_id} title={ep.title} eager hd duration={ep.duration_s ? clock(ep.duration_s) : undefined} />
                   <span className="facade-play" aria-hidden="true">▶</span>
                   {cue > 0 && <span className="facade-cue">Starts at {clock(cue)}</span>}
                 </button>

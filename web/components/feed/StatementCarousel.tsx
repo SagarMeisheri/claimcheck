@@ -7,6 +7,7 @@ import { SourcesTag } from "@/components/SourcesTag";
 import { STATEMENT_TYPES, TYPE_ORDER, hasSources, totalStatements, typeOf } from "@/lib/statements";
 import { clock } from "@/lib/format";
 import { MatchFilter, matchCounts } from "@/components/MatchFilter";
+import { MATCH_MEANING, MATCH_WORD } from "@/components/SourceList";
 import { SourcesDrawer } from "./SourcesDrawer";
 
 type Counts = Partial<Record<StatementType, number>>;
@@ -25,13 +26,15 @@ export function TimelineItem({ c, active, selected = false, onPlay, onSelect, on
   const sourceable = c.sources_status !== "not_eligible" && hasSources(c.statement_type); // not questions or stories
   const done = c.sources_status === "done";
   const isQuestion = typeOf(c.statement_type) === "question";
+  const match = sourceable && done ? c.sources_match : null; // colours the text: direct / partial / loose
   return (
     <li id={`card-${c.id}`} className={`tl-item${active ? " is-active" : ""}${selected ? " is-selected" : ""}${busy ? " is-verifying" : ""}`}
         style={{ ["--stype" as string]: t.cssVar }} aria-current={selected ? "true" : undefined}>
       <button type="button" className="tl-time" onClick={() => onPlay(c)} aria-label={`Play from ${clock(c.start_s)}`}>{clock(c.start_s)}</button>
       <span className="bd-dot tl-dot" style={{ background: t.cssVar }} title={t.label} aria-hidden="true" />
-      <button type="button" className={`tl-text${isQuestion ? " is-question" : ""}`} onClick={() => (onSelect ?? onPlay)(c)}
-              aria-label={`${t.label} at ${clock(c.start_s)}: ${c.claim_text}. ${onSelect ? "Show details" : "Play from here"}`}>
+      <button type="button" className={`tl-text${isQuestion ? " is-question" : ""}${match ? ` m-${match}` : ""}`} onClick={() => (onSelect ?? onPlay)(c)}
+              title={match ? `${MATCH_WORD[match]} match: ${MATCH_MEANING[match]}` : undefined}
+              aria-label={`${t.label} at ${clock(c.start_s)}: ${c.claim_text}.${match ? ` ${MATCH_WORD[match]} source match.` : ""} ${onSelect ? "Show details" : "Play from here"}`}>
         {c.claim_text}
       </button>
       <div className="tl-action">

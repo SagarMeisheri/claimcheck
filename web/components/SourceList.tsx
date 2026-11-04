@@ -10,18 +10,21 @@ export const SOURCES_NOTE =
  * compact (home page): the summary and numbered site links. Full (video page): the summary and every source with
  * its excerpt. No verdict and no colours for right or wrong.
  */
-const MATCH_LABEL: Record<SourcesMatch, string> = { high: "High", medium: "Medium", low: "Low" };
-const MATCH_BARS: Record<SourcesMatch, number> = { high: 3, medium: 2, low: 1 };
+/** How closely the sources match a statement, in words (no bars, no colours for right or wrong). */
+export const MATCH_WORD: Record<SourcesMatch, string> = { high: "Direct", medium: "Partial", low: "Loose" };
+export const MATCH_MEANING: Record<SourcesMatch, string> = {
+  high: "The sources address this exact point.",
+  medium: "The sources cover the topic, not this exact point.",
+  low: "The sources are only loosely related.",
+};
 export const MATCH_NOTE =
-  "Source match: how directly the excerpts address this claim's specific point, rated by AI. It is not whether they agree: a source giving a different figure for the same thing is a high match.";
+  "Source match: how directly the excerpts address this claim's specific point, rated by AI. It is not whether they agree: a source giving a different figure for the same thing is a direct match.";
 
-/** "Match: High" with a small three-bar meter. Neutral colour: relevance, not right or wrong. */
+/** "Direct match", "Partial match", "Loose match". */
 export function MatchBadge({ match }: { match: SourcesMatch }) {
-  const bars = MATCH_BARS[match];
   return (
-    <span className={`src-match is-${match}`} title={MATCH_NOTE} aria-label={`Source match: ${MATCH_LABEL[match]}`}>
-      <span className="src-bars" aria-hidden="true">{[1, 2, 3].map((i) => <i key={i} className={i <= bars ? "on" : ""} />)}</span>
-      {MATCH_LABEL[match]} match
+    <span className={`src-match is-${match}`} title={`${MATCH_MEANING[match]} ${MATCH_NOTE}`}>
+      {MATCH_WORD[match]} match
     </span>
   );
 }
