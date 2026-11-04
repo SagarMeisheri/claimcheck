@@ -70,7 +70,7 @@ export async function submitVideo(_prev: ActionResult | null, form: FormData): P
   if (ep.error) return { ok: false, message: "Couldn't queue the video. Try again in a minute." };
 
   const res = await pipeline("/episodes", { url: `https://www.youtube.com/watch?v=${videoId}`, episode_id: ep.data.id, submitted_by: who });
-  revalidatePath("/");
+  revalidatePath("/", "layout"); // the sidebar on every page lists the new video
   if (!res || !res.ok) {
     return { ok: false, message: "The analysis service didn't respond. Try again in a few minutes." };
   }
@@ -172,7 +172,8 @@ export async function requestSources(claimId: string): Promise<SourcesResult> {
   return { ok: true, status: "searching", message: "Searching the web. This usually takes a few seconds." };
 }
 
-/** "Check sources for all statements": one press runs a web search for each statement of a video (up to 75 per press; press again for more). */
+/** "Check sources for all statements": one press runs a web search for each statement of a video (up to 75). Only for videos
+ *  whose sources have never been checked. */
 export async function requestAllSources(videoId: string): Promise<{ ok: boolean; message: string }> {
   if (!/^[\w-]{6,20}$/.test(videoId)) return { ok: false, message: "Unknown video." };
   const db = serviceDb();
@@ -180,6 +181,10 @@ export async function requestAllSources(videoId: string): Promise<{ ok: boolean;
   if (!ep) return { ok: false, message: "Unknown video." };
   if (!["done", "in_review"].includes(ep.status)) return { ok: false, message: "This video is still being analysed. Try again when it's finished." };
   if (ep.sources_batch_status === "running") return { ok: true, message: "Already checking sources for this video." };
+
+  // Once any statement of the video has sources ("last checked"), the video isn't checked again as a whole.
+  const { data: checked } = await db.from("claims").select("id").eq("episode_id", ep.id).not("sources_checked_at", "is", null).limit(1);
+  if (checked?.length) return { ok: false, message: "Sources have already been checked for this video." };
 
   const { data: eligible } = await db.from("claims").select("id").eq("episode_id", ep.id).not("statement_type", "in", "(question,story)")
     .in("sources_status", ["not_requested", "failed"]).limit(1);
@@ -202,7 +207,6 @@ export async function requestAllSources(videoId: string): Promise<{ ok: boolean;
     if (reqRow) await db.from("source_requests").update({ outcome: "failed" }).eq("id", reqRow.id);
     return { ok: false, message: detail || "The service didn't respond. Try again in a few minutes." };
   }
-  revalidatePath("/");
   revalidatePath(`/v/${videoId}`);
   return { ok: true, message: "Searching sources for the claims. Each result appears as soon as it is ready." };
 }
@@ -224,8 +228,7 @@ export async function cancelEpisode(form: FormData): Promise<void> {
     await serviceDb().from("episodes").update({ status: "skipped", skip_reason: "Cancelled." })
       .eq("id", id).in("status", ["queued", "processing"]);
   }
-  revalidatePath("/review");
-  revalidatePath("/");
+  revalidatePath("/", "layout"); // the sidebar and /review
 }
 
 /** Removes a video, its statements and their sources (cascade). Old verdict rows stay hidden in the database. */
@@ -234,8 +237,7 @@ export async function deleteEpisode(form: FormData): Promise<void> {
   const id = String(form.get("episode_id"));
   await pipeline(`/episodes/${encodeURIComponent(id)}/cancel`);
   await serviceDb().from("episodes").delete().eq("id", id);
-  revalidatePath("/review");
-  revalidatePath("/");
+  revalidatePath("/", "layout"); // the sidebar and /review
 }
 
 /** Closes a report: "accepted" once the problem is fixed (or the statement removed), "rejected" if nothing was wrong. */
@@ -262,5 +264,4 @@ export async function hideStatement(form: FormData): Promise<void> {
   const videoId = (data as any)?.episodes?.youtube_video_id;
   if (videoId) revalidatePath(`/v/${videoId}`);
   revalidatePath("/review");
-  revalidatePath("/");
 }

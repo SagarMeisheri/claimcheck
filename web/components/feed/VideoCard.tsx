@@ -110,7 +110,7 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
       )}
       {!checking && (
         <CheckAllSources videoId={ep.youtube_video_id} running={ep.sources_batch === "running"} compact
-                         eligible={(ep.preview_claims ?? []).some((c) => canCheckSources({ ...c, not_checked_reason: null }))} />
+                         eligible={!ep.sources_checked_at && (ep.preview_claims ?? []).some((c) => canCheckSources({ ...c, not_checked_reason: null }))} />
       )}
       {(!checking || (ep.preview_claims?.length ?? 0) > 0) && (
         <StatementCarousel videoId={ep.youtube_video_id} statements={ep.preview_claims ?? []} sections={ep.sections ?? []} withSources={ep.with_sources ?? 0}
