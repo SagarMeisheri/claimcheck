@@ -4,12 +4,12 @@ import { useState } from "react";
 import type { CreatorProfile, EpisodeSpeaker, Section } from "@/lib/types";
 import { clock, domain } from "@/lib/format";
 
-type Tab = "video" | "creator" | "speakers";
+type Tab = "summary" | "chapters" | "creator" | "speakers";
 
 const PROFILE_NOTE = "Compiled with AI from public web sources. It describes who they are, not whether anything said is right.";
 
 /**
- * Tabs under the video: the AI summary and the parts of the conversation, the show's profile, and who speaks.
+ * Tabs under the video: the AI summary, the chapters (parts of the conversation), the show's profile, and who speaks.
  * Profiles show neutral facts only; the notes on known positions and criticisms that steer source searches are
  * never sent to the browser.
  */
@@ -19,13 +19,16 @@ export function ProfileTabs({ summary, sections, creator, speakers, onSeek, onSe
   onSection?(s: Section): void; // jump the statement list to this part of the conversation
 }) {
   const tabs: { key: Tab; label: string }[] = [
-    { key: "video", label: "Video" },
+    ...(summary ? [{ key: "summary" as Tab, label: "Summary" }] : []),
+    ...(sections.length ? [{ key: "chapters" as Tab, label: `Chapters ${sections.length}` }] : []),
     ...(creator ? [{ key: "creator" as Tab, label: "Creator" }] : []),
     ...(speakers.length ? [{ key: "speakers" as Tab, label: `People ${speakers.length}` }] : []),
   ];
-  const [tab, setTab] = useState<Tab>("video");
+  const [picked, setTab] = useState<Tab | null>(null);
   const [more, setMore] = useState(false);
-  if (!summary && !sections.length && tabs.length === 1) return null;
+  if (!tabs.length) return null;
+  // The first tab until one is picked (the summary or chapters can arrive later, while the video is analysed).
+  const tab = picked && tabs.some((t) => t.key === picked) ? picked : tabs[0].key;
 
   return (
     <section className="ptabs" aria-label="About this video">
@@ -38,39 +41,38 @@ export function ProfileTabs({ summary, sections, creator, speakers, onSeek, onSe
         </div>
       )}
 
-      {tab === "video" && (
-        <div role="tabpanel" id="ppanel-video" aria-labelledby="ptab-video" className="ppanel">
-          {summary && (
-            <div className="ai-summary">
-              <p className="ai-note">AI summary</p>
-              <p className={more ? "" : "clamp-3"}>{summary}</p>
-              {summary.length > 220 && (
-                <button type="button" className="linkish" onClick={() => setMore(!more)}>{more ? "Show less" : "Show more"}</button>
-              )}
-            </div>
-          )}
-          {sections.length > 0 && (
-            <>
-              <p className="ai-note">Parts of the conversation (AI)</p>
-              <ol className="sections">
-                {sections.map((s) => (
-                  <li key={s.idx}>
-                    <button type="button" className="linkish cc-ts" onClick={() => onSeek(s.start_s)} aria-label={`Play from ${clock(s.start_s)}`}>
-                      {clock(s.start_s)}
-                    </button>
-                    {onSection ? (
-                      <button type="button" className="section-body section-go" onClick={() => onSection(s)} title={s.summary || undefined}
-                              aria-label={`Go to the statements in "${s.title}"`}>
-                        {s.title}
-                      </button>
-                    ) : (
-                      <span className="section-body"><strong>{s.title}</strong>{s.summary && <span className="meta"> {s.summary}</span>}</span>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            </>
-          )}
+      {tab === "summary" && summary && (
+        <div role="tabpanel" id="ppanel-summary" aria-labelledby="ptab-summary" className="ppanel">
+          <div className="ai-summary">
+            <p className="ai-note">AI summary</p>
+            <p className={more ? "" : "clamp-3"}>{summary}</p>
+            {summary.length > 220 && (
+              <button type="button" className="linkish" onClick={() => setMore(!more)}>{more ? "Show less" : "Show more"}</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "chapters" && (
+        <div role="tabpanel" id="ppanel-chapters" aria-labelledby="ptab-chapters" className="ppanel">
+          <ol className="sections">
+            {sections.map((s) => (
+              <li key={s.idx}>
+                <button type="button" className="linkish cc-ts" onClick={() => onSeek(s.start_s)} aria-label={`Play from ${clock(s.start_s)}`}>
+                  {clock(s.start_s)}
+                </button>
+                {onSection ? (
+                  <button type="button" className="section-body section-go" onClick={() => onSection(s)} title={s.summary || undefined}
+                          aria-label={`Go to the statements in "${s.title}"`}>
+                    {s.title}
+                  </button>
+                ) : (
+                  <span className="section-body"><strong>{s.title}</strong>{s.summary && <span className="meta"> {s.summary}</span>}</span>
+                )}
+              </li>
+            ))}
+          </ol>
+          <p className="meta chapters-note">Chapters are written by AI. Click a time to play from there, or a title to see its statements.</p>
         </div>
       )}
 
