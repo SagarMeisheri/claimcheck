@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Sidebar } from "@/components/shell/Sidebar";
+import { getSidebarVideos } from "@/lib/data";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,7 +10,10 @@ export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+// The sidebar lists every video, so every page re-renders at least this often (seconds).
+export const revalidate = 10;
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <head>
@@ -21,25 +26,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        <header className="site-head">
-          <div className="bar">
-            <Link href="/" className="brand">ClaimCheck</Link>
-            <nav className="site-nav" aria-label="Main">
-              <Link href="/">Latest</Link>
-              <Link href="/submit">Analyse a video</Link>
-              <Link href="/method">How it works</Link>
-              <Link href="/privacy">Privacy</Link>
-            </nav>
+        <div className="app">
+          <Sidebar videos={await getSidebarVideos()} />
+          <div className="app-body">
+            <main>{children}</main>
+            <footer>
+              AI-generated breakdowns of YouTube videos. Not a fact-check: nothing is judged true or false, and sources are
+              shown for context. Quotes, speakers and tags can be wrong; use “Report a problem” on any statement.{" "}
+              <Link href="/method">How it works</Link> · <Link href="/privacy">Privacy</Link>.
+            </footer>
           </div>
-        </header>
-        <main>{children}</main>
-        <footer>
-          <div>
-            AI-generated breakdowns of YouTube videos. Not a fact-check: nothing is judged true or false, and sources are
-            shown for context. Quotes, speakers and tags can be wrong; use “Report a problem” on any statement.{" "}
-            <Link href="/method">How it works</Link> · <Link href="/privacy">Privacy</Link>.
-          </div>
-        </footer>
+        </div>
       </body>
     </html>
   );

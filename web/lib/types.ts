@@ -128,6 +128,9 @@ export interface EpisodeSpeaker {
   } | null;
 }
 
+/** One row of the sidebar's video list. */
+export interface SidebarVideo { id: string; videoId: string; title: string; channel: string; status: string; statements: number }
+
 export interface ChannelPage {
   id: string;
   name: string;

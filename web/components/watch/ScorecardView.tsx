@@ -26,7 +26,16 @@ const CLIP_S = 20;
 const LEAD_S = 3;
 const CUE_LEAD_S = 5;
 const AUTO_NEXT_S = 4;
-const DOCK_QUERY = "(min-width: 1360px)"; // wide screens: the selected statement's detail is docked beside the list
+const DOCK_QUERY = "(min-width: 1600px)"; // wide screens (sidebar + three panes): the selected statement's detail is docked beside the list
+
+/** The nearest ancestor that scrolls on its own, or null when the page itself scrolls. */
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight) return p;
+  }
+  return null;
+}
 
 /** True while a media query matches (false on the server and the first render). */
 function useMedia(query: string): boolean {
@@ -92,22 +101,27 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const activeId = clip?.id ?? (following && playing ? current?.id ?? null : null);
 
   const flash = (msg: string) => { setToast(msg); window.setTimeout(() => setToast(null), 2500); };
-  // Scroll a card to just below whatever is pinned at the top (the player and track on phones).
+  // Scroll a card into view, below whatever is pinned at the top (the player and track on phones).
   // Runs after layout settles, because switching the player on changes the page height above the cards.
   const scrollToCard = (id: string) => scrollToEl(`card-${id}`);
   const scrollToEl = (elId: string) => {
     const go = () => {
       const el = document.getElementById(elId);
       if (!el) return;
-      let pinned = 0;
-      for (const sel of [".player-band.is-on", ".track-holder.is-on"]) {
-        const n = document.querySelector(sel);
-        const cs = n ? getComputedStyle(n) : null;
-        if (n && cs && cs.position === "sticky") pinned = Math.max(pinned, (parseFloat(cs.top) || 0) + (n as HTMLElement).offsetHeight);
+      const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+      // Wide screens: each column scrolls on its own.
+      const box = scrollParent(el);
+      if (box) {
+        const top = box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - 12;
+        box.scrollTo({ top: Math.max(0, top), behavior });
+        return;
       }
-      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      // Phones: the page scrolls, under the pinned player.
+      const dock = document.querySelector(".player-dock") as HTMLElement | null;
+      const cs = dock ? getComputedStyle(dock) : null;
+      const pinned = dock && cs?.position === "sticky" ? (parseFloat(cs.top) || 0) + dock.offsetHeight : 0;
       const top = window.scrollY + el.getBoundingClientRect().top - pinned - 12;
-      window.scrollTo({ top: Math.max(0, top), behavior: reduce ? "auto" : "smooth" });
+      window.scrollTo({ top: Math.max(0, top), behavior });
     };
     requestAnimationFrame(() => requestAnimationFrame(go));
   };
@@ -275,46 +289,43 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   };
 
   const chipTypes = TYPE_ORDER.filter((t) => t === "factual_claim" || typeCounts[t]);
-  const lookupEligible = ep.claims.some((c) => canCheckSources(c));
+  // Sources already checked for this video ("last checked" shown): no button to check them all again.
+  const lookupEligible = !ep.sources_checked_at && ep.claims.some((c) => canCheckSources(c));
 
   return (
     <div className={`score${docked ? " has-dock" : ""}`}>
       <div className="score-main">
-        <nav className="score-back" aria-label="Back">
-          <Link href="/" onClick={(e) => {
-            // Came from the feed: go back in history so the feed keeps its scroll position.
-            if (document.referrer.startsWith(window.location.origin) && window.history.length > 1) { e.preventDefault(); router.back(); }
-          }}>← All videos</Link>
-        </nav>
-        <div className={`player-band${playerOn ? " is-on" : ""}`}>
-          <div className="player-frame">
-            {playerError !== null ? (
-              <div className="player-error">
-                <p>This video isn&apos;t available on YouTube any more.</p>
-              </div>
-            ) : playerOn ? (
-              <YouTubePlayer ref={player} videoId={ep.youtube_video_id} start={cue} autoplay={startPlaying}
-                             onPlayingChange={setPlaying} onError={setPlayerError} />
-            ) : (
-              <button className="facade" onClick={() => { setStartPlaying(true); setPlayerOn(true); }} aria-label={`Play video from ${clock(cue)}`}>
-                <Thumb videoId={ep.youtube_video_id} title={ep.title} eager duration={ep.duration_s ? clock(ep.duration_s) : undefined} />
-                <span className="facade-play" aria-hidden="true">▶</span>
-                {cue > 0 && <span className="facade-cue">Starts at {clock(cue)}</span>}
-              </button>
-            )}
+        {/* The player and the statement track stay pinned while everything else scrolls. */}
+        <div className="player-dock">
+          <div className={`player-band${playerOn ? " is-on" : ""}`}>
+            <div className="player-frame">
+              {playerError !== null ? (
+                <div className="player-error">
+                  <p>This video isn&apos;t available on YouTube any more.</p>
+                </div>
+              ) : playerOn ? (
+                <YouTubePlayer ref={player} videoId={ep.youtube_video_id} start={cue} autoplay={startPlaying}
+                               onPlayingChange={setPlaying} onError={setPlayerError} />
+              ) : (
+                <button className="facade" onClick={() => { setStartPlaying(true); setPlayerOn(true); }} aria-label={`Play video from ${clock(cue)}`}>
+                  <Thumb videoId={ep.youtube_video_id} title={ep.title} eager duration={ep.duration_s ? clock(ep.duration_s) : undefined} />
+                  <span className="facade-play" aria-hidden="true">▶</span>
+                  {cue > 0 && <span className="facade-cue">Starts at {clock(cue)}</span>}
+                </button>
+              )}
+            </div>
           </div>
+          {ep.claims.length > 0 && (
+            <div className={`track-holder${playerOn ? " is-on" : ""}`}>
+              <ClaimTrack claims={ep.claims} duration={ep.duration_s} time={time} currentId={activeId}
+                          onSeekClaim={(c) => { if (!viewList.includes(c)) setView("all"); window.setTimeout(() => scrollToCard(c.id), 60); playFrom(c.start_s); }} />
+            </div>
+          )}
         </div>
         {playerOn && (
           <p className="vcard-under">
             <a className="vcard-yt" href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}`} target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a>
           </p>
-        )}
-
-        {ep.claims.length > 0 && (
-          <div className={`track-holder${playerOn ? " is-on" : ""}`}>
-            <ClaimTrack claims={ep.claims} duration={ep.duration_s} time={time} currentId={activeId}
-                        onSeekClaim={(c) => { if (!viewList.includes(c)) setView("all"); window.setTimeout(() => scrollToCard(c.id), 60); playFrom(c.start_s); }} />
-          </div>
         )}
 
         <header className="score-head">

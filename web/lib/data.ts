@@ -1,6 +1,6 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { ChannelPage, Claim, CreatorProfile, Episode, EpisodeDetail, EpisodeSpeaker, OpenReport, Pestle, PreviewClaim, Progress, Section, Source,
+import type { ChannelPage, Claim, CreatorProfile, Episode, EpisodeDetail, EpisodeSpeaker, OpenReport, Pestle, PreviewClaim, Progress, Section, SidebarVideo, Source,
   SourcesMatch, SourcesStatus } from "./types";
 import { mergeCounts, typeOf } from "./statements";
 
@@ -138,6 +138,23 @@ export async function getFeed(limit = 40): Promise<Episode[]> {
     ...deriveFeedFields(e, byEp.get(e.id) ?? []),
     creator: e.creator_id ? creatorById.get(e.creator_id) ?? null : null, speakers: speakersByEp.get(e.id) ?? [],
   }));
+}
+
+/** Every public video, newest first, with only what the sidebar shows (no statements). Empty if the database is unreachable. */
+export async function getSidebarVideos(limit = 200): Promise<SidebarVideo[]> {
+  try {
+    const { data, error } = await publicDb().from("episodes")
+      .select("id, youtube_video_id, title, status, statement_counts, channels(name)")
+      .in("status", PUBLIC_STATUSES).order("created_at", { ascending: false }).limit(limit);
+    if (error) throw error;
+    return (data ?? []).map((r: any) => ({
+      id: r.id, videoId: r.youtube_video_id, title: r.title ?? "Untitled video", channel: r.channels?.name ?? "Submitted video",
+      status: r.status, statements: Object.values((r.statement_counts ?? {}) as Record<string, number>).reduce((a, b) => a + (b || 0), 0),
+    }));
+  } catch (e) {
+    console.error("sidebar videos", e);
+    return [];
+  }
 }
 
 export async function getEpisodeByVideo(videoId: string): Promise<EpisodeDetail | null> {
