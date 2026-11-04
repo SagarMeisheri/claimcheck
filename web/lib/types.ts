@@ -103,7 +103,7 @@ export interface EpisodeDetail extends Episode {
 export interface Section { idx: number; start_s: number; end_s: number; title: string; summary: string }
 
 export type StepStatus = "pending" | "running" | "done" | "skipped";
-export interface Step { key: string; label: string; status: StepStatus; detail?: string | null }
+export interface Step { key: string; label: string; status: StepStatus; detail?: string | null; parallel?: boolean } // parallel: runs alongside the main step
 export interface Progress { label?: string; pct?: number; steps?: Step[] }
 
 /** The neutral parts of a creator profile (the database never sends the bias and criticism notes). */

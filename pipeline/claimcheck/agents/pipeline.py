@@ -7,7 +7,9 @@ EpisodePipeline (SequentialAgent)
   ExtractorAgent   LLM    agentic video -> tagged statements (with what was being discussed), sections, summary
   ClaimFilter      code   cap, content policy in code, which statements can have sources looked up, sections cleaned
   SpeakerProfiler  code   a profile for every named speaker, from the creator profile, the `speakers` table or a
-                          web search (agents/speakers.py)
+                          web search (agents/speakers.py). The people the description lists are profiled in the
+                          background from the IngestGate on, alongside the extractor; this step then only adds
+                          the speakers named in the statements.
   Publisher        code   saves statements, sections and the result (sources are looked up later: sources.py)
 
 The viewer sees the steps as a checklist (EpisodeContext.steps, saved in episodes.progress).
@@ -69,9 +71,16 @@ _STAGE_INDEX = {name: i for i, (name, _, _) in enumerate(STAGE_PROGRESS)}
 CREATOR_STEP = ("creator", "Matching the channel to a creator profile")
 
 
+# Checklist order: speaker profiles come right after the video details, since they can run alongside the reading
+# (for the people the description lists). They are a parallel step: starting a later step doesn't tick them off.
+CHECKLIST = ["ingest_gate", "speaker_profiler", "extractor", "claim_filter", "publisher"]
+
+
 def initial_steps() -> list[dict[str, Any]]:
+    labels = {name: label for name, label, _ in STAGE_PROGRESS}
     return [{"key": CREATOR_STEP[0], "label": CREATOR_STEP[1], "status": "pending"}] + [
-        {"key": name, "label": label, "status": "pending"} for name, label, _ in STAGE_PROGRESS]
+        {"key": name, "label": labels[name], "status": "pending", **({"parallel": True} if name == "speaker_profiler" else {})}
+        for name in CHECKLIST]
 
 
 def _step_detail(ev: Any) -> Optional[str]:
@@ -191,6 +200,9 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
         await store.save_guardrail_events(episode_id, ec.events)
         return {"episode_id": episode_id, "status": "failed", "reason": f"{type(e).__name__}: {e}"}
     finally:
+        task = ec.listed_profiles  # the background speaker profiles, if the run ended before they were used
+        if task is not None and not task.done():
+            task.cancel()
         try:
             token.var.reset(token)
         except ValueError:

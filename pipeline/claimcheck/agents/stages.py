@@ -127,6 +127,9 @@ class IngestGate(BaseAgent):
             if hits:
                 ec.log("ingest", "prompt_injection_in_metadata", "flagged", hits[0])
             delta["gate"] = {"skip": False}
+            # The people the description lists need no statements: profile them while the video is read.
+            from .speakers import start_listed_profiles
+            start_listed_profiles(meta)
             delta["video_title"] = wrap_untrusted("TITLE", meta.get("title", ""))
             delta["channel_title"] = wrap_untrusted("CHANNEL", meta.get("channel_title", ""))
 

@@ -59,6 +59,10 @@ class EpisodeContext:
     duration_s: int = 0  # video length, used to turn a statement's timestamp into progress
     creator: Optional[dict[str, Any]] = None  # the matched `creators` row, if the channel is a known show
     listed_people: list[dict[str, str]] = field(default_factory=list)  # guests / hosts named in the video description
+    # Profiles for the listed people, built while the video is read (agents/speakers.py: profile_listed).
+    listed_profiles: Any = None  # asyncio.Task[dict[name_key, speaker id or None]]
+    progress_label: str = ""  # the last label and % written, so a step can be ticked without changing them
+    progress_pct: int = 0
     # The steps shown to the viewer while the video is analysed: [{"key", "label", "status", "detail"}].
     steps: list[dict[str, Any]] = field(default_factory=list)
 
@@ -70,14 +74,17 @@ STEP_STATUSES = ("pending", "running", "done", "skipped")
 
 
 def set_step(ec: "EpisodeContext", key: str, status: str, detail: Optional[str] = None) -> None:
-    """Marks one step. Starting a step marks every earlier step that is still pending or running as done."""
+    """Marks one step. Starting a step marks every earlier step that is still pending or running as done, except
+    steps that run alongside others (parallel), which finish on their own."""
     keys = [s["key"] for s in ec.steps]
     if key not in keys:
         return
     i = keys.index(key)
+    if status == "running" and ec.steps[i].get("parallel") and ec.steps[i]["status"] == "done":
+        return  # finished in the background already
     if status == "running":
         for s in ec.steps[:i]:
-            if s["status"] in ("pending", "running"):
+            if s["status"] in ("pending", "running") and not s.get("parallel"):
                 s["status"] = "done"
     ec.steps[i]["status"] = status
     if detail is not None:
@@ -87,12 +94,18 @@ def set_step(ec: "EpisodeContext", key: str, status: str, detail: Optional[str] 
 async def report_progress(ec: "EpisodeContext", label: str, pct: int) -> None:
     """Writes the current step, the % done and the step list to the episode row, for the progress view. Never raises."""
     try:
-        progress: dict[str, Any] = {"label": label, "pct": max(0, min(100, int(pct)))}
+        ec.progress_label, ec.progress_pct = label, max(0, min(100, int(pct)))
+        progress: dict[str, Any] = {"label": label, "pct": ec.progress_pct}
         if ec.steps:
             progress["steps"] = [dict(s) for s in ec.steps]
         await ec.store.update_episode(ec.episode_id, {"progress": progress})
     except Exception:
         pass
+
+
+async def report_steps(ec: "EpisodeContext") -> None:
+    """Writes the step list only, keeping the current label and %. For steps that finish in the background."""
+    await report_progress(ec, ec.progress_label or "Working", ec.progress_pct)
 
 
 _current: contextvars.ContextVar[Optional[EpisodeContext]] = contextvars.ContextVar("claimcheck_episode", default=None)

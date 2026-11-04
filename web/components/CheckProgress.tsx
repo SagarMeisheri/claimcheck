@@ -59,7 +59,7 @@ export function CheckProgress({ videoId, compact = false, showSteps, initialStep
               <span className="step-icon" aria-hidden="true">{st.status === "running" ? <span className="spinner" /> : ICON[st.status]}</span>
               <span className="step-body">
                 <span className="step-label">{st.label}<span className="sr-only"> ({SR[st.status]})</span></span>
-                {st.status === "running" && s?.label && s.label !== st.label
+                {st.status === "running" && !st.parallel && s?.label && s.label !== st.label
                   ? <span className="meta step-detail">{s.label}</span>
                   : st.detail ? <span className="meta step-detail">{st.detail}</span> : null}
               </span>

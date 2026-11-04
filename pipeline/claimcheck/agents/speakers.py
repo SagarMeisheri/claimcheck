@@ -30,7 +30,7 @@ from google.adk.events import Event, EventActions
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
-from ..context import get_context, is_budget_error
+from ..context import get_context, is_budget_error, report_steps, set_step
 from ..policy import domain_of
 from ..profiles import host_groups, is_role_label, match_host, name_key, search_location
 from ..schemas import ClaimRecord, SpeakerProfileOut
@@ -38,6 +38,7 @@ from ..tools.evidence import search_sources
 
 log = logging.getLogger("claimcheck")
 APP = "claimcheck_speakers"
+STEP = "speaker_profiler"  # the checklist step (agents/pipeline.py)
 PROFILE_CONCURRENCY = 3
 
 
@@ -128,10 +129,80 @@ async def build_profile(label: str, meta: dict[str, Any], topics: list[str], des
     return row
 
 
+async def _listed_one(p: dict[str, str], meta: dict[str, Any], gate: asyncio.Semaphore, searches_left: list[int]) -> Optional[str]:
+    """The speaker id for one person the description lists: the show's host profile, an existing profile, a new one
+    from a web search (aimed with the description's role), or the description's role alone."""
+    ec = get_context()
+    store, s = ec.store, ec.settings
+    host = match_host(p["name"], ec.creator)
+    if host:
+        sp = await store.get_speaker(name_key(host)) or await store.save_speaker(host_profile(host, ec.creator))
+        return (sp or {}).get("id")
+    existing = await store.get_speaker(name_key(p["name"]))
+    if existing and existing.get("status") == "ready":
+        return existing["id"]
+    can_search = (not existing and s.profile_speakers and searches_left[0] > 0
+                  and ec.budget.spent_usd + s.search_cost_usd <= ec.budget.cap_usd)
+    if can_search:
+        searches_left[0] -= 1
+        async with gate:
+            try:
+                sp = await store.save_speaker(await build_profile(p["name"], meta, [], p["role"]))
+                return (sp or {}).get("id")
+            except Exception as e:
+                reason = "budget" if is_budget_error(e) else f"{type(e).__name__}: {e}"
+                ec.log("speakers", "profile_failed", "skipped", f"{p['name']}: {reason}"[:300])
+    # Searched before without a match, no search left, or the search failed: the description's role is enough.
+    sp = await store.save_speaker(described_profile(p["name"], p["role"]))
+    return (sp or {}).get("id")
+
+
+async def profile_listed(meta: dict[str, Any]) -> dict[str, Optional[str]]:
+    """Profiles for the people the video's description lists, started right after the video details and built while
+    the video is read (they need no statements). name_key -> speaker id. Ticks the step off when done. Never raises."""
+    ec = get_context()
+    people = list(ec.listed_people)
+    gate, searches_left = asyncio.Semaphore(PROFILE_CONCURRENCY), [ec.settings.max_speaker_profiles]
+
+    async def one(p: dict[str, str]) -> tuple[str, Optional[str]]:
+        try:
+            return name_key(p["name"]), await _listed_one(p, meta, gate, searches_left)
+        except Exception:
+            log.exception("profile for listed person %r failed", p.get("name"))
+            return name_key(p["name"]), None
+
+    out = dict(await asyncio.gather(*(one(p) for p in people)))
+    ready = sum(1 for v in out.values() if v)
+    set_step(ec, STEP, "done", f"{ready} of {len(people)} people from the description have a profile")
+    await report_steps(ec)
+    return out
+
+
+def start_listed_profiles(meta: dict[str, Any]) -> None:
+    """Starts profile_listed in the background (called by the ingest gate) when the description lists people."""
+    ec = get_context()
+    if ec.listed_people and ec.listed_profiles is None:
+        set_step(ec, STEP, "running", "Looking up the people listed in the description")
+        ec.listed_profiles = asyncio.create_task(profile_listed(meta))
+
+
+async def listed_profiles() -> dict[str, Optional[str]]:
+    """The background profiles, once finished ({} if none were started or they failed)."""
+    task = get_context().listed_profiles
+    if task is None:
+        return {}
+    try:
+        return await task
+    except Exception:
+        log.exception("listed profiles failed")
+        return {}
+
+
 async def profile_speakers(records: list[ClaimRecord], meta: dict[str, Any]) -> list[dict[str, Any]]:
     """episode_speakers rows for one video, creating speaker profiles as needed. Never raises."""
     ec = get_context()
     store, s = ec.store, ec.settings
+    early = await listed_profiles()  # the description's people, profiled while the video was read
     counts = Counter(r.claim.speaker.strip() for r in records
                      if r.not_checked_reason != "outside_policy" and (r.claim.speaker or "").strip())
     topics_by: dict[str, Counter] = {}
@@ -160,6 +231,10 @@ async def profile_speakers(records: list[ClaimRecord], meta: dict[str, Any]) -> 
                     row["speaker_id"] = (sp or {}).get("id")
                 except Exception:
                     log.exception("host lookup failed for %r", label)
+            continue
+        if name_key(label) in early:  # already profiled while the video was read
+            row.update(speaker_id=early[name_key(label)],
+                       role="host" if match_host(label, ec.creator) or (lp and lp["is_host"]) else "guest")
             continue
         try:
             host = match_host(label, ec.creator)
