@@ -279,7 +279,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   };
   const nav = <PaneNav hasPrev={selAt > 0} hasNext={selAt >= 0 && selAt < playable.length - 1} onPrev={() => selectAt(selAt - 1)} onNext={() => selectAt(selAt + 1)} />;
   const groups = groupBySection(playable, ep.sections ?? []);
-  // A part of the conversation clicked in the Video tab: show every statement (a filter may hide that part), then
+  // A chapter clicked in the Chapters tab: show every statement (a filter may hide that part), then
   // scroll the list to its heading and select its first statement.
   const goToSection = (sec: Section) => {
     const first = visible.find((c) => (c.section_idx ?? -1) === sec.idx) ?? visible.find((c) => c.start_s >= sec.start_s);
