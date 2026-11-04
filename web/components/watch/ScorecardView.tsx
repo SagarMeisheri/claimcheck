@@ -17,6 +17,7 @@ import { TimelineItem, groupBySection } from "@/components/feed/StatementCarouse
 import { Drawer, PaneNav } from "@/components/Drawer";
 import { ClaimTrack } from "./ClaimTrack";
 import { ProfileTabs } from "./ProfileTabs";
+import { ViewSwitch } from "@/components/ViewSwitch";
 import type { SourcesResult } from "@/components/CheckSources";
 import { YouTubePlayer, type PlayerHandle } from "./YouTubePlayer";
 
@@ -330,6 +331,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         )}
 
         <header className="score-head">
+          <ViewSwitch videoId={ep.youtube_video_id} current="interactive" status={ep.status} />
           <h1>{ep.title}</h1>
           <div className="watch-channel">
             <Avatar name={ep.channel_name} />

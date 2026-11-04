@@ -743,3 +743,9 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .match-chip::before { content: ""; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--m); }
 .match-chip[aria-pressed="true"] { background: var(--m); border-color: var(--m); color: var(--paper); }
 .match-chip[aria-pressed="true"]::before { background: var(--paper); }
+
+/* Interactive / Notes switch shown on both views of a video */
+.view-switch { display: inline-flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; margin: 0 0 0.9rem; }
+.view-switch a { padding: 0.35rem 0.9rem; font-size: 0.9rem; color: var(--ink-soft); text-decoration: none; }
+.view-switch a + a { border-left: 1px solid var(--rule); }
+.view-switch a[aria-current="page"] { background: var(--ink); color: var(--paper); font-weight: 600; }
