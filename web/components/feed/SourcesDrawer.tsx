@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import type { PreviewClaim, Source } from "@/lib/types";
 import { Drawer, PaneNav } from "@/components/Drawer";
 import { SourceList } from "@/components/SourceList";
-import { STATEMENT_TYPES, typeOf } from "@/lib/statements";
+import { STATEMENT_TYPES, speakerName, typeOf } from "@/lib/statements";
 import { clock } from "@/lib/format";
 
 type Full = { sources: Source[]; counter: Source[] };
@@ -37,6 +37,7 @@ export function SourcesDrawer({ videoId, claim, hasPrev, hasNext, onPrev, onNext
       <p className="sdrawer-head">
         <button type="button" className="linkish cc-ts" onClick={() => onPlay(claim)}>▶ {clock(claim.start_s)}</button>
         <span className="stype-tag"><span className="bd-dot" style={{ background: t.cssVar }} aria-hidden="true" />{t.label}</span>
+        {speakerName(claim.speaker) && <span className="meta" title="Speaker as identified by AI from the video">{speakerName(claim.speaker)} <span className="ai-note">(identified by AI)</span></span>}
       </p>
       <h3 id="sdrawer-title" className="sdrawer-claim">{claim.claim_text}</h3>
       {claim.statement_context && <p className="cc-context"><span className="ai-note">Context</span> {claim.statement_context}</p>}

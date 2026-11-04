@@ -557,6 +557,7 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
   color: inherit; text-align: left; cursor: pointer; }
 .tl-text:hover { text-decoration: underline; text-decoration-color: var(--rule); }
 .tl-text.is-question { font-style: italic; }
+.tl-who { font-weight: 600; font-style: normal; color: var(--ink-soft); }
 .tl-action { grid-area: action; display: flex; justify-content: flex-end; padding-top: 0.05rem; }
 .tl-tag { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.05rem 0.5rem; border: 1px solid var(--src-rule);
   border-radius: 999px; background: var(--src-bg); font: inherit; font-size: 0.76rem; line-height: 1.15rem; font-weight: 600;

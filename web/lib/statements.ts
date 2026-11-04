@@ -48,3 +48,9 @@ export function mergeCounts(counts: Record<string, number | undefined>): Partial
   for (const [k, n] of Object.entries(counts)) out[typeOf(k)] = (out[typeOf(k)] ?? 0) + (n ?? 0);
   return out;
 }
+
+/** The speaker to show beside a statement, or null when there is none or it is only the generic "Speaker". */
+export function speakerName(speaker: string | null | undefined): string | null {
+  const s = speaker?.trim();
+  return s && !/^speaker$/i.test(s) ? s : null;
+}

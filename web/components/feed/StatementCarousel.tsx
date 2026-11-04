@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { PreviewClaim, Section, SourcesMatch, StatementType } from "@/lib/types";
 import { CheckSources, type SourcesResult } from "@/components/CheckSources";
 import { SourcesTag } from "@/components/SourcesTag";
-import { STATEMENT_TYPES, TYPE_ORDER, hasSources, totalStatements, typeOf } from "@/lib/statements";
+import { STATEMENT_TYPES, TYPE_ORDER, hasSources, speakerName, totalStatements, typeOf } from "@/lib/statements";
 import { clock } from "@/lib/format";
 import { MatchFilter, matchCounts } from "@/components/MatchFilter";
 import { MATCH_MEANING, MATCH_WORD } from "@/components/SourceList";
@@ -27,6 +27,7 @@ export function TimelineItem({ c, active, selected = false, onPlay, onSelect, on
   const done = c.sources_status === "done";
   const isQuestion = typeOf(c.statement_type) === "question";
   const match = sourceable && done ? c.sources_match : null; // colours the text: direct / partial / loose
+  const who = speakerName(c.speaker);
   return (
     <li id={`card-${c.id}`} className={`tl-item${active ? " is-active" : ""}${selected ? " is-selected" : ""}${busy ? " is-verifying" : ""}`}
         style={{ ["--stype" as string]: t.cssVar }} aria-current={selected ? "true" : undefined}>
@@ -34,7 +35,8 @@ export function TimelineItem({ c, active, selected = false, onPlay, onSelect, on
       <span className="bd-dot tl-dot" style={{ background: t.cssVar }} title={t.label} aria-hidden="true" />
       <button type="button" className={`tl-text${isQuestion ? " is-question" : ""}${match ? ` m-${match}` : ""}`} onClick={() => (onSelect ?? onPlay)(c)}
               title={match ? `${MATCH_WORD[match]} match: ${MATCH_MEANING[match]}` : undefined}
-              aria-label={`${t.label} at ${clock(c.start_s)}: ${c.claim_text}.${match ? ` ${MATCH_WORD[match]} source match.` : ""} ${onSelect ? "Show details" : "Play from here"}`}>
+              aria-label={`${t.label} at ${clock(c.start_s)}${who ? `, ${who}` : ""}: ${c.claim_text}.${match ? ` ${MATCH_WORD[match]} source match.` : ""} ${onSelect ? "Show details" : "Play from here"}`}>
+        {who && <span className="tl-who" title="Speaker as identified by AI from the video">{who}:</span>}{who && " "}
         {c.claim_text}
       </button>
       <div className="tl-action">
