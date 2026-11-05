@@ -139,6 +139,8 @@ class VideoContext:
         return {k: v for k, v in {
             "statement": claim.get("claim_text", ""), "statement_type": claim.get("statement_type"),
             "question": claim.get("question"),
+            "video": {"id": self.episode.get("youtube_video_id"), "title": self.episode.get("title"),
+                      "channel": (self.creator or {}).get("youtube_channel_name")},
             "discussing": claim.get("statement_context") or (section or {}).get("summary") or "",
             "section": (section or {}).get("title") or "",
             "speaker": speaker_context(self.speakers.get(label), label),
@@ -247,6 +249,33 @@ class Lookup(NamedTuple):
     related: list[Source]
     counter: list[Source]
     triage: Optional[dict[str, Any]] = None
+    research: Any = None  # a research.Research when the answer was researched, else None
+
+
+async def gather_sources(ctx: dict[str, Any], route: str, location: Optional[str]) -> tuple[list[Source], list[Source], Any]:
+    """The sources for one answer: researched (agents/research.py) when settings.research_sources is on, with the plain search as
+    the fallback if the research can't run. Returns (related, counter, research or None)."""
+    ec = get_context()
+    if ec.settings.research_sources:
+        from .research import ResearchUnavailable, research_answer
+
+        from .opinion import research_and_assess, wanted
+
+        try:
+            if wanted(ec.settings, route, ctx.get("statement_type")):
+                r = await research_and_assess(ctx, route, location)
+            else:
+                r = await research_answer(ctx, location)
+            return r.related, r.counter, r
+        except ResearchUnavailable as e:
+            ec.log("sources", "research_unavailable", "skipped", str(e)[:200])
+        except Exception as e:
+            if is_budget_error(e):
+                raise
+            ec.log("sources", "research_failed", "skipped", f"{type(e).__name__}: {e}"[:200])
+            log.warning("research failed, using the plain search: %s: %s", type(e).__name__, e)
+    related, counter = await run_searches(ctx["statement"], route, ctx, location)
+    return related, counter, None
 
 
 async def run_searches(statement: str, route: str, ctx: dict[str, Any], location: Optional[str]) -> tuple[list[Source], list[Source]]:
@@ -290,13 +319,13 @@ def build_lookup_workflow(settings: Settings, box: dict[str, Any], *, force: boo
     async def lookup(ctx: Context, node_input: dict[str, Any]) -> dict[str, Any]:
         route = (ctx.state.get("triage") or {}).get("choice") or "related"
         box["route"] = route
-        box["related"], box["counter"] = await run_searches(node_input["statement"], route, node_input, location)
+        box["related"], box["counter"], box["research"] = await gather_sources(node_input, route, location)
         return node_input
 
     async def skip(node_input: dict[str, Any]) -> dict[str, Any]:
         if force:  # a viewer pressed Check sources: they get the related search
             box["route"] = "related"
-            box["related"], box["counter"] = await run_searches(node_input["statement"], "related", node_input, location)
+            box["related"], box["counter"], box["research"] = await gather_sources(node_input, "related", location)
         else:
             box["route"] = "skip"
         return node_input
@@ -318,8 +347,8 @@ async def lookup_claim(claim: dict[str, Any], vctx: VideoContext, *, force: bool
     statement = claim["claim_text"]
     location = vctx.location
     if not ec.settings.triage_sources:
-        related, counter = await run_searches(statement, "related", ctx, location)
-        return Lookup("related", related, counter)
+        related, counter, research = await gather_sources(ctx, "related", location)
+        return Lookup("related", related, counter, None, research)
     box: dict[str, Any] = {}
     runner = InMemoryRunner(node=build_lookup_workflow(ec.settings, box, force=force, location=location),
                             app_name=APP, plugins=ec.plugins_factory())
@@ -331,13 +360,16 @@ async def lookup_claim(claim: dict[str, Any], vctx: VideoContext, *, force: bool
     triage = done.state.get("triage")
     if "route" not in box:  # the workflow ended without a routed node running: never expected, but never silent
         raise RuntimeError("source lookup workflow ended without a route")
-    return Lookup(box["route"], box.get("related", []), box.get("counter", []), triage)
+    return Lookup(box["route"], box.get("related", []), box.get("counter", []), triage, box.get("research"))
 
 
 async def _lookup_and_summarize(claim: dict[str, Any], vctx: VideoContext, *, force: bool) -> tuple[Lookup, Digest]:
     found = await lookup_claim(claim, vctx, force=force)
     if found.route == "skip":
         return found, Digest()
+    if found.research is not None:  # the findings were verified one by one; their summary is made from them, not by another model call
+        r = found.research
+        return found, Digest(r.summary, r.match, r.counter_summary)
     return found, await summarize(claim["claim_text"], found.related, found.counter, vctx.for_claim(claim))
 
 
@@ -346,7 +378,8 @@ async def _save(store: Any, claim_id: str, found: Lookup, digest: Digest) -> Non
         await store.save_sources_route(claim_id, "skip", found.triage)
         return
     await store.save_claim_sources(claim_id, found.related, digest.summary, digest.match, counter=found.counter,
-                                   counter_summary=digest.counter_summary, route=found.route, triage=found.triage)
+                                   counter_summary=digest.counter_summary, route=found.route, triage=found.triage,
+                                   research=found.research.stored() if found.research is not None else None)
 
 
 def _context(episode_id: str, ep: dict[str, Any], settings: Settings, store: Any) -> EpisodeContext:
@@ -403,14 +436,18 @@ async def run_claim_sources(claim_id: str, *, settings: Settings, store: Any) ->
 
 # --- Every claim of a video --------------------------------------------------------------------------
 
-async def run_video_sources(episode_id: str, *, settings: Settings, store: Any) -> dict[str, Any]:
-    """Looks up sources for every statement of a video that has none yet. Never raises."""
+async def run_video_sources(episode_id: str, *, settings: Settings, store: Any, recheck: bool = False) -> dict[str, Any]:
+    """Looks up sources for every statement of a video that has none yet. Never raises.
+    recheck: every answer is looked up again with the current method (finished ones too, and ones the classifier once skipped); each
+    new result replaces the old one, and an answer not reached (over budget) keeps the result it had."""
     async with lock_for(episode_id):
         ep = await store.get_episode(episode_id)
         if not ep or ep.get("status") not in ("done", "in_review"):
             await store.update_episode(episode_id, {"sources_batch_status": None})
             return {"status": "skipped", "reason": "The video hasn't finished being analysed."}
-        claims = sorted(await store.list_batch_claims(episode_id), key=lambda r: r.get("start_s") or 0)
+        claims = sorted(await store.list_batch_claims(episode_id, recheck) if recheck else await store.list_batch_claims(episode_id),
+                        key=lambda r: r.get("start_s") or 0)
+        before = {c["id"]: c.get("sources_status") or "not_requested" for c in claims}  # what an unreached answer goes back to
         groups: dict[str, list[dict[str, Any]]] = {}  # same wording -> claims sharing one lookup, earliest first
         for c in claims:
             groups.setdefault(same_wording(c["claim_text"]), []).append(c)
@@ -471,7 +508,7 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any) 
             try:
                 for c in todo:  # anything not reached goes back, so a viewer can still press "Check sources"
                     if c["id"] not in finished:
-                        await store.set_sources_status(c["id"], "not_requested")
+                        await store.set_sources_status(c["id"], "done" if before.get(c["id"]) == "done" else "not_requested")
                 await store.add_episode_cost(episode_id, spent, ec.budget.tokens_in, ec.budget.tokens_out)
                 await store.save_guardrail_events(episode_id, ec.events)
                 await store.update_episode(episode_id, {"sources_batch_status": None, "progress": {}})
@@ -518,7 +555,9 @@ class AutoSources:
     async def _context(self) -> VideoContext:
         async with self._vctx_lock:
             if self._vctx is None:  # the creator's profile is known now; the speakers' are built after the extraction
-                self._vctx = await VideoContext(self.store, {"id": self.ec.episode_id, "creator_id": (self.ec.creator or {}).get("id")}).load()
+                ep = await self.store.get_episode(self.ec.episode_id) or {}
+                self._vctx = await VideoContext(self.store, {**ep, "id": self.ec.episode_id,
+                                                            "creator_id": (self.ec.creator or {}).get("id") or ep.get("creator_id")}).load()
             return self._vctx
 
     async def _one(self, idx: int) -> None:

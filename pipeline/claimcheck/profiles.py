@@ -88,10 +88,14 @@ def creator_context(creator: Optional[dict[str, Any]]) -> dict[str, Any]:
     if not creator:
         return {}
     p = creator.get("profile") or {}
+    # Curated shows already carry notes on leaning (biases) and on how the show is received (criticism, controversies); a show
+    # found by a live search has leaning and public_opinion. Either way the later steps get the same two fields.
+    opinion = p.get("public_opinion") or " ".join(x for x in (p.get("criticism"), p.get("controversies")) if x)
     return {k: v for k, v in {
         "podcast": creator.get("podcast"), "summary": creator.get("summary"), "hosts": p.get("hosts"),
         "country": creator.get("country"), "biases": p.get("biases"), "criticism": p.get("criticism"),
-        "controversies": p.get("controversies"),
+        "controversies": p.get("controversies"), "leaning": p.get("leaning") or p.get("biases"),
+        "leaning_basis": p.get("leaning_basis") or ("curated" if p.get("biases") else ""), "public_opinion": opinion,
     }.items() if v}
 
 
@@ -102,7 +106,10 @@ def speaker_context(speaker: Optional[dict[str, Any]], label: str = "") -> dict[
     p = speaker.get("profile") or {}
     return {k: v for k, v in {
         "name": speaker.get("name") or label, "summary": speaker.get("summary"), "role": p.get("role"),
-        "known_positions": p.get("known_positions"), "criticisms": p.get("criticisms"),
+        "affiliations": p.get("affiliations"), "known_positions": p.get("known_positions"), "criticisms": p.get("criticisms"),
+        "leaning": p.get("leaning") or p.get("known_positions"),
+        "leaning_basis": p.get("leaning_basis") or ("described" if p.get("known_positions") else ""),
+        "public_opinion": p.get("public_opinion") or p.get("criticisms"),
     }.items() if v}
 
 

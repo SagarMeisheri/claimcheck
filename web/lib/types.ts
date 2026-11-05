@@ -17,6 +17,39 @@ export interface Source {
   publish_date: string | null;
   rank: number; // the search engine's order, most relevant first
   kind?: "related" | "counter"; // which search found it: the statement's subject, or different figures / other views
+  independence?: "independent" | "own_organisation" | "same_episode" | null; // set when the answer was researched
+}
+
+/** How a page relates to one point of an answer. A description of the page, never a verdict on the speaker. */
+export type ResearchRelation = "same" | "different" | "different_scope" | "other_position";
+export interface ResearchFinding {
+  url: string; site: string; title: string;
+  independence: "independent" | "own_organisation";
+  relation: ResearchRelation;
+  finding: string; // what the page says about the point, from its own words
+  quote: string; // the page's exact words, checked against the page text
+  position: string; // a neutral label of the stance, for other positions
+}
+export type PointStatus = "same" | "different" | "different_scope" | "other_position" | "mixed" | "own_organisation_only" | "no_independent_source";
+export interface ResearchPoint { text: string; kind: string; status: PointStatus; findings: ResearchFinding[] }
+export type Camp = "ruling" | "opposition";
+export interface CampStance { stance: string; quote: string; who: string; url: string; site: string; title: string; date?: string | null }
+export type BiasKind = "stake" | "prior_stance" | "camp_match" | "one_sided" | "loaded_language" | "selective_use" | "leading_question" | "other_view_acknowledged";
+export interface BiasSignal { kind: BiasKind; text: string; quote: string }
+export type Grounding = "backed" | "partly_backed" | "unverified" | "not_backed" | "value_judgement";
+/** The assessment of an opinion: how it is backed, what the two camps say, and quoted bias signals. Every quote was checked against its source. */
+export interface Assessment {
+  bottom_line: string; grounding: Grounding; grounding_reason: string; bias: "balanced" | "leans" | "one_sided" | "cant_tell"; toward: Camp | "none";
+  bias_reason: string; signals: number[]; objection: string; speaker_record: string; stake: string; evidence: "strong" | "limited" | "none";
+}
+export interface Opinion {
+  version: number; camps: Record<Camp, string>; issue: string; stances: Record<Camp, CampStance[]>;
+  signals: BiasSignal[]; matches: Camp | "neither" | "unclear"; assessment: Assessment;
+}
+/** How an answer's sources were researched: its checkable points and what independent pages say about each. */
+export interface Research {
+  version: number; points: ResearchPoint[]; positions: string[]; queries: string[];
+  opinion?: Opinion; dropped?: Record<string, number>; pages?: { url: string; site: string; title: string; independence: string }[];
 }
 
 export interface Claim {
@@ -45,6 +78,7 @@ export interface Claim {
   sources_route: SourcesRoute | null;
   counter_sources: Source[]; // from the second search (data / contested statements)
   counter_summary: string | null;
+  research?: Research | null; // how the sources were researched (points, findings with quotes, other positions)
   sources_checked_at?: string | null;
 }
 
@@ -125,7 +159,7 @@ export interface CreatorProfile {
   youtube_handles: string[];
   country: string;
   summary: string | null;
-  public_profile: { hosts?: string; host_background?: string; host_bio?: string; topics?: string[]; known_for?: string };
+  public_profile: { hosts?: string; host_background?: string; host_bio?: string; topics?: string[]; known_for?: string; leaning?: string; leaning_basis?: string; public_opinion?: string };
 }
 
 /** Who speaks in a video, and their profile if one was found (neutral parts only). */
@@ -135,7 +169,7 @@ export interface EpisodeSpeaker {
   statements: number;
   speaker: {
     id: string; name: string; summary: string | null; sources: { url: string; title: string | null }[];
-    public_profile: { role?: string; background?: string; affiliations?: string[]; topics?: string[] };
+    public_profile: { role?: string; background?: string; affiliations?: string[]; topics?: string[]; leaning?: string; leaning_basis?: string; public_opinion?: string };
   } | null;
 }
 

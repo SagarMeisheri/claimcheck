@@ -215,6 +215,29 @@ section + section { margin-top: 2.5rem; }
   .track-holder { padding-inline: 0; }
 }
 
+/* Below the wide layout the page is still exactly one screen tall, never a long scroll: the video on top, the questions
+   and answers in their own scrolling window under it, and the video's details (title, summary, chapters) in a short
+   scrolling strip at the bottom. */
+@media (max-width: 1179.98px) {
+  .app-body:has(> main > .score) { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+  .app-body:has(> main > .score) > main { padding: 0; min-height: 0; overflow: hidden; }
+  .app-body:has(> main > .score) > footer { display: none; }
+  .score { height: 100%; margin: 0 auto; grid-template-rows: auto minmax(0, 1fr) auto; }
+  .player-dock { grid-row: 1; position: static; }
+  .player-frame { max-height: none; width: min(100%, calc(24vh * 16 / 9)); }  /* the whole picture, never cropped */
+  .track-holder { padding-block: 0 0.1rem; }
+  .score-side { grid-row: 2; margin-top: 0.5rem; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding-bottom: 1rem; }
+  .score-info { grid-row: 3; margin-inline: 1rem; min-height: 0; max-height: 16vh; overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: thin; border-top: 1px solid var(--rule); padding-bottom: 0.75rem; }
+  .score-info > :first-child { margin-top: 0.4rem; }
+  .score-summary { padding: 0.45rem 0.8rem; }
+  .score-summary .type-bar { display: none; }
+  .stmt-filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 0.15rem; }
+  .stmt-filters .chip { flex: none; }
+  .score-head { margin-top: 0.5rem; }
+  .claim-card, .qa-item { scroll-margin-top: 0.5rem; }
+}
+
 /* Claim track */
 .track-wrap { padding-top: 0.6rem; }
 .track { position: relative; height: 2.6rem; border-bottom: 2px solid var(--ink); touch-action: none; cursor: pointer; user-select: none; }
@@ -560,13 +583,12 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .qa-item.is-active .qa-card { box-shadow: inset 3px 0 0 var(--focus); background: var(--highlight); }
 .qa-item.is-selected .qa-card { border-color: var(--ink-soft); }
 .qa-q { font-family: var(--font-display); font-size: 1.08rem; line-height: 1.3; margin: 0; font-weight: 700; }
-.qa-q button, .qa-ans-text button { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
-.qa-q button:hover, .qa-ans-text button:hover { text-decoration: underline; text-decoration-color: var(--rule); }
+.qa-q button { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.qa-q button:hover { text-decoration: underline; text-decoration-color: var(--rule); }
 .qa-asked { margin: 0.15rem 0 0.1rem; font-size: 0.82rem; color: var(--ink-soft); }
 .qa-ans { padding-top: 0.55rem; margin-top: 0.55rem; border-top: 1px solid var(--rule); }
 .qa-head + .qa-ans { margin-top: 0.5rem; }
 .qa-card > .qa-ans:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
-.qa-ans.is-verifying .qa-src { background: var(--src-bg); }
 .qa-ans-head { display: flex; flex-wrap: wrap; gap: 0.2rem 0.55rem; align-items: baseline; margin: 0; font-size: 0.85rem; }
 .qa-who { font-weight: 600; color: var(--ink-soft); }
 .qa-ts { background: none; border: 0; padding: 0; font: inherit; font-size: 0.82rem; font-variant-numeric: tabular-nums; color: var(--ink-soft); cursor: pointer; }
@@ -787,3 +809,35 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 /* Interactive / Notes switch shown on both views of a video */
 .qa-note { margin: 0; font-size: 0.85rem; }
 .qa-check .ccard-verifying { margin: 0; font-size: 0.88rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.4rem; }
+
+/* Research results: what independent pages say about each point of an answer. Neutral styling: no right/wrong colours. */
+.rs { margin-top: 1rem; display: grid; gap: .75rem; }
+.rs-title { margin: 0; font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+.rs-point { border-left: 3px solid var(--rule); padding-left: .7rem; }
+.rs-point-text { margin: 0; font-weight: 600; }
+.rs-status { margin: .15rem 0 .4rem; font-size: .85rem; color: var(--ink-soft); }
+.rs-findings { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+.rs-f-head { margin: 0; display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: baseline; font-size: .85rem; }
+.rs-rel, .rs-own { font-size: .75rem; padding: .05rem .4rem; border: 1px solid var(--rule); border-radius: 999px; color: var(--ink-soft); }
+.rs-f-text { margin: .15rem 0 0; font-size: .9rem; }
+.rs-quote { margin: .25rem 0 0; padding-left: .6rem; border-left: 2px solid var(--rule); font-size: .85rem; font-style: italic; color: var(--ink-soft); }
+.rs-positions h5 { margin: 0 0 .4rem; font-size: .85rem; }
+.rs-position { margin-bottom: .6rem; }
+.rs-pos-label { margin: 0 0 .25rem; font-weight: 600; font-size: .85rem; }
+.rs-foot { margin: 0; }
+.rs-chips { list-style: none; margin: .4rem 0 0; padding: 0; display: grid; gap: .25rem; }
+.rs-chip { font-size: .8rem; padding: .2rem .5rem; border: 1px solid var(--rule); border-radius: .5rem; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-chip b { font-weight: 600; color: inherit; }
+
+/* Opinion assessment: how an opinion is backed, what the two sides say, quoted signals. Neutral styling: no right/wrong colours. */
+.op-card { margin-top: .5rem; display: grid; gap: .35rem; }
+.op-line { margin: 0; font-size: .9rem; }
+.op-chips { margin: 0; display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.op-chip { font-size: .78rem; padding: .15rem .55rem; border: 1px solid var(--rule); border-radius: 999px; background: var(--paper-raised); color: var(--ink); }
+.op-ai { font-size: .7rem; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); border: 1px dashed var(--rule); border-radius: 4px; padding: .05rem .3rem; cursor: help; }
+.op { margin-top: 1rem; display: grid; gap: .8rem; }
+.op-block { display: grid; gap: .35rem; border-left: 3px solid var(--rule); padding-left: .7rem; }
+.op-label { margin: 0; font-size: .8rem; color: var(--ink-soft); }
+.op-value { margin: 0; font-weight: 600; }
+.op-side { display: grid; gap: .3rem; margin-top: .3rem; }
+.op-side-name { margin: 0; font-weight: 600; font-size: .85rem; }

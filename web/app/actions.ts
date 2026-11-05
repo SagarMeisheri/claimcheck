@@ -174,7 +174,7 @@ export async function requestSources(claimId: string): Promise<SourcesResult> {
 
 /** "Check sources for all statements": one press runs a web search for each statement of a video (up to 75). Only for videos
  *  whose sources have never been checked. */
-export async function requestAllSources(videoId: string): Promise<{ ok: boolean; message: string }> {
+export async function requestAllSources(videoId: string, recheck = false): Promise<{ ok: boolean; message: string }> {
   if (!/^[\w-]{6,20}$/.test(videoId)) return { ok: false, message: "Unknown video." };
   const db = serviceDb();
   const { data: ep } = await db.from("episodes").select("id, status, sources_batch_status").eq("youtube_video_id", videoId).maybeSingle();
@@ -183,11 +183,12 @@ export async function requestAllSources(videoId: string): Promise<{ ok: boolean;
   if (ep.sources_batch_status === "running") return { ok: true, message: "Already checking sources for this video." };
 
   // Once any statement of the video has sources ("last checked"), the video isn't checked again as a whole.
+  // A re-check (recheck) is the exception: it looks every answer up again with the current method.
   const { data: checked } = await db.from("claims").select("id").eq("episode_id", ep.id).not("sources_checked_at", "is", null).limit(1);
-  if (checked?.length) return { ok: false, message: "Sources have already been checked for this video." };
+  if (checked?.length && !recheck) return { ok: false, message: "Sources have already been checked for this video." };
 
   const { data: eligible } = await db.from("claims").select("id").eq("episode_id", ep.id).not("statement_type", "in", "(question,story)")
-    .in("sources_status", ["not_requested", "failed"]).limit(1);
+    .in("sources_status", recheck ? ["not_requested", "failed", "done"] : ["not_requested", "failed"]).limit(1);
   if (!eligible?.length) return { ok: false, message: "Sources have already been looked up for every statement in this video." };
 
   const who = await visitorHash();
@@ -199,7 +200,7 @@ export async function requestAllSources(videoId: string): Promise<{ ok: boolean;
     .insert({ episode_id: ep.id, requester: who, kind: "all" }).select("id").single();
   await db.from("episodes").update({ sources_batch_status: "running" }).eq("id", ep.id); // the button shows progress straight away
 
-  const res = await pipeline(`/episodes/${encodeURIComponent(ep.id)}/sources-all`);
+  const res = await pipeline(`/episodes/${encodeURIComponent(ep.id)}/sources-all${recheck ? "?recheck=true" : ""}`);
   if (!res || !res.ok) {
     const detail = res ? String((await res.json().catch(() => ({})))?.detail ?? "") : "";
     if (res?.status === 409) return { ok: true, message: detail || "Already checking sources for this video." }; // it is running: keep the state

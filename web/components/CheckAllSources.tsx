@@ -21,8 +21,10 @@ function Ring({ pct }: { pct: number | null }) {
  * "Check sources for all statements": starts the whole-video lookup. While it runs the button turns into a ring with
  * "Checking sources: 3 of 10", polls the video, and refreshes the page whenever another claim has its sources.
  */
-export function CheckAllSources({ videoId, running: initialRunning, eligible, compact = false }: {
+export function CheckAllSources({ videoId, running: initialRunning, eligible, canRecheck = false, onRecheck, compact = false }: {
   videoId: string; running: boolean; eligible: boolean; compact?: boolean;
+  /** Some answers already have a result: "Re-check all statements" looks every one up again with the current method. */
+  canRecheck?: boolean; onRecheck?(): void;
 }) {
   const router = useRouter();
   const [running, setRunning] = useState(initialRunning);
@@ -52,10 +54,10 @@ export function CheckAllSources({ videoId, running: initialRunning, eligible, co
     return () => { stop = true; window.clearInterval(id); };
   }, [running, videoId, router]);
 
-  const go = () => start(async () => {
-    const r = await requestAllSources(videoId);
+  const go = (recheck = false) => start(async () => {
+    const r = await requestAllSources(videoId, recheck);
     setMessage(r.ok ? null : r.message);
-    if (r.ok) { setRunning(true); router.refresh(); }
+    if (r.ok) { if (recheck) onRecheck?.(); setRunning(true); router.refresh(); }
   });
 
   if (running || pending) {
@@ -69,10 +71,13 @@ export function CheckAllSources({ videoId, running: initialRunning, eligible, co
       </p>
     );
   }
-  if (!eligible) return null;
+  if (!eligible && !canRecheck) return null;
   return (
     <p className={`verify-all${compact ? " compact" : ""}`}>
-      <button type="button" className="btn small verify-all-btn" onClick={go}>Check sources for all statements</button>
+      {eligible
+        ? <button type="button" className="btn small verify-all-btn" onClick={() => go()}>Check sources for all statements</button>
+        : <button type="button" className="btn secondary small verify-all-btn" onClick={() => go(true)}
+                  title="Looks every answer up again with the current method. The old results are replaced as the new ones arrive.">Re-check all statements</button>}
       {message && <span className="meta verify-all-msg" role="status">{message}</span>}
     </p>
   );

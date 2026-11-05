@@ -114,6 +114,7 @@ class Source(BaseModel):
     tier: int = 3                     # display label only: 1 official, 2 established news/research, 3 other
     rank: int = 0                     # Parallel's order, most relevant first
     kind: Literal["related", "counter"] = "related"  # which search found it: the statement's subject, or other figures / views
+    independence: Optional[Literal["independent", "own_organisation", "same_episode"]] = None  # set by the research lookup (agents/independence.py)
 
 
 class SourcesSummary(BaseModel):
@@ -136,6 +137,48 @@ class QaOut(BaseModel):
     items: list[QaItemOut] = Field(default_factory=list)
 
 
+# --- Researching an answer (agents/research.py) ---------------------------------------------------
+PointKind = Literal["figure", "rule", "event", "cause", "comparison", "interpretation", "outlook", "other"]
+Relation = Literal["same", "different", "different_scope", "other_position"]
+
+
+class PlanPoint(BaseModel):
+    """One checkable point of an answer, and how to look for sources on it."""
+
+    text: str = Field(description="One checkable point from the answer, self-contained, figures, units and periods exactly as said")
+    kind: PointKind = Field(description="figure, rule, event, cause, comparison, interpretation (a reading of history or events), outlook or other")
+    queries: list[str] = Field(description="2 short keyword queries that would find sources on this point. Not the answer's wording, and not only the phrase the answer opens with")
+    challenge_queries: list[str] = Field(description="1-2 queries aimed at sources giving other figures, other periods or definitions, or other positions on this point")
+
+
+class Position(BaseModel):
+    label: str = Field(description="A short neutral name (at most 8 words) for a position people hold on the issue; never a person or party's character")
+    query: str = Field(description="A query that would find a source stating that position")
+
+
+class ResearchPlan(BaseModel):
+    points: list[PlanPoint] = Field(description="The 1-2 most checkable points of the answer, each searched separately")
+    disputed: bool = Field(default=False, description="True only if the issue itself is contested in public debate, not merely because the answer is an opinion")
+    positions: list[Position] = Field(default_factory=list, description="When disputed: 2-3 positions held on the issue; empty otherwise")
+
+
+class PageFinding(BaseModel):
+    point: int = Field(description="Number of the point this finding is about")
+    page: int = Field(description="Number of the page")
+    relation: Relation = Field(description="same, different, different_scope or other_position")
+    finding: str = Field(description="What the page says about the point, at most 40 words, with its figures, units and periods")
+    quote: str = Field(description="The exact words from the page that support the finding, copied character for character, at most 40 words")
+    position: str = Field(default="", description="For other_position or different: a neutral label of the stance, at most 8 words")
+
+
+class PageReading(BaseModel):
+    findings: list[PageFinding] = Field(default_factory=list)
+
+
+class QueryRewrite(BaseModel):
+    queries: list[str] = Field(description="2 new keyword queries from a different angle")
+
+
 # --- Creator profiles found on the web (agents/creators.py) -------------------------------------
 class CreatorProfileOut(BaseModel):
     """What the profile step returns about a YouTube show or channel, from web search excerpts only."""
@@ -150,6 +193,9 @@ class CreatorProfileOut(BaseModel):
     known_for: str = Field(default="", description="What the show is known for, as the pages describe it")
     criticism: str = Field(default="", description="Main public criticisms the pages report, attributed; empty if none")
     country: str = Field(default="", description="The country the show is based in, if the pages say")
+    leaning: str = Field(default="", description="The political or ideological leaning the pages attribute to the show, attributed ('Described by X as ...'); empty if they say nothing")
+    leaning_basis: Literal["described", "none"] = Field(default="none", description="'described' if the pages attribute a leaning to the show, else 'none'")
+    public_opinion: str = Field(default="", description="How the public and the press view the show, both favourable and critical, each attributed ('Praised by X for ...', 'Criticised by Y for ...'); empty if the pages say nothing")
 
 
 # --- Speaker profiles (agents/speakers.py) -------------------------------------------------------
@@ -164,6 +210,59 @@ class SpeakerProfileOut(BaseModel):
     topics: list[str] = Field(default_factory=list, description="Subjects they usually speak on")
     known_positions: str = Field(default="", description="Public positions or leanings as the pages describe them, attributed ('described as...'); empty if none")
     criticisms: str = Field(default="", description="Main public criticisms as the pages report them, attributed; empty if none")
+    leaning: str = Field(default="", description="Their political or ideological leaning as the pages state it, attributed ('Described by X as ...', or the party or government post they hold or held); empty if the pages say nothing")
+    leaning_basis: Literal["declared", "described", "none"] = Field(default="none", description="'declared' if they hold or held a party or government post or speak for a party; 'described' if the pages attribute a leaning to them; else 'none'")
+    public_opinion: str = Field(default="", description="How the public and the press view them, both favourable and critical, each attributed ('Praised by X for ...', 'Criticised by Y for ...'); empty if the pages say nothing")
+
+
+# --- Opinion assessment (agents/opinion.py) ----------------------------------------------------
+Camp = Literal["ruling", "opposition"]
+
+
+class StancePlan(BaseModel):
+    issue: str = Field(description="The public issue the answer takes a side on, as one neutral sentence that doesn't favour either side")
+    ruling_queries: list[str] = Field(description="2 short keyword queries that would find what the governing side has said or done on this issue")
+    opposition_queries: list[str] = Field(description="2 short keyword queries that would find what the opposition has said on this issue")
+
+
+class StanceFinding(BaseModel):
+    camp: Camp = Field(description="ruling or opposition")
+    page: int = Field(description="Number of the page")
+    stance: str = Field(description="The camp's position on the issue as this page reports it, at most 35 words, no adjectives of your own")
+    quote: str = Field(description="The exact words from the page that state or report the position, copied character for character, at most 40 words")
+    who: str = Field(default="", description="Who held the position, as the page names them (a party, a minister, a spokesperson)")
+
+
+class StanceReading(BaseModel):
+    findings: list[StanceFinding] = Field(default_factory=list)
+
+
+BiasKind = Literal["stake", "prior_stance", "camp_match", "one_sided", "loaded_language", "selective_use", "leading_question", "other_view_acknowledged"]
+
+
+class BiasSignal(BaseModel):
+    kind: BiasKind = Field(description="stake (a role or interest in the outcome), prior_stance (their own earlier public position), camp_match (the answer matches a camp's stated position), one_sided (no other view acknowledged), loaded_language, selective_use (cites only facts favouring one side), leading_question, other_view_acknowledged (the answer itself weighs another view)")
+    text: str = Field(description="What was found, one plain sentence, at most 30 words, no adjectives of your own")
+    quote: str = Field(description="The exact words, copied character for character, from the answer, the question, the profile text or a finding, that show it")
+
+
+class BiasRead(BaseModel):
+    signals: list[BiasSignal] = Field(default_factory=list)
+    matches: Literal["ruling", "opposition", "neither", "unclear"] = Field(default="unclear", description="Which camp's stated position the answer's stance is closest to")
+
+
+class Assessment(BaseModel):
+    bottom_line: str = Field(description="One plain sentence, at most 45 words: what kind of answer it is, what it rests on, where it sits between the ruling side and the opposition")
+    grounding: Literal["backed", "partly_backed", "unverified", "not_backed", "value_judgement"] = Field(description="backed: the premises have independent sources; partly_backed: some do; unverified: none has an independent source; not_backed: independent sources were found and give other figures or a different account; value_judgement: no factual premise to check")
+    grounding_reason: str = Field(description="One sentence, at most 35 words, naming the premise and what the sources show")
+    bias: Literal["balanced", "leans", "one_sided", "cant_tell"] = Field(description="balanced, leans, one_sided or cant_tell, from the evidenced signals only")
+    toward: Literal["ruling", "opposition", "none"] = Field(default="none", description="For leans and one_sided: which camp's position the answer follows")
+    bias_reason: str = Field(description="One sentence, at most 40 words, naming the strongest evidenced signals")
+    signals: list[int] = Field(default_factory=list, description="Numbers of the signals the bias judgement relies on")
+    objection: str = Field(default="", description="The strongest evidenced other view in one sentence of at most 30 words, or empty")
+    speaker_record: str = Field(default="", description="One sentence on what the speaker has said before on this, only if a signal or finding shows it, else empty")
+    stake: str = Field(default="", description="One factual sentence on a role or interest the speaker has in the outcome, only if a signal shows it, else empty")
+    evidence: Literal["strong", "limited", "none"] = Field(description="How much independent evidence the assessment rests on")
 
 
 # --- Source triage (agents/sources.py) ---------------------------------------------------------

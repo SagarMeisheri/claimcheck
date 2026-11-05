@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { CheckSources, type SourcesResult } from "@/components/CheckSources";
+import { OpinionChips, PointChips } from "@/components/ResearchPanel";
 import { MatchBadge } from "@/components/SourceList";
 import { SourcesTag } from "@/components/SourcesTag";
 import { clock } from "@/lib/format";
@@ -11,14 +12,16 @@ import type { Claim } from "@/lib/types";
 import { TypeTag } from "./ClaimCard";
 
 /**
- * One question in the timeline, as a card: the question, who asked it, then every answer given to it with who answered,
- * the answer and what web pages found for it. It never changes size when a lookup runs: progress shows in place, and
- * the full source list opens in the detail panel. When sources are looked up automatically (`auto`) there is no button:
- * the card shows a spinner from the moment the answer appears, until its sources arrive. Nothing here judges an answer.
+ * One question in the timeline, as a card: the question, who asked it, then every answer given to it with who answered
+ * and the answer. Clicking the question plays the video from there. Under each answer sit the two AI summaries of what
+ * web pages found ("What web pages say", "Other figures and views") and a Sources tag; the full source list opens in the
+ * detail panel only when that tag (or Details) is clicked. A card never changes size when a lookup runs: progress shows in place. When sources are looked up automatically (`auto`)
+ * there is no button: the card shows a spinner from the moment the answer appears, until its sources arrive.
+ * Nothing here judges an answer.
  */
 export function QaCard({ group, auto, running, activeId, selectedId, onPlay, onSelect, onLookedUp }: {
   group: QaGroup; auto: boolean; running: boolean; activeId: string | null; selectedId: string | null;
-  onPlay(c: Claim): void; onSelect(c: Claim): void; onLookedUp(c: Claim, r: SourcesResult): void;
+  onPlay(c: Claim): void; onSelect(c: Claim): void; onLookedUp(c: Claim, r: SourcesResult): void
 }) {
   const first = group.answers[0];
   const type = STATEMENT_TYPES[typeOf(first.statement_type)];
@@ -33,7 +36,7 @@ export function QaCard({ group, auto, running, activeId, selectedId, onPlay, onS
       <article className="qa-card">
         {group.q && (
           <header className="qa-head">
-            <h4 className="qa-q"><button type="button" onClick={() => onSelect(first)}>{group.q}</button></h4>
+            <h4 className="qa-q"><button type="button" onClick={() => onPlay(first)} title="Play the video from here">{group.q}</button></h4>
             <p className="qa-asked">
               {group.implied ? "Question written by AI to fit what was said" : asker ? `Asked by ${asker}` : group.askedBy ? `Asked by ${group.askedBy}` : "Asked in the video"}
             </p>
@@ -69,13 +72,14 @@ function Answer({ c, auto, running, onPlay, onSelect, onLookedUp }: {
         <TypeTag type={c.statement_type} />
         <button type="button" className="qa-ts" onClick={() => onPlay(c)} aria-label={`Play from ${clock(c.start_s)}`}>▶ {clock(c.start_s)}</button>
       </p>
-      <p className="qa-ans-text"><button type="button" onClick={() => onSelect(c)}>{c.claim_text}</button></p>
+      <p className="qa-ans-text">{c.claim_text}</p>
       {sourceable && (
         <div className="qa-src">
           {done ? (
             <>
               {c.sources_summary && <p className="qa-src-text"><b>What web pages say.</b> {c.sources_summary}</p>}
               {c.counter_summary && <p className="qa-src-text"><b>Other figures and views.</b> {c.counter_summary}</p>}
+              {c.research?.opinion ? <OpinionChips research={c.research} /> : <PointChips research={c.research} />}
               <p className="qa-src-row">
                 <SourcesTag c={c} onOpen={() => onSelect(c)} label />
                 {c.sources_match && <MatchBadge match={c.sources_match} />}
