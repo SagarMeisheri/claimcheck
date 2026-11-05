@@ -4,7 +4,7 @@ Before the pipeline: the video's channel row and, if the channel is a known show
 
 EpisodePipeline (SequentialAgent)
   IngestGate       code   metadata + input guardrails (public, finished)
-  ExtractorAgent   LLM    agentic video -> tagged statements (with what was being discussed), sections, summary
+  ExtractorAgent   LLM    agentic video -> questions and their answers (who asked, who answered, tagged), sections, summary
   ClaimFilter      code   cap, content policy in code, which statements can have sources looked up, sections cleaned
   SpeakerProfiler  code   a profile for every named speaker, from the creator profile, the `speakers` table or a
                           web search (agents/speakers.py)
@@ -58,7 +58,7 @@ def build_pipeline(settings: Settings) -> SequentialAgent:
 # (agent name, label shown while it runs, % complete once it has finished)
 STAGE_PROGRESS = [
     ("ingest_gate", "Checking the video details", 12),
-    ("extractor", "Reading the video, tagging statements and sections", 82),
+    ("extractor", "Reading the video, listing questions and answers", 82),
     ("claim_filter", "Applying the content policy", 86),
     ("speaker_profiler", "Building speaker profiles", 96),
     ("publisher", "Saving results", 100),

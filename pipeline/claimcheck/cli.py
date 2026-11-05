@@ -3,6 +3,7 @@
   python -m claimcheck.cli https://www.youtube.com/watch?v=VIDEO_ID
   python -m claimcheck.cli --sources CLAIM_ID            # look up sources for one stored claim
   python -m claimcheck.cli --sources-all EPISODE_ID      # look up sources for every statement of a video
+  python -m claimcheck.cli --qa EPISODE_ID               # the questions for a finished video's Q&A tab
   python -m claimcheck.cli --summarize-missing           # sources summary + match for claims looked up before them
   python -m claimcheck.cli --relink-channels             # give videos saved without a channel their channel + creator
 
@@ -23,6 +24,7 @@ def main() -> None:
     ap.add_argument("url", nargs="?")
     ap.add_argument("--sources", metavar="CLAIM_ID", help="look up sources for one stored claim")
     ap.add_argument("--sources-all", metavar="EPISODE_ID", help="look up sources for every statement of a video")
+    ap.add_argument("--qa", metavar="EPISODE_ID", help="write the Q&A questions for a finished video")
     ap.add_argument("--summarize-missing", action="store_true",
                     help="write the sources summary for claims whose sources were saved without one (no new search)")
     ap.add_argument("--relink-channels", action="store_true",
@@ -48,6 +50,11 @@ def main() -> None:
             return
         asyncio.run(store.start_claim_sources(args.sources))
         print(json.dumps(asyncio.run(run_claim_sources(args.sources, settings=settings, store=store)), indent=2))
+        return
+    if args.qa:
+        from .agents.qa import generate_qa
+
+        print(json.dumps(asyncio.run(generate_qa(args.qa, settings=settings, store=store)), indent=2))
         return
     if args.relink_channels:
         from .maintenance import relink_channels

@@ -7,6 +7,7 @@ talked around.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Optional
 
 from google.adk.agents import BaseAgent
@@ -94,6 +95,8 @@ def build_record(i: int, raw: dict[str, Any], ec: Any, log: bool = True) -> Opti
             ec.log("extract", "claim_schema_invalid", "skipped", str(e)[:200], i)
         return None
     claim.speaker = speaker_label(claim.speaker, ec)
+    claim.question = " ".join((claim.question or "").split())[:300]
+    claim.asked_by = "" if claim.question_kind == "implied" or not claim.question else speaker_label(" ".join((claim.asked_by or "").split())[:80], ec)
     tier, reason = classify_statement(claim, ec.policy)
     rec = ClaimRecord(index=i, start_s=ts_to_seconds(claim.start_ts), claim=claim, effective_tier=tier, not_checked_reason=reason)
     if log and reason == "outside_policy":
@@ -184,6 +187,8 @@ class Publisher(BaseAgent):
         auto = ec.settings.auto_sources and any(sources_status(r) == "not_requested" for r in records)
         await ec.store.update_episode(ec.episode_id, {
             **base, "status": "done", "statement_counts": statement_counts,
+            # Marks a video whose answers carry their questions: the Q&A page and sitemap use it.
+            **({"qa_generated_at": datetime.now(timezone.utc).isoformat()} if any(r.claim.question and r.not_checked_reason != "outside_policy" for r in records) else {}),
             # Set in the same write that publishes the statements, so the page never shows a gap before the batch starts.
             "sources_batch_status": "running" if auto else None,
             "summary": ((st.get("extraction") or {}).get("summary") or "").strip()[:1200] or None,

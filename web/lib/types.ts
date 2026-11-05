@@ -27,6 +27,9 @@ export interface Claim {
   claim_text: string; // AI paraphrase of what was said
   context_quote: string | null; // AI transcript of the spoken words
   statement_context: string | null; // AI: what was being discussed when it was said
+  question?: string | null; // the question this answer responds to (videos analysed since answers were extracted)
+  asked_by?: string | null;
+  question_kind?: "asked" | "implied" | null; // implied: the AI wrote the question for a passage nobody prompted
   section_idx: number | null;
   pestle_area: Pestle;
   topic: string | null;
@@ -64,7 +67,13 @@ export interface PreviewClaim {
   counter_summary: string | null;
   section_idx: number | null;
   statement_context: string | null;
+  question?: string | null;
+  asked_by?: string | null;
+  question_kind?: "asked" | "implied" | null;
 }
+
+/** One Q&A question and the ids of the stored statements that answer it (written by the AI; the answers are the statements). */
+export interface QaEntry { q: string; claim_ids: string[] }
 
 export interface Episode {
   id: string;
@@ -84,6 +93,7 @@ export interface Episode {
   progress?: Progress | null;
   creator?: CreatorProfile | null; // the show's profile, if the channel is a known creator
   speakers?: EpisodeSpeaker[];
+  qa?: QaEntry[] | null; // the Q&A page's questions; only loaded for a single video
   statement_counts: Partial<Record<StatementType, number>>; // every tagged statement, by type
   // Derived for the feed
   pestle_areas?: Pestle[];

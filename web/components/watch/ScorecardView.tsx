@@ -13,11 +13,12 @@ import { CheckAllSources } from "@/components/CheckAllSources";
 import { CheckedAt } from "@/components/CheckedAt";
 import { type CardPhase } from "./ClaimCard";
 import { StatementDetail } from "./StatementDetail";
-import { TimelineItem, groupBySection } from "@/components/feed/StatementCarousel";
+import { groupBySection } from "@/components/feed/StatementCarousel";
+import { QaCard } from "./QaCard";
+import { groupByQuestion } from "@/lib/qa";
 import { Drawer, PaneNav } from "@/components/Drawer";
 import { ClaimTrack } from "./ClaimTrack";
 import { ProfileTabs } from "./ProfileTabs";
-import { ViewSwitch } from "@/components/ViewSwitch";
 import type { SourcesResult } from "@/components/CheckSources";
 import { YouTubePlayer, type PlayerHandle } from "./YouTubePlayer";
 
@@ -75,6 +76,9 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   }, [ep.claims]);
   const searchingCount = ep.claims.filter((c) => SEARCHING.includes(c.sources_status)).length;
   const checking = ep.status === "processing" || ep.status === "queued";
+  // Videos analysed as questions and answers say so; older ones are lists of statements.
+  const qa = ep.claims.some((c) => !!c.question);
+  const nouns = qa ? { one: "answer", many: "answers" } : { one: "statement", many: "statements" };
 
   const [view, setView] = useState<View>(initialView ?? "all");
   const [match, setMatch] = useState<SourcesMatch | null>(initialMatch ?? null);
@@ -331,7 +335,6 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         )}
 
         <header className="score-head">
-          <ViewSwitch videoId={ep.youtube_video_id} current="interactive" status={ep.status} />
           <h1>{ep.title}</h1>
           <div className="watch-channel">
             <Avatar name={ep.channel_name} />
@@ -351,7 +354,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         {ep.claims.length > 0 && (
           <section className="score-summary" aria-label="Breakdown">
             <p className="score-line">
-              <strong>{ep.claims.length} statements</strong>
+              <strong>{ep.claims.length} {ep.claims.length === 1 ? nouns.one : nouns.many}</strong>
               <span className="meta">
                 {withSources.length} with sources{searchingCount > 0 && ` · searching ${searchingCount} now`}
                 {ep.sources_checked_at && <> · <CheckedAt iso={ep.sources_checked_at} prefix="last checked" /></>}
@@ -396,7 +399,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           {playable.length === 0
             ? <p className="meta pad">{view === "with_sources" ? "No sources looked up yet. Press Check sources on any claim."
                 : view !== "all" ? `No ${STATEMENT_TYPES[view].plural} in this video.`
-                : checking ? "Statements appear here as they are found." : "No statements for this video."}</p>
+                : checking ? `${qa || ep.claims.length === 0 ? "Questions and answers" : "Statements"} appear here as they are found.` : "No questions or statements for this video."}</p>
             : groups.map((g, gi) => (
               <section key={`${g.key}-${gi}`} className="tl-group" id={g.section ? `sec-${g.section.idx}` : undefined}>
                 {g.section && (
@@ -407,11 +410,10 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
                     {g.section.summary && <p className="tl-summary">{g.section.summary}</p>}
                   </header>
                 )}
-                <ol className="tl-list">
-                  {g.items.map((c) => (
-                    <TimelineItem key={c.id} c={c} active={activeId === c.id} selected={selected?.id === c.id}
-                                  onPlay={() => playMoment(c)} onSelect={() => select(c)} onOpen={() => select(c)}
-                                  onLookedUp={(_, r) => lookedUp(c, r)} />
+                <ol className="qa-list">
+                  {groupByQuestion(g.items).map((grp) => (
+                    <QaCard key={grp.answers[0].id} group={grp} activeId={activeId} selectedId={selected?.id ?? null}
+                            onPlay={playMoment} onSelect={select} onLookedUp={lookedUp} />
                   ))}
                 </ol>
               </section>
@@ -421,8 +423,10 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         <details className="fold">
           <summary>How this video was analysed</summary>
           <ul className="nclist">
-            <li>An AI watched the video, listed {ep.claims.length} statements with their timestamps and what was being discussed, and tagged each one as a claim, opinion, forecast, advice, story, question or other.</li>
-            <li>The wording of each statement, the transcript, the speaker names and the tags are AI output and can be wrong. Use &quot;Watch 20 s&quot; to hear the original, and &quot;Report a problem&quot; if something is off.</li>
+            <li>{qa
+              ? <>An AI watched the video and listed {ep.claims.length} questions with their answers, with timestamps and who answered, and tagged each answer as mostly a claim, opinion, forecast, advice, story or other.</>
+              : <>An AI watched the video, listed {ep.claims.length} statements with their timestamps and what was being discussed, and tagged each one as a claim, opinion, forecast, advice, story, question or other.</>}</li>
+            <li>The questions, the wording of each answer, the transcript, the speaker names and the tags are AI output and can be wrong. Use &quot;Watch 20 s&quot; to hear the original, and &quot;Report a problem&quot; if something is off.</li>
             <li>Nothing is judged true or false. On any statement except questions and stories, &quot;Check sources&quot; runs a web search and shows the top results with an AI summary of their excerpts. Statements with figures or on disputed subjects also get a second search for official data, other figures or other viewpoints, aimed using public profiles of the speaker and the show.</li>
             <li><Link href="/method">How it works</Link></li>
             <li><a href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}&t=${Math.floor(time)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube from {clock(time)}</a></li>
