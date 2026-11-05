@@ -40,6 +40,9 @@ class ExtractedClaim(BaseModel):
     claim: str = Field(description="The statement, self-contained, speaker's numbers kept exactly")
     context_quote: str = Field(description="The spoken words as heard, up to ~40 words")
     statement_context: str = ""  # what was being discussed when it was said, one neutral line
+    question: str = ""  # the question this answer responds to (empty for statements saved before answers were extracted)
+    asked_by: str = ""
+    question_kind: Optional[Literal["asked", "implied"]] = None
     pestle_area: PestleArea
     topic: str = Field(description="First subject tag; same as topics[0]")
     topics: list[str] = Field(default_factory=list, description="1-2 free-form subject tags")
@@ -68,16 +71,20 @@ class ExtractedClaim(BaseModel):
 
 
 class ExtractedStatement(BaseModel):
-    """What the extractor model returns. statement_type is required so the model can't skip the tag."""
+    """What the extractor model returns: one answer to one question. The field is still called `claim` (and the type
+    `statement_type`) because every later step, the source search included, works on that text."""
 
-    start_ts: str = Field(description="HH:MM:SS or MM:SS where the statement starts")
-    speaker: str = Field(description="Name only if it is said or shown on screen in the video, otherwise a role (Host, Guest 1)")
-    claim: str = Field(description="The statement, self-contained, speaker's numbers kept exactly")
+    start_ts: str = Field(description="HH:MM:SS or MM:SS where the answer starts")
+    question: str = Field(description="The question this answer responds to: plain words, self-contained, at most 25 words, ends with '?'")
+    question_kind: Literal["asked", "implied"] = Field(description="'asked' if someone put the question; 'implied' if you wrote it for a passage nobody prompted")
+    asked_by: str = Field(description="Who asked it (name only if said or shown on screen, otherwise a role such as Host); empty if implied")
+    speaker: str = Field(description="Who gave this answer. Name only if it is said or shown on screen in the video, otherwise a role (Host, Guest 1)")
+    claim: str = Field(description="The answer in plain words, at most 80 words, speaker's numbers kept exactly")
     context_quote: str = Field(description="The spoken words as you heard them (Hindi or English as spoken), up to ~40 words")
     statement_context: str = Field(description="Required: one neutral line (at most 20 words) on what was being discussed when this was said")
-    statement_type: StatementType = Field(description="Required tag: factual_claim, opinion, forecast, advice, story, question or other")
+    statement_type: StatementType = Field(description="What the answer mostly is: factual_claim, opinion, forecast, advice, story or other (never question)")
     pestle_area: PestleArea
-    topics: list[str] = Field(description="1-2 short subject names (plain words) saying what the statement is about, most relevant first")
+    topics: list[str] = Field(description="1-2 short subject names (plain words) saying what the answer is about, most relevant first")
     policy_tier: PolicyTier
     refers_to_visual: bool = False
 
@@ -115,6 +122,18 @@ class SourcesSummary(BaseModel):
     summary: str = Field(default="", description="1-2 plain, neutral sentences (at most 45 words) summarising what the excerpts say, with their own figures and dates")
     match: Literal["high", "medium", "low"] = Field(default="low", description="How directly the excerpts address what the statement says (not whether they agree): high = the same specific point, medium = the same topic but not the specific point, low = loosely related or nothing relevant")
     counter_summary: str = Field(default="", description="1-2 plain, neutral sentences (at most 45 words) on what the OTHER pages say, with their own figures and dates; empty if there are none")
+
+
+# --- Q&A view (agents/qa.py) ---------------------------------------------------------------------
+class QaItemOut(BaseModel):
+    """One question for the Q&A view and the numbered statements that answer it."""
+
+    question: str = Field(description="A neutral question a reader would ask, answered by the cited statements alone")
+    statements: list[int] = Field(description="Numbers of the 1-3 statements that answer the question")
+
+
+class QaOut(BaseModel):
+    items: list[QaItemOut] = Field(default_factory=list)
 
 
 # --- Speaker profiles (agents/speakers.py) -------------------------------------------------------

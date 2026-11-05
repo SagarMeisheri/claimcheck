@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { ChannelPage, Claim, CreatorProfile, Episode, EpisodeDetail, EpisodeSpeaker, OpenReport, Pestle, PreviewClaim, Progress, Section, SidebarVideo, Source,
-  SourcesMatch, SourcesStatus } from "./types";
+  QaEntry, SourcesMatch, SourcesStatus } from "./types";
 import { mergeCounts, typeOf } from "./statements";
 
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -26,13 +26,13 @@ type EpisodeRow = {
   id: string; youtube_video_id: string; title: string | null; duration_s: number | null; published_at: string | null;
   status: string; skip_reason?: string | null; created_at: string; channel_id: string | null;
   statement_counts?: Record<string, number> | null; summary?: string | null; sources_batch_status?: string | null;
-  creator_id?: string | null; sections?: Section[] | null; progress?: Progress | null;
+  creator_id?: string | null; sections?: Section[] | null; progress?: Progress | null; qa?: QaEntry[] | null;
   channels: { name: string } | null;
 };
 
 const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, statement_counts, summary, sources_batch_status, created_at, channel_id, creator_id, sections, progress, channels(name)";
 const SOURCE_COLS = "claim_sources(url, title, tier, excerpt, publish_date, rank, kind)";
-const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, section_idx, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, sources_checked_at, ${SOURCE_COLS}`;
+const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, question, asked_by, question_kind, section_idx, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, sources_checked_at, ${SOURCE_COLS}`;
 const CREATOR_COLS = "id, podcast, youtube_channel_name, youtube_handles, country, summary, public_profile";
 const SPEAKER_COLS = "episode_id, label, role, statements, speakers(id, name, summary, sources, public_profile)";
 
@@ -48,7 +48,7 @@ function toEpisode(r: EpisodeRow): Episode {
     duration_s: r.duration_s ?? 0, published_at: r.published_at, status: r.status, skip_reason: r.skip_reason,
     statement_counts: mergeCounts(r.statement_counts ?? {}), summary: r.summary ?? null,
     sources_batch: r.sources_batch_status ?? null, created_at: r.created_at,
-    creator_id: r.creator_id ?? null, sections: r.sections ?? [], progress: r.progress ?? null,
+    creator_id: r.creator_id ?? null, sections: r.sections ?? [], progress: r.progress ?? null, qa: r.qa ?? null,
   };
 }
 
@@ -76,6 +76,7 @@ function toPreview(c: Claim): PreviewClaim {
     sources: c.sources.map((s) => ({ ...s, excerpt: "" })), sources_summary: c.sources_summary ?? null, sources_match: c.sources_match ?? null,
     sources_route: c.sources_route ?? null, counter_sources: c.counter_sources.map((s) => ({ ...s, excerpt: "" })),
     counter_summary: c.counter_summary ?? null, section_idx: c.section_idx ?? null, statement_context: c.statement_context ?? null,
+    question: c.question ?? null, asked_by: c.asked_by ?? null, question_kind: c.question_kind ?? null,
   };
 }
 
@@ -159,7 +160,7 @@ export async function getSidebarVideos(limit = 200): Promise<SidebarVideo[]> {
 
 export async function getEpisodeByVideo(videoId: string): Promise<EpisodeDetail | null> {
   const db = publicDb();
-  const { data: ep } = await db.from("episodes").select(EP_COLS).eq("youtube_video_id", videoId).maybeSingle();
+  const { data: ep } = await db.from("episodes").select(`${EP_COLS}, qa`).eq("youtube_video_id", videoId).maybeSingle();
   if (!ep) return null;
   const epId = (ep as any).id as string;
   const creatorId = (ep as any).creator_id as string | null;

@@ -31,7 +31,16 @@ export function StatementDetail({ claim: c, videoId, phase, countdown, hasNext, 
         {c.speaker && <span className="meta" title="Speaker as identified by AI from the video">{c.speaker} <span className="ai-note">(identified by AI)</span></span>}
         {phase === "playing" && <span className="cc-playing">Playing</span>}
       </p>
-      <h3 id={titleId} className="sdrawer-claim">{c.claim_text}</h3>
+      {c.question ? (
+        <>
+          <h3 id={titleId} className="sdrawer-claim">{c.question}</h3>
+          <p className="sdetail-asked">
+            {c.question_kind === "implied" ? "Question written by AI to fit what was said"
+              : c.asked_by ? `Asked by ${c.asked_by}` : "Question"}
+          </p>
+          <p className="sdetail-answer"><span className="ai-note">Answer</span> {c.claim_text}</p>
+        </>
+      ) : <h3 id={titleId} className="sdrawer-claim">{c.claim_text}</h3>}
       {c.statement_context && <p className="cc-context"><span className="ai-note">Context</span> {c.statement_context}</p>}
       {c.context_quote && (
         showQuote

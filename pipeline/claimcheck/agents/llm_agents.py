@@ -16,7 +16,7 @@ from .. import prompts
 from ..config import Settings
 from ..context import get_context
 from ..guardrails.injection import screen_text, wrap_untrusted
-from ..schemas import ExtractionResult, SourcesSummary, SpeakerProfileOut
+from ..schemas import ExtractionResult, QaOut, SourcesSummary, SpeakerProfileOut
 
 
 def _model(name: str, settings: Settings) -> Any:
@@ -88,6 +88,18 @@ def summarizer_agent(s: Settings, name: str = "source_summarizer") -> LlmAgent:
     return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.SUMMARIZE,
                     include_contents="none", output_schema=SourcesSummary, output_key="summary",
                     generate_content_config=cfg, before_model_callback=inject_pages)
+
+
+# --- Q&A view --------------------------------------------------------------------------------------
+
+def qa_agent(s: Settings, name: str = "qa_writer") -> LlmAgent:
+    """Picks the questions for the Q&A view and the statements that answer them. The statements are read from state."""
+    cfg = types.GenerateContentConfig()
+    level = (s.summary_thinking or "default").strip().upper()
+    if level != "DEFAULT":
+        cfg.thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel(level))
+    return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.QA,
+                    include_contents="none", output_schema=QaOut, output_key="qa", generate_content_config=cfg)
 
 
 # --- Speaker profiles ------------------------------------------------------------------------------

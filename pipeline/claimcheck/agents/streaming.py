@@ -1,4 +1,4 @@
-"""Streams extracted statements to the database while the extractor is still writing them.
+"""Streams extracted answers (each saved with its question) to the database while the extractor is still writing them.
 
 The extractor returns one JSON object, {"claims": [...], "summary": "..."}. With streaming on, ADK emits the
 reply in pieces; this module pulls each complete statement out of the claims array as soon as its closing
@@ -139,7 +139,7 @@ class StatementStreamer:
             await self.ec.store.update_episode(self.ec.episode_id, {"statement_counts": dict(self._counts)})
         except Exception:
             log.exception("could not update statement counts")
-        await report_progress(self.ec, f"Reading the video: {self.saved} statements found so far", pct)
+        await report_progress(self.ec, f"Reading the video: {self.saved} answers found so far", pct)
 
     async def finish(self) -> None:
         log.info("extractor timing: %s statements streamed, run finished at +%.1fs", self.saved, time.monotonic() - self.started)

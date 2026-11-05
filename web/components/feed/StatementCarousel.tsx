@@ -35,7 +35,8 @@ export function TimelineItem({ c, active, selected = false, onPlay, onSelect, on
       <span className="bd-dot tl-dot" style={{ background: t.cssVar }} title={t.label} aria-hidden="true" />
       <button type="button" className={`tl-text${isQuestion ? " is-question" : ""}${match ? ` m-${match}` : ""}`} onClick={() => (onSelect ?? onPlay)(c)}
               title={match ? `${MATCH_WORD[match]} match: ${MATCH_MEANING[match]}` : undefined}
-              aria-label={`${t.label} at ${clock(c.start_s)}${who ? `, ${who}` : ""}: ${c.claim_text}.${match ? ` ${MATCH_WORD[match]} source match.` : ""} ${onSelect ? "Show details" : "Play from here"}`}>
+              aria-label={`${c.question ? `Question: ${c.question}. Answer: ` : ""}${t.label} at ${clock(c.start_s)}${who ? `, ${who}` : ""}: ${c.claim_text}.${match ? ` ${MATCH_WORD[match]} source match.` : ""} ${onSelect ? "Show details" : "Play from here"}`}>
+        {c.question && <span className="tl-q">{c.question}</span>}
         {who && <span className="tl-who" title="Speaker as identified by AI from the video">{who}:</span>}{who && " "}
         {c.claim_text}
       </button>

@@ -29,7 +29,7 @@ export function CheckProgress({ videoId, compact = false, showSteps, initialStep
         if (!r.ok || stop) return;
         const j = (await r.json()) as Status;
         setS(j);
-        // New statements were saved since the last look: refresh the page so they show up while the check runs.
+        // New answers were saved since the last look: refresh the page so they show up while the check runs.
         if (j.statements > seen.current) { seen.current = j.statements; router.refresh(); }
         if (!RUNNING.includes(j.status)) { stop = true; window.clearInterval(id); router.refresh(); }
       } catch { /* keep the last state; try again next tick */ }
@@ -67,7 +67,7 @@ export function CheckProgress({ videoId, compact = false, showSteps, initialStep
           ))}
         </ol>
       )}
-      {!compact && <p className="meta">Statements appear as they are found. This updates on its own.</p>}
+      {!compact && <p className="meta">Questions and answers appear as they are found. This updates on its own.</p>}
     </div>
   );
 }
