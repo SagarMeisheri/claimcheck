@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { requestSources } from "@/app/actions";
-import type { Source, SourcesMatch, SourcesRoute, SourcesStatus } from "@/lib/types";
+import type { Research, Source, SourcesMatch, SourcesRoute, SourcesStatus } from "@/lib/types";
 import { SEARCHING } from "@/lib/statements";
 import { SourceList } from "./SourceList";
 
@@ -17,7 +17,7 @@ const NONE: Source[] = []; // stable default: a fresh [] each render would re-ru
  * full: the video page (summary and the numbered list). compact: the home carousel (summary and numbered site links).
  */
 export type SourcesResult = { status: SourcesStatus; error: string | null; sources: Source[]; summary: string | null; match: SourcesMatch | null;
-  counter?: Source[]; counter_summary?: string | null; route?: SourcesRoute | null };
+  counter?: Source[]; counter_summary?: string | null; route?: SourcesRoute | null; research?: Research | null };
 
 export function CheckSources({ claimId, status: initial, error: initialError, sources: initialSources = NONE, summary: initialSummary = null,
   match: initialMatch = null, counter: initialCounter = NONE, counterSummary: initialCounterSummary = null, route: initialRoute = null,

@@ -15,7 +15,7 @@ from claimcheck.tools.evidence import best_excerpt, clean_excerpt, search_source
 
 POLICY = load_policy()
 SETTINGS = Settings(max_cost_usd_per_episode=3.0, sources_per_claim=5, sources_concurrency=3, search_cost_usd=0.005,
-                    summarize_sources=False, triage_sources=False)  # summaries and triage: see the tests at the end
+                    summarize_sources=False, triage_sources=False, research_sources=False)  # summaries and triage: see the tests at the end
 
 
 def hit(url, title="t", excerpts=("Some text from the page.",), date=None):
@@ -106,7 +106,8 @@ class FakeStore:
     async def get_episode(self, eid):
         return {"id": eid, "status": "done", "cost_usd": 0}
 
-    async def list_batch_claims(self, eid):
+    async def list_batch_claims(self, eid, recheck=False):
+        self.recheck = recheck
         return self.batch
 
     async def set_sources_status(self, cid, status, error=None):
@@ -123,7 +124,7 @@ class FakeStore:
         self.routes[cid] = route
         self.status[cid] = ("not_requested", None)
 
-    async def save_claim_sources(self, cid, found, summary="", match="", *, counter=None, counter_summary="", route=None, triage=None):
+    async def save_claim_sources(self, cid, found, summary="", match="", *, counter=None, counter_summary="", route=None, triage=None, research=None):
         self.routes = getattr(self, "routes", {})
         self.routes[cid] = route
         self.counter = getattr(self, "counter", {})
@@ -213,9 +214,22 @@ def test_all_claims_stop_at_the_budget_and_return_the_rest(monkeypatch):
     store = FakeStore(batch=claims(10))
     out = asyncio.run(run_video_sources("e1", settings=Settings(max_cost_usd_per_episode=0.02, search_cost_usd=0.005,
                                                                  sources_concurrency=3, summarize_sources=False,
-                                                                 triage_sources=False), store=store))
+                                                                 triage_sources=False, research_sources=False), store=store))
     assert out["searched"] == 4 and len(store.saved) == 4  # $0.02 pays for 4 searches; earliest claims first
     assert set(store.saved) == {"id9", "id8", "id7", "id6"}
+
+
+def test_a_recheck_asks_for_every_answer_and_leaves_those_over_the_budget_as_they_were(monkeypatch):
+    monkeypatch.setattr(evidence, "_client", lambda s: FakeParallel([hit("https://a.example/x")]))
+    batch = [{**c, "sources_status": "done" if c["idx"] % 2 == 0 else "not_requested"} for c in claims(6)]
+    store = FakeStore(batch=batch)
+    cfg = Settings(max_cost_usd_per_episode=0.02, search_cost_usd=0.005, sources_concurrency=3, summarize_sources=False, triage_sources=False, research_sources=False)
+    out = asyncio.run(run_video_sources("e1", settings=cfg, store=store, recheck=True))
+    assert store.recheck is True and out["searched"] == 4
+    assert set(store.saved) == {"id5", "id4", "id3", "id2"}            # earliest first; $0.02 pays for 4
+    assert "id1" not in store.status and "id0" not in store.status   # answers over the budget are left exactly as they were
+    asyncio.run(run_video_sources("e1", settings=cfg, store=store))
+    assert store.recheck is False
 
 
 def test_one_failed_search_does_not_stop_the_others(monkeypatch):

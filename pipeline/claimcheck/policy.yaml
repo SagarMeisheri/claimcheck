@@ -18,7 +18,27 @@ pestle_areas: [political, economic, social, technological, legal, environmental]
 # --- Sources --------------------------------------------------------------------
 # Whatever the web search returns is shown. Tiers below are only a display label ("Official source",
 # "News or research organisation"); they never hide a result. The blocklist is sent to Parallel with the search.
+# The two camps the opinion check looks up, by the show's country code (agents/opinion.py). The model doesn't choose who counts.
+politics:
+  in:
+    ruling: "the BJP-led National Democratic Alliance (NDA) government"
+    opposition: "the opposition: the Indian National Congress and the INDIA bloc parties"
+  us:
+    ruling: "the party that holds the presidency"
+    opposition: "the main opposition party"
+  gb:
+    ruling: "the party that leads the government"
+    opposition: "the main opposition parties"
+  default:
+    ruling: "the governing party or coalition"
+    opposition: "the main opposition parties"
+
 sources:
+  # Pages that are the episode itself or a listing / transcript of it. They repeat what was said, so they can't be a
+  # source for it: the research lookup drops them (agents/independence.py).
+  same_episode_hosts: [listennotes.com, podscripts.co, podchaser.com, podtail.com, player.fm, spotify.com, podcasts.apple.com,
+                       castbox.fm, ulisten.ai, tapesearch.com, snipd.com, podbean.com, youtubetranscript.com, tactiq.io,
+                       happyscribe.com, podcastindex.org, pocketcasts.com, overcast.fm, deezer.com]
   tier1_suffixes: [".gov.in", ".nic.in", ".gov"]
   tier1_domains:
     - rbi.org.in

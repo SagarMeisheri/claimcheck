@@ -50,7 +50,8 @@ class Store(Protocol):
     async def set_sources_status(self, claim_id: str, status: str, error: Optional[str] = None) -> None: ...
     async def save_claim_sources(self, claim_id: str, sources: list[Source], summary: str = "", match: str = "", *,
                                  counter: Optional[list[Source]] = None, counter_summary: str = "",
-                                 route: Optional[str] = None, triage: Optional[dict[str, Any]] = None) -> None: ...
+                                 route: Optional[str] = None, triage: Optional[dict[str, Any]] = None,
+                                 research: Optional[dict[str, Any]] = None) -> None: ...
     async def save_sources_route(self, claim_id: str, route: str, triage: Optional[dict[str, Any]] = None) -> None: ...
     # Creators, speakers, sections
     async def get_creator_by_channel(self, youtube_channel_id: str) -> Optional[dict[str, Any]]: ...
@@ -165,16 +166,17 @@ class SupabaseStore:
              .eq("id", episode_id).limit(1).execute())
         return r.data[0] if r.data else None
 
-    async def list_batch_claims(self, episode_id):
+    async def list_batch_claims(self, episode_id, recheck=False):
         """Statements "Check sources for all" may take: not a question or story, not redacted, no sources yet, not running,
-        and not already set aside by the classifier (sources_route 'skip'; a viewer can still press Check sources)."""
+        and not already set aside by the classifier (sources_route 'skip'; a viewer can still press Check sources).
+        recheck: every such statement, including finished lookups and ones the classifier once skipped, but never one running."""
         r = (self.db.table("claims")
              .select("id, idx, start_s, speaker, claim_text, statement_context, question, section_idx, pestle_area, topic, topics, "
                      "statement_type, policy_tier, sources_status, sources_route")
              .eq("episode_id", episode_id).not_.in_("statement_type", ["question", "story"])
-             .in_("sources_status", ["not_requested", "failed"]).neq("policy_tier", "never")
+             .in_("sources_status", ["not_requested", "failed"] + (["done"] if recheck else [])).neq("policy_tier", "never")
              .or_("not_checked_reason.is.null,not_checked_reason.neq.outside_policy").order("start_s").limit(200).execute())
-        return [c for c in (r.data or []) if c.get("sources_route") != "skip"]
+        return [c for c in (r.data or []) if recheck or c.get("sources_route") != "skip"]
 
     async def list_claims_for_qa(self, episode_id):
         """Every statement of a video, in the order said, for the Q&A step to choose from."""
@@ -200,7 +202,7 @@ class SupabaseStore:
         self.db.table("claims").update({"sources_status": status, "sources_error": error}).eq("id", claim_id).execute()
 
     async def save_claim_sources(self, claim_id, sources, summary="", match="", *, counter=None, counter_summary="",
-                                 route=None, triage=None):
+                                 route=None, triage=None, research=None):
         """Both groups of sources (related, then counter) and the summaries, in one go."""
         self.db.table("claim_sources").delete().eq("claim_id", claim_id).execute()
         rows = [{**s.model_dump(), "kind": "related", "claim_id": claim_id} for s in sources]
@@ -213,6 +215,7 @@ class SupabaseStore:
             fields["sources_route"] = route
         if triage is not None:
             fields["sources_triage"] = triage
+        fields["research"] = research  # None for a plain search, so an earlier lookup's research never lingers
         self.db.table("claims").update(fields).eq("id", claim_id).execute()
 
     async def save_sources_route(self, claim_id, route, triage=None):

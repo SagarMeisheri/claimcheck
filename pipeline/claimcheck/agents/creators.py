@@ -41,6 +41,9 @@ def creator_row(meta: dict[str, Any], out: Optional[CreatorProfileOut]) -> dict[
         "hosts": _clip(out.hosts, 200), "host_background": _clip(out.host_background, 160), "host_bio": _clip(out.host_bio, 500),
         "topics": [_clip(t, 60) for t in out.topics[:8] if t.strip()], "known_for": _clip(out.known_for, 400),
         "criticism": _clip(out.criticism, 500),
+        "public_opinion": _clip(out.public_opinion, 600),
+        "leaning": _clip(out.leaning, 300) if out.leaning_basis != "none" else "",
+        "leaning_basis": out.leaning_basis if out.leaning.strip() and out.leaning_basis != "none" else "",
     }.items() if v}
     return {**base, "podcast": _clip(out.podcast, 120) or channel, "country": _clip(out.country, 60) or "Unknown",
             "summary": _clip(out.summary, 400) or None, "profile": profile}
@@ -54,7 +57,7 @@ async def _search(meta: dict[str, Any]) -> list[Any]:
     return await search_sources(
         channel, dataclasses.replace(s, excerpt_chars=700, sources_per_claim=5), ec.policy,
         objective=(f"What is the YouTube show or channel \"{channel}\"? Find who hosts it, what it covers, where it is based and "
-                   f"any notable public criticism. A video titled \"{title}\" was published on it."),
+                   f"its political leaning if any, and how the public and the press view it (praise and criticism). A video titled \"{title}\" was published on it."),
         extra_queries=[f"{channel} YouTube channel hosts", f"{channel} podcast about"], location=s.default_search_location)
 
 

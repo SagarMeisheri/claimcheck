@@ -71,6 +71,29 @@ def _host_summary(host: str, creator: dict[str, Any]) -> str:
     return f"Host of {podcast}" + (f", with {', '.join(others[:3])}" if others else "") + "."
 
 
+async def host_row(host: str, creator: dict[str, Any], meta: dict[str, Any]) -> dict[str, Any]:
+    """A host's speakers row: the creator-profile one, plus their own political leaning and public opinion from one search (the
+    show's profile describes the show, not each host). A failed or budget-limited search leaves the plain row."""
+    row = host_profile(host, creator)
+    ec = get_context()
+    s = ec.settings
+    if not s.profile_speakers or ec.budget.spent_usd + s.search_cost_usd > ec.budget.cap_usd:
+        return row
+    try:
+        found = await build_profile(host, meta, [])
+    except Exception as e:
+        ec.log("speakers", "host_profile_failed", "skipped", f"{host}: {type(e).__name__}: {e}"[:300])
+        return row
+    if found.get("status") == "ready":
+        p = found["profile"]
+        row["profile"].update({k: p[k] for k in ("leaning", "leaning_basis", "public_opinion") if p.get(k)})
+        for k in ("affiliations",):
+            if p.get(k) and not row["profile"].get(k):
+                row["profile"][k] = p[k]
+        row["sources"] = found.get("sources") or []
+    return row
+
+
 def appearance(meta: dict[str, Any], topics: list[str], described_as: str = "") -> str:
     title, channel = meta.get("title") or "", meta.get("channel_title") or ""
     where = f"the YouTube video \"{title}\"" + (f" on the channel {channel}" if channel else "")
@@ -97,9 +120,9 @@ async def build_profile(label: str, meta: dict[str, Any], topics: list[str], des
     ec.budget.add(s.search_cost_usd)
     found = await search_sources(
         label, dataclasses.replace(s, excerpt_chars=700, sources_per_claim=5), ec.policy,
-        objective=(f"Who is {label}? Find their profession, current role, organisations, public positions and notable "
-                   f"criticisms. They appeared in {where}."),
-        extra_queries=[f"{label} biography", f"{label} {' '.join(topics[:2])}"], location=search_location(ec.creator, s.default_search_location))
+        objective=(f"Who is {label}? Find their profession, current role, organisations, public positions, political "
+                   f"leaning, and how the public and the press view them (praise and criticism). They appeared in {where}."),
+        extra_queries=[f"{label} biography", f"{label} political views", f"{label} public opinion criticism praise"], location=search_location(ec.creator, s.default_search_location))
     row: dict[str, Any] = {"name": label, "name_key": name_key(label), "status": "not_found", "summary": None,
                            "profile": {}, "sources": [{"url": x.url, "title": x.title} for x in found[:5]]}
     pages = [{"n": i + 1, "group": "SEARCH", "title": x.title, "site": domain_of(x.url), "text": x.excerpt}
@@ -124,6 +147,9 @@ async def build_profile(label: str, meta: dict[str, Any], topics: list[str], des
         "affiliations": [clip(a, 80) for a in out.affiliations[:8] if a.strip()],
         "topics": [clip(t, 60) for t in out.topics[:8] if t.strip()],
         "known_positions": clip(out.known_positions, 500), "criticisms": clip(out.criticisms, 500),
+        "public_opinion": clip(out.public_opinion, 600),
+        "leaning": clip(out.leaning, 300) if out.leaning_basis != "none" else "",
+        "leaning_basis": out.leaning_basis if out.leaning.strip() and out.leaning_basis != "none" else "",
     }.items() if v})
     return row
 
@@ -156,7 +182,7 @@ async def profile_speakers(records: list[ClaimRecord], meta: dict[str, Any]) -> 
             if len(groups) == 1:
                 try:
                     host = groups[0][-1]
-                    sp = await store.get_speaker(name_key(host)) or await store.save_speaker(host_profile(host, ec.creator))
+                    sp = await store.get_speaker(name_key(host)) or await store.save_speaker(await host_row(host, ec.creator, meta))
                     row["speaker_id"] = (sp or {}).get("id")
                 except Exception:
                     log.exception("host lookup failed for %r", label)
@@ -165,7 +191,7 @@ async def profile_speakers(records: list[ClaimRecord], meta: dict[str, Any]) -> 
             host = match_host(label, ec.creator)
             if host:
                 key = name_key(host)
-                sp = await store.get_speaker(key) or await store.save_speaker(host_profile(host, ec.creator))
+                sp = await store.get_speaker(key) or await store.save_speaker(await host_row(host, ec.creator, meta))
                 row.update(speaker_id=(sp or {}).get("id"), role="host")
                 continue
             existing = await store.get_speaker(name_key(label))

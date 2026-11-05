@@ -35,6 +35,9 @@ class Store:
     async def set_sources_status(self, claim_id, status, error=None):
         self.status.append((claim_id, status))
 
+    async def get_episode(self, episode_id):
+        return {"id": episode_id, "youtube_video_id": "VID123", "title": "The episode"}
+
     async def get_creator(self, creator_id):
         return None
 

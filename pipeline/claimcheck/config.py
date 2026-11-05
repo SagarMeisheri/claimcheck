@@ -91,6 +91,21 @@ class Settings:
     # Before a lookup, a classifier (ADK ClassifierNode, agents/sources.py) decides how to look the statement up:
     # skip (background, self-description, vague), related (one search), data or contested (one more search for
     # different figures or other perspectives, aimed with the speaker's and creator's profiles).
+    # Researching an answer (agents/research.py): a planner turns the answer into checkable points with new queries (not the
+    # answer's own words), pages from the speaker's own organisation and the episode itself are set aside, the best pages are
+    # read (not only their search excerpts) and each finding carries a quote checked against the page. If it fails, the
+    # lookup falls back to the plain search and summary.
+    research_sources: bool = _env("CLAIMCHECK_RESEARCH_SOURCES", "1") == "1"
+    research_max_points: int = int(_env("CLAIMCHECK_RESEARCH_MAX_POINTS", "2"))
+    research_pages: int = int(_env("CLAIMCHECK_RESEARCH_PAGES", "5"))  # pages read per answer
+    research_retry: bool = _env("CLAIMCHECK_RESEARCH_RETRY", "1") == "1"  # one rewritten-query retry for an unanswered point
+    # Rough costs, used only to plan budgets (the model calls are counted from tokens; extract_cost_usd is an assumption).
+    extract_cost_usd: float = float(_env("CLAIMCHECK_EXTRACT_COST_USD", "0.005"))
+    research_cost_estimate_usd: float = float(_env("CLAIMCHECK_RESEARCH_COST_ESTIMATE_USD", "0.012"))  # planner + reader
+    # Opinion assessment (agents/opinion.py): for opinions and contested answers, what the governing side and the opposition say,
+    # evidenced bias signals from the speaker's and show's profiles, and a judge's short assessment. Needs research_sources.
+    opinion_check: bool = _env("CLAIMCHECK_OPINION_CHECK", "1") == "1"
+    opinion_cost_estimate_usd: float = float(_env("CLAIMCHECK_OPINION_COST_ESTIMATE_USD", "0.03"))  # stance plan+search+read, bias, judge
     triage_sources: bool = _env("CLAIMCHECK_TRIAGE_SOURCES", "1") == "1"
     counter_search: bool = _env("CLAIMCHECK_COUNTER_SEARCH", "1") == "1"
     triage_model: str = field(default_factory=lambda: _env("CLAIMCHECK_TRIAGE_MODEL", "gemini-3.8-flash"))
@@ -133,6 +148,12 @@ class Settings:
     def lookup_cost_estimate_usd(self) -> float:
         """The most one lookup can cost (triage, both searches, the summary), for planning a "Check sources for all
         statements" press. Statements the classifier routes to one search or skips cost less."""
+        if self.research_sources:  # points x searches, pages read, planner and reader
+            searches = max(1, self.research_max_points) + 1
+            return (self.search_cost_usd * searches + self.extract_cost_usd * (2 if self.research_retry else 1)
+                    + self.research_cost_estimate_usd * (2 if self.research_retry else 1)
+                    + (self.opinion_cost_estimate_usd if self.opinion_check else 0.0)
+                    + (self.triage_cost_estimate_usd if self.triage_sources else 0.0))
         searches = 2 if self.counter_enabled else 1
         return (self.search_cost_usd * searches + (self.summary_cost_estimate_usd if self.summarize_sources else 0.0)
                 + (self.triage_cost_estimate_usd if self.triage_sources else 0.0))

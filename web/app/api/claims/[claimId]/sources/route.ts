@@ -15,6 +15,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ claimId
   // Once the result is in, drop the cached video page so the next refresh shows it.
   if (FINAL.includes(s.sources_status) && s.video_id) revalidatePath(`/v/${s.video_id}`);
   return NextResponse.json({ status: s.sources_status, error: s.sources_error, sources: s.sources, summary: s.sources_summary, match: s.sources_match,
-                             counter: s.counter_sources, counter_summary: s.counter_summary, route: s.sources_route },
+                             counter: s.counter_sources, counter_summary: s.counter_summary, route: s.sources_route, research: s.research },
                            { headers: { "Cache-Control": "no-store" } });
 }

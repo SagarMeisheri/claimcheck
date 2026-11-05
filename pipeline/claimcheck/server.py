@@ -110,8 +110,9 @@ async def cancel(episode_id: str, x_pipeline_secret: Optional[str] = Header(defa
 
 
 @app.post("/episodes/{episode_id}/sources-all")
-async def sources_all(episode_id: str, wait: bool = False, x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
-    """Looks up sources for every statement of a video that has finished its first pass."""
+async def sources_all(episode_id: str, wait: bool = False, recheck: bool = False, x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
+    """Looks up sources for every statement of a video that has finished its first pass. recheck: every answer again, with the
+    current method, replacing what was stored."""
     _auth(x_pipeline_secret)
     from .agents.sources import run_video_sources
 
@@ -121,8 +122,8 @@ async def sources_all(episode_id: str, wait: bool = False, x_pipeline_secret: Op
     if not await _store.get_episode(episode_id):
         raise HTTPException(404, "Video not found.")
     if wait:
-        return await run_video_sources(episode_id, settings=_settings, store=_store)
-    _start(key, run_video_sources(episode_id, settings=_settings, store=_store))
+        return await run_video_sources(episode_id, settings=_settings, store=_store, recheck=recheck)
+    _start(key, run_video_sources(episode_id, settings=_settings, store=_store, recheck=recheck))
     return {"accepted": True, "episode_id": episode_id}
 
 

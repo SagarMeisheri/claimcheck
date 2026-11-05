@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { ChannelPage, Claim, CreatorProfile, Episode, EpisodeDetail, EpisodeSpeaker, OpenReport, Pestle, PreviewClaim, Progress, Section, SidebarVideo, Source,
-  QaEntry, SourcesMatch, SourcesStatus } from "./types";
+  QaEntry, Research, SourcesMatch, SourcesStatus } from "./types";
 import { mergeCounts, typeOf } from "./statements";
 
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -31,8 +31,8 @@ type EpisodeRow = {
 };
 
 const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, statement_counts, summary, sources_batch_status, auto_sources, created_at, channel_id, creator_id, sections, progress, channels(name)";
-const SOURCE_COLS = "claim_sources(url, title, tier, excerpt, publish_date, rank, kind)";
-const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, question, asked_by, question_kind, section_idx, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, sources_checked_at, ${SOURCE_COLS}`;
+const SOURCE_COLS = "claim_sources(url, title, tier, excerpt, publish_date, rank, kind, independence)";
+const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, question, asked_by, question_kind, section_idx, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, research, sources_checked_at, ${SOURCE_COLS}`;
 const CREATOR_COLS = "id, podcast, youtube_channel_name, youtube_handles, country, summary, public_profile";
 const SPEAKER_COLS = "episode_id, label, role, statements, speakers(id, name, summary, sources, public_profile)";
 
@@ -219,17 +219,17 @@ export async function getOpenReports(): Promise<OpenReport[]> {
 
 export type ClaimSources = {
   id: string; sources_status: SourcesStatus; sources_error: string | null; video_id: string | null; sources: Source[]; sources_summary: string | null; sources_match: SourcesMatch | null;
-  counter_sources: Source[]; counter_summary: string | null; sources_route: string | null;
+  counter_sources: Source[]; counter_summary: string | null; sources_route: string | null; research: Research | null;
 };
 
 /** Live state of one claim's source lookup, polled by the "Check sources" button. */
 export async function getClaimSources(id: string): Promise<ClaimSources | null> {
   const { data } = await publicDb().from("claims")
-    .select(`id, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, episodes(youtube_video_id), ${SOURCE_COLS}`)
+    .select(`id, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, research, episodes(youtube_video_id), ${SOURCE_COLS}`)
     .eq("id", id).maybeSingle();
   if (!data) return null;
   const d = data as any;
   return { id: d.id, sources_status: d.sources_status, sources_error: d.sources_error,
            video_id: d.episodes?.youtube_video_id ?? null, sources: inSearchOrder(d.claim_sources), sources_summary: d.sources_summary ?? null, sources_match: d.sources_match ?? null,
-           counter_sources: inSearchOrder(d.claim_sources, "counter"), counter_summary: d.counter_summary ?? null, sources_route: d.sources_route ?? null };
+           counter_sources: inSearchOrder(d.claim_sources, "counter"), counter_summary: d.counter_summary ?? null, sources_route: d.sources_route ?? null, research: d.research ?? null };
 }

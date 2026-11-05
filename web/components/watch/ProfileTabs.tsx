@@ -92,6 +92,19 @@ export function ProfileTabs({ summary, sections, creator, speakers, onSeek, onSe
 }
 
 
+const BASIS: Record<string, string> = { declared: "holds or held party or government office", described: "as described by the sources", curated: "editorial note" };
+
+/** The two profile sections found by the live search: political leaning (attributed, with its basis) and public opinion (praise and criticism, attributed). */
+function LeaningAndOpinion({ p }: { p: { leaning?: string; leaning_basis?: string; public_opinion?: string } }) {
+  if (!p.leaning && !p.public_opinion) return null;
+  return (
+    <>
+      {p.leaning && <p><span className="profile-k">Political leaning</span> {p.leaning}{p.leaning_basis && BASIS[p.leaning_basis] ? <span className="meta"> ({BASIS[p.leaning_basis]})</span> : null}</p>}
+      {p.public_opinion && <p><span className="profile-k">Public opinion</span> {p.public_opinion}</p>}
+    </>
+  );
+}
+
 /** The show's profile: neutral facts only. */
 export function CreatorPanel({ creator }: { creator: CreatorProfile }) {
   return (
@@ -106,6 +119,7 @@ export function CreatorPanel({ creator }: { creator: CreatorProfile }) {
       {creator.public_profile.hosts && <p><span className="profile-k">Hosts</span> {creator.public_profile.hosts}</p>}
       {creator.public_profile.host_bio && <p><span className="profile-k">Background</span> {creator.public_profile.host_bio}</p>}
       {creator.public_profile.known_for && <p><span className="profile-k">Known for</span> {creator.public_profile.known_for}</p>}
+      <LeaningAndOpinion p={creator.public_profile} />
       {!!creator.public_profile.topics?.length && (
         <p className="profile-topics">{creator.public_profile.topics.map((t) => <span key={t} className="chip static">{t}</span>)}</p>
       )}
@@ -154,6 +168,7 @@ export function PeoplePanel({ people, creator }: { people: EpisodeSpeaker[]; cre
             {!!p.speaker.public_profile.affiliations?.length && (
               <p><span className="profile-k">Affiliations</span> {p.speaker.public_profile.affiliations.join(", ")}</p>
             )}
+            <LeaningAndOpinion p={p.speaker.public_profile} />
             {!!p.speaker.sources?.length && (
               <p className="meta">From: {p.speaker.sources.slice(0, 3).map((x, i) => (
                 <span key={x.url}>{i > 0 && ", "}<a href={x.url} target="_blank" rel="noopener noreferrer">{domain(x.url)}</a></span>

@@ -150,6 +150,18 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
     seek(s, true);
   }, [seek]);
 
+  // A click on a card's time or ▶: play from just before its answer with no stop at 20 s, and follow along (the
+  // card that is playing is highlighted and the list scrolls with the video). "Watch 20 s" and "Play in order" still use clips.
+  const playCard = useCallback((c: Claim) => {
+    setSelectedId(c.id);
+    setClip(null);
+    setCountdown(null);
+    setAutoAll(false);
+    setFollowing(true);
+    setScrollFollow(true);
+    seek(Math.max(0, c.start_s - LEAD_S), true);
+  }, [seek]);
+
   const playMoment = useCallback((c: Claim) => {
     setSelectedId(c.id); // the detail follows what is playing
     setFollowing(false);
@@ -269,7 +281,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   // --- Selection and detail --------------------------------------------------------------------
   const lookedUp = (c: Claim, r: SourcesResult) => setLooked((m) => ({ ...m, [c.id]: { ...c, sources_status: "done", sources: r.sources ?? [],
     sources_summary: r.summary ?? null, sources_match: r.match ?? null, counter_sources: r.counter ?? [],
-    counter_summary: r.counter_summary ?? null, sources_route: r.route ?? c.sources_route } }));
+    counter_summary: r.counter_summary ?? null, research: r.research ?? null, sources_route: r.route ?? c.sources_route } }));
   const select = (c: Claim) => { setSelectedId(c.id); if (wide) setDockOpen(true); else setDrawerOpen(true); };
   const selected = visible.find((c) => c.id === selectedId) ?? (docked ? playable[0] ?? null : null);
   const selAt = selected ? playable.findIndex((c) => c.id === selected.id) : -1;
@@ -332,6 +344,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
             </div>
           )}
         </div>
+        <div className="score-info">
         {playerOn && (
           <p className="vcard-under">
             <a className="vcard-yt" href={`https://www.youtube.com/watch?v=${ep.youtube_video_id}`} target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a>
@@ -351,7 +364,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
 
         <ProfileTabs summary={ep.summary} sections={ep.sections ?? []} creator={ep.creator} speakers={ep.speakers}
                      onSeek={(s) => playFrom(s)} onSection={goToSection} />
-
+        </div>
       </div>
 
       <div className="score-side">
@@ -369,7 +382,8 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
                 <span key={t} style={{ flexGrow: typeCounts[t], background: STATEMENT_TYPES[t].cssVar }} />
               ))}
             </p>
-            {!checking && <CheckAllSources videoId={ep.youtube_video_id} running={ep.sources_batch === "running"} eligible={lookupEligible && !auto} />}
+            {!checking && <CheckAllSources videoId={ep.youtube_video_id} running={ep.sources_batch === "running"} eligible={lookupEligible && !auto}
+                                                canRecheck={ep.claims.some((c) => c.sources_status === "done" || c.sources_route === "skip")} onRecheck={() => setLooked({})} />}
           </section>
         )}
         {ep.claims.length > 0 && (
@@ -417,7 +431,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
                 <ol className="qa-list">
                   {groupByQuestion(g.items).map((grp) => (
                     <QaCard key={grp.answers[0].id} group={grp} auto={auto} running={lookingUp} activeId={activeId} selectedId={selected?.id ?? null}
-                            onPlay={playMoment} onSelect={select} onLookedUp={lookedUp} />
+                            onPlay={playCard} onSelect={select} onLookedUp={lookedUp} />
                   ))}
                 </ol>
               </section>

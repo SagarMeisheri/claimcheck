@@ -140,6 +140,29 @@ def counter_request(query: str, route: str, ctx: Optional[dict[str, Any]] = None
     return queries, objective[:2000]
 
 
+async def extract_pages(urls: list[str], objective: str, settings: Any, *, max_chars: int = 3500) -> dict[str, str]:
+    """Reads pages: for each URL the passages most relevant to the objective, as one cleaned line of at most `max_chars`.
+    Returns url -> text for the pages that could be read (a missing URL could not be fetched). Raises on API errors or timeout."""
+    if not urls:
+        return {}
+    client = _client(settings)
+
+    def _run() -> Any:
+        return client.extract(urls=list(dict.fromkeys(urls))[:20], objective=objective[:2000],
+                              advanced_settings={"excerpt_settings": {"max_chars_per_result": max_chars}})
+
+    res = await asyncio.wait_for(asyncio.to_thread(_run), timeout=settings.tool_timeout_s)
+    out: dict[str, str] = {}
+    for r in getattr(res, "results", None) or []:
+        text = " ".join(e for e in (getattr(r, "excerpts", None) or []) if e and e.strip())
+        if not text and getattr(r, "full_content", None):
+            text = r.full_content
+        text = clean_excerpt(text, max_chars)
+        if text and getattr(r, "url", None):
+            out[r.url] = text
+    return out
+
+
 async def search_sources(claim_text: str, settings: Any, policy: dict[str, Any], *, objective: Optional[str] = None,
                          extra_queries: tuple[str, ...] | list[str] = (), location: Optional[str] = None,
                          exclude_urls: frozenset[str] | set[str] = frozenset()) -> list[Source]:
