@@ -30,7 +30,9 @@ from ..context import Budget, EpisodeContext, is_budget_error, report_progress, 
 from ..guardrails.budget import BudgetPlugin
 from ..guardrails.input_checks import parse_video_id
 from ..policy import load_policy
+from ..profiles import usable_creator
 from ..store import make_store
+from .creators import profile_creator
 from .llm_agents import extractor_agent
 from .speakers import SpeakerProfiler
 from .streaming import StatementStreamer
@@ -113,10 +115,11 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
 
     channel = await resolve_channel(store, meta)
     try:
-        creator = await store.get_creator_by_channel(meta.get("channel_id") or "")
+        saved_creator = await store.get_creator_by_channel(meta.get("channel_id") or "")
     except Exception:  # a profile only adds context; the video is analysed without it
         log.exception("creator lookup failed for %s", meta.get("channel_id"))
-        creator = None
+        saved_creator = None
+    creator = usable_creator(saved_creator)  # a channel the web couldn't describe is remembered, but gives no context
     episode_id = episode_id or await store.create_episode({
         "youtube_video_id": video_id, "channel_id": (channel or {}).get("id"), "title": meta.get("title"),
         "status": "queued", "submitted_by": submitted_by,
@@ -126,25 +129,38 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
     await store.update_episode(episode_id, {k: v for k, v in {
         "status": "processing", "title": meta.get("title") or None, "duration_s": meta.get("duration_s") or None,
         "published_at": meta.get("published_at") or None, "channel_id": (channel or {}).get("id"),
-        "creator_id": (creator or {}).get("id"),
+        "creator_id": (creator or {}).get("id"), "auto_sources": settings.auto_sources_enabled,
     }.items() if v is not None})
 
     ec = EpisodeContext(episode_id=episode_id, video_id=video_id, settings=settings, policy=policy,
                         store=store, budget=Budget(cap_usd=settings.max_cost_usd_per_episode),
                         plugins_factory=make_plugins_factory(settings), duration_s=int(meta.get("duration_s") or 0),
                         creator=creator, steps=initial_steps())
-    set_step(ec, CREATOR_STEP[0], "done" if creator else "skipped",
-             creator["podcast"] if creator else "Not one of the shows with a creator profile")
     token = set_context(ec)
+    found_on_web = False
+    if saved_creator is None and settings.profile_creators:
+        # Not on the curated list and never looked up: one web search for the show, like a speaker's profile.
+        set_step(ec, CREATOR_STEP[0], "running", "Looking up the show on the web")
+        await report_progress(ec, CREATOR_STEP[1], 1)
+        creator = ec.creator = await profile_creator(meta)
+        found_on_web = creator is not None
+        if creator:
+            await store.update_episode(episode_id, {"creator_id": creator["id"]})
+    set_step(ec, CREATOR_STEP[0], "done" if creator else "skipped",
+             (f"{creator['podcast']} (found on the web)" if found_on_web else creator["podcast"]) if creator
+             else "Not one of the shows with a creator profile")
     runner = InMemoryRunner(agent=build_pipeline(settings), app_name=APP, plugins=ec.plugins_factory())
     session = await runner.session_service.create_session(app_name=APP, user_id="pipeline", state={
         "video_url": f"https://www.youtube.com/watch?v={video_id}", "episode_id": episode_id,
     })
+    auto: Any = None  # AutoSources, when lookups start as answers are found
     try:
         set_step(ec, STAGE_PROGRESS[0][0], "running")
         await report_progress(ec, STAGE_PROGRESS[0][1], 2)
         await store.clear_statements_without_sources(episode_id)  # leftovers from an earlier attempt would clash with the new rows
-        streamer = StatementStreamer(ec)
+        from .sources import AutoSources
+        auto = AutoSources(ec) if settings.auto_sources_as_found else None
+        streamer = StatementStreamer(ec, auto)
         last = -1
         # SSE streaming: the extractor's reply arrives in pieces and each finished statement is saved at once.
         async for ev in runner.run_async(user_id="pipeline", session_id=session.id, run_config=RunConfig(streaming_mode=StreamingMode.SSE),
@@ -161,6 +177,10 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
                 set_step(ec, STAGE_PROGRESS[i + 1][0], "running")
                 await report_progress(ec, STAGE_PROGRESS[i + 1][1], STAGE_PROGRESS[i][2])
         await streamer.finish()
+        if auto is not None:
+            await auto.drain()  # lookups started while the video was being read finish before the run ends
+            await store.update_episode(episode_id, {"cost_usd": round(ec.budget.spent_usd, 4),
+                                                    "tokens_in": ec.budget.tokens_in, "tokens_out": ec.budget.tokens_out})
         final = await runner.session_service.get_session(app_name=APP, user_id="pipeline", session_id=session.id)
         st = final.state
         gate = st.get("gate", {})
@@ -172,7 +192,7 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
         result = {"episode_id": episode_id, "status": "skipped" if gate.get("skip") else "published",
                   "skip_reason": gate.get("reason"), "statement_counts": st.get("statement_counts"),
                   "cost_usd": round(ec.budget.spent_usd, 4), "guardrail_events": [e.model_dump() for e in ec.events]}
-        if result["status"] == "published" and settings.auto_sources:
+        if result["status"] == "published" and settings.auto_sources_enabled:
             # The statements are already on screen. Now look up sources for the claims, each appearing as it finishes.
             from .sources import run_video_sources
             try:
@@ -191,6 +211,8 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
         await store.save_guardrail_events(episode_id, ec.events)
         return {"episode_id": episode_id, "status": "failed", "reason": f"{type(e).__name__}: {e}"}
     finally:
+        if auto is not None:
+            await auto.cancel()  # only does anything if the run failed: nothing is left "searching"
         try:
             token.var.reset(token)
         except ValueError:

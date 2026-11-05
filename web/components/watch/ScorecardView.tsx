@@ -76,6 +76,10 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   }, [ep.claims]);
   const searchingCount = ep.claims.filter((c) => SEARCHING.includes(c.sources_status)).length;
   const checking = ep.status === "processing" || ep.status === "queued";
+  // Sources are looked up by themselves for this video: no buttons, progress instead. "running" while the video is still
+  // being read or the follow-up batch is working, so an answer that hasn't been reached yet already shows a spinner.
+  const auto = !!ep.auto_sources;
+  const lookingUp = checking || ep.sources_batch === "running";
   // Videos analysed as questions and answers say so; older ones are lists of statements.
   const qa = ep.claims.some((c) => !!c.question);
   const nouns = qa ? { one: "answer", many: "answers" } : { one: "statement", many: "statements" };
@@ -273,7 +277,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const detail = (c: Claim, titleId: string) => {
     const isActive = activeId === c.id;
     return (
-      <StatementDetail claim={c} videoId={ep.youtube_video_id} titleId={titleId} canLookUp={!checking}
+      <StatementDetail claim={c} videoId={ep.youtube_video_id} titleId={titleId} canLookUp={!checking && !(auto && c.sources_status === "not_requested")}
         phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"} hasNext={!!nextIn(c)}
         countdown={isActive && autoAll ? countdown : null}
         onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
@@ -365,7 +369,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
                 <span key={t} style={{ flexGrow: typeCounts[t], background: STATEMENT_TYPES[t].cssVar }} />
               ))}
             </p>
-            {!checking && <CheckAllSources videoId={ep.youtube_video_id} running={ep.sources_batch === "running"} eligible={lookupEligible} />}
+            {!checking && <CheckAllSources videoId={ep.youtube_video_id} running={ep.sources_batch === "running"} eligible={lookupEligible && !auto} />}
           </section>
         )}
         {ep.claims.length > 0 && (
@@ -412,7 +416,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
                 )}
                 <ol className="qa-list">
                   {groupByQuestion(g.items).map((grp) => (
-                    <QaCard key={grp.answers[0].id} group={grp} activeId={activeId} selectedId={selected?.id ?? null}
+                    <QaCard key={grp.answers[0].id} group={grp} auto={auto} running={lookingUp} activeId={activeId} selectedId={selected?.id ?? null}
                             onPlay={playMoment} onSelect={select} onLookedUp={lookedUp} />
                   ))}
                 </ol>

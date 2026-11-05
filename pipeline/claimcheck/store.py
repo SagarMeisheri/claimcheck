@@ -44,6 +44,7 @@ class Store(Protocol):
     async def get_claim_for_sources(self, claim_id: str) -> Optional[dict[str, Any]]: ...
     async def get_episode(self, episode_id: str) -> Optional[dict[str, Any]]: ...
     async def list_batch_claims(self, episode_id: str) -> list[dict[str, Any]]: ...
+    async def get_claim_row(self, episode_id: str, idx: int) -> Optional[dict[str, Any]]: ...
     async def list_claims_for_qa(self, episode_id: str) -> list[dict[str, Any]]: ...
     async def start_claim_sources(self, claim_id: str) -> bool: ...
     async def set_sources_status(self, claim_id: str, status: str, error: Optional[str] = None) -> None: ...
@@ -54,6 +55,7 @@ class Store(Protocol):
     # Creators, speakers, sections
     async def get_creator_by_channel(self, youtube_channel_id: str) -> Optional[dict[str, Any]]: ...
     async def get_creator(self, creator_id: str) -> Optional[dict[str, Any]]: ...
+    async def save_creator(self, row: dict[str, Any]) -> Optional[dict[str, Any]]: ...
     async def get_speaker(self, key: str) -> Optional[dict[str, Any]]: ...
     async def save_speaker(self, row: dict[str, Any]) -> Optional[dict[str, Any]]: ...
     async def save_episode_speakers(self, episode_id: str, rows: list[dict[str, Any]]) -> None: ...
@@ -91,6 +93,11 @@ class SupabaseStore:
         if not youtube_channel_id:
             return None
         r = self.db.table("creators").select("*").contains("youtube_channel_ids", [youtube_channel_id]).limit(1).execute()
+        return r.data[0] if r.data else None
+
+    async def save_creator(self, row: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Adds a creator found by a web search (no rank). Returns the saved row."""
+        r = self.db.table("creators").insert(row).execute()
         return r.data[0] if r.data else None
 
     async def get_creator(self, creator_id: str) -> Optional[dict[str, Any]]:
@@ -147,7 +154,7 @@ class SupabaseStore:
 
     async def get_claim_for_sources(self, claim_id):
         r = (self.db.table("claims")
-             .select("id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, section_idx, "
+             .select("id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, question, asked_by, section_idx, "
                      "pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, refers_to_visual, sources_status, "
                      "episodes(id, youtube_video_id, title, status, cost_usd, creator_id, sections)")
              .eq("id", claim_id).limit(1).execute())
@@ -162,7 +169,7 @@ class SupabaseStore:
         """Statements "Check sources for all" may take: not a question or story, not redacted, no sources yet, not running,
         and not already set aside by the classifier (sources_route 'skip'; a viewer can still press Check sources)."""
         r = (self.db.table("claims")
-             .select("id, idx, start_s, speaker, claim_text, statement_context, section_idx, pestle_area, topic, topics, "
+             .select("id, idx, start_s, speaker, claim_text, statement_context, question, section_idx, pestle_area, topic, topics, "
                      "statement_type, policy_tier, sources_status, sources_route")
              .eq("episode_id", episode_id).not_.in_("statement_type", ["question", "story"])
              .in_("sources_status", ["not_requested", "failed"]).neq("policy_tier", "never")
@@ -174,6 +181,14 @@ class SupabaseStore:
         r = (self.db.table("claims").select("id, start_s, speaker, claim_text, statement_type, policy_tier, not_checked_reason, sources_status, question")
              .eq("episode_id", episode_id).order("start_s").limit(1000).execute())
         return r.data or []
+
+    async def get_claim_row(self, episode_id, idx):
+        """One saved statement by its position in the extraction, with what a source lookup needs."""
+        r = (self.db.table("claims")
+             .select("id, idx, episode_id, start_s, speaker, claim_text, statement_context, question, section_idx, pestle_area, topic, "
+                     "topics, statement_type, policy_tier, not_checked_reason, sources_status")
+             .eq("episode_id", episode_id).eq("idx", idx).limit(1).execute())
+        return r.data[0] if r.data else None
 
     async def start_claim_sources(self, claim_id):
         """Moves a claim to 'searching' only if no other run holds it. Returns False if it was taken."""

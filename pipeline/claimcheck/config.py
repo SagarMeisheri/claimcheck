@@ -78,7 +78,15 @@ class Settings:
     # Searches per press (earliest claims first; press again for the rest). Claims with the same wording share one.
     sources_all_max_searches: int = int(_env("CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES", "75"))
     sources_concurrency: int = int(_env("CLAIMCHECK_SOURCES_CONCURRENCY", "5"))
-    auto_sources: bool = _env("CLAIMCHECK_AUTO_SOURCES", "0") == "1"  # run it right after extraction
+    # Automatic source checking, so nobody has to press "Check sources" (agents/sources.py):
+    #   auto_sources           after the whole video is read, look up every answer the triage classifier doesn't skip
+    #   auto_sources_as_found  also start each answer's lookup as soon as it is saved, while the extractor is still
+    #                          writing (implies the one above, which then picks up whatever was left)
+    # A lookup started during extraction is paid from the same video budget as the extraction, whose cost is only
+    # counted when it ends, so they are limited to auto_sources_stream_budget_usd / lookup_cost_estimate_usd.
+    auto_sources: bool = _env("CLAIMCHECK_AUTO_SOURCES", "0") == "1"
+    auto_sources_as_found: bool = _env("CLAIMCHECK_AUTO_SOURCES_AS_FOUND", "0") == "1"
+    auto_sources_stream_budget_usd: float = float(_env("CLAIMCHECK_AUTO_SOURCES_STREAM_BUDGET_USD", "0.5"))
     tool_timeout_s: float = float(_env("CLAIMCHECK_TOOL_TIMEOUT_S", "60"))
     # Before a lookup, a classifier (ADK ClassifierNode, agents/sources.py) decides how to look the statement up:
     # skip (background, self-description, vague), related (one search), data or contested (one more search for
@@ -87,6 +95,8 @@ class Settings:
     counter_search: bool = _env("CLAIMCHECK_COUNTER_SEARCH", "1") == "1"
     triage_model: str = field(default_factory=lambda: _env("CLAIMCHECK_TRIAGE_MODEL", "gemini-3.8-flash"))
     # Speaker profiles (agents/speakers.py): one web search + one model call per new named speaker, then reused.
+    # A channel that isn't on the curated creator list is looked up on the web once (agents/creators.py) and remembered.
+    profile_creators: bool = _env("CLAIMCHECK_PROFILE_CREATORS", "1") == "1"
     profile_speakers: bool = _env("CLAIMCHECK_PROFILE_SPEAKERS", "1") == "1"
     max_speaker_profiles: int = int(_env("CLAIMCHECK_MAX_SPEAKER_PROFILES", "6"))  # new profiles per video
     profile_model: str = field(default_factory=lambda: _env("CLAIMCHECK_PROFILE_MODEL", "gemini-3.8-flash"))
@@ -107,6 +117,17 @@ class Settings:
     def counter_enabled(self) -> bool:
         """The second search needs the classifier: without it there is no way to pick the statements that get one."""
         return self.triage_sources and self.counter_search
+
+    @property
+    def auto_sources_enabled(self) -> bool:
+        """Whether lookups start by themselves, whenever that happens."""
+        return self.auto_sources or self.auto_sources_as_found
+
+    @property
+    def max_streamed_lookups(self) -> int:
+        """How many lookups may start while the extractor is still writing."""
+        each = self.lookup_cost_estimate_usd
+        return max(0, int(self.auto_sources_stream_budget_usd / each + 1e-9)) if each > 0 else 0
 
     @property
     def lookup_cost_estimate_usd(self) -> float:

@@ -76,6 +76,13 @@ def match_host(label: str, creator: Optional[dict[str, Any]]) -> Optional[str]:
     return None
 
 
+def usable_creator(creator: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """The creator row, or None for a channel a web search couldn't describe (saved so it isn't searched again)."""
+    if creator and (creator.get("profile") or {}).get("identified") is False:
+        return None
+    return creator
+
+
 def creator_context(creator: Optional[dict[str, Any]]) -> dict[str, Any]:
     """What the later steps get about the show. Empty if the channel isn't a known creator."""
     if not creator:

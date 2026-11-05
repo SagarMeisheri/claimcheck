@@ -16,7 +16,7 @@ from .. import prompts
 from ..config import Settings
 from ..context import get_context
 from ..guardrails.injection import screen_text, wrap_untrusted
-from ..schemas import ExtractionResult, QaOut, SourcesSummary, SpeakerProfileOut
+from ..schemas import CreatorProfileOut, ExtractionResult, QaOut, SourcesSummary, SpeakerProfileOut
 
 
 def _model(name: str, settings: Settings) -> Any:
@@ -102,7 +102,15 @@ def qa_agent(s: Settings, name: str = "qa_writer") -> LlmAgent:
                     include_contents="none", output_schema=QaOut, output_key="qa", generate_content_config=cfg)
 
 
-# --- Speaker profiles ------------------------------------------------------------------------------
+# --- Creator and speaker profiles ------------------------------------------------------------------
+
+def creator_profiler_agent(s: Settings, name: str = "creator_profiler") -> LlmAgent:
+    cfg = types.GenerateContentConfig()
+    cfg.thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel("LOW"))
+    return LlmAgent(name=name, model=_model(s.profile_model, s), instruction=prompts.PROFILE_CREATOR,
+                    include_contents="none", output_schema=CreatorProfileOut, output_key="profile",
+                    generate_content_config=cfg, before_model_callback=inject_pages)
+
 
 def speaker_profiler_agent(s: Settings, name: str = "speaker_profiler") -> LlmAgent:
     cfg = types.GenerateContentConfig()

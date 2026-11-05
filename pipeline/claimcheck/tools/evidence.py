@@ -104,7 +104,9 @@ def _said_by(ctx: dict[str, Any]) -> str:
     about = ctx.get("discussing") or ""
     parts = [f"Said by {who}" if who else "Said", f"on {show}" if show else "", f"while discussing: {about}" if about else ""]
     line = " ".join(p for p in parts if p).strip()
-    return "" if line == "Said" else line + "."
+    line = "" if line == "Said" else line + "."
+    question = " ".join(str(ctx.get("question") or "").split())
+    return f'{line} In answer to: "{question}"'.strip() if question else line
 
 
 def related_objective(query: str, ctx: Optional[dict[str, Any]] = None) -> str:
