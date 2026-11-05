@@ -73,8 +73,9 @@ class ObjectStream:
 class StatementStreamer:
     """Handles the extractor's partial events: saves each statement as it completes."""
 
-    def __init__(self, ec: EpisodeContext) -> None:
+    def __init__(self, ec: EpisodeContext, auto: Any = None) -> None:
         self.ec = ec
+        self.auto = auto  # AutoSources: starts each saved answer's source lookup
         self._stream = ObjectStream()
         self._index = 0
         self._counts: dict[str, int] = {}
@@ -120,6 +121,8 @@ class StatementStreamer:
             self.broken = True
             return
         self.saved += 1
+        if self.auto is not None:
+            self.auto.submit(rec)
         if self.saved == 1:
             log.info("extractor timing: first statement saved at +%.1fs", time.monotonic() - self.started)
         t = rec.claim.statement_type or "other"

@@ -184,7 +184,7 @@ class Publisher(BaseAgent):
         for r in records:
             t = r.claim.statement_type or "other"
             statement_counts[t] = statement_counts.get(t, 0) + 1
-        auto = ec.settings.auto_sources and any(sources_status(r) == "not_requested" for r in records)
+        auto = ec.settings.auto_sources_enabled and any(sources_status(r) == "not_requested" for r in records)
         await ec.store.update_episode(ec.episode_id, {
             **base, "status": "done", "statement_counts": statement_counts,
             # Marks a video whose answers carry their questions: the Q&A page and sitemap use it.

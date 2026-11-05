@@ -86,6 +86,7 @@ export interface Episode {
   status: string;
   skip_reason?: string | null;
   sources_batch?: string | null; // "running" while "Check sources for all statements" works through the video
+  auto_sources?: boolean | null; // sources are looked up automatically for this video: no "Check sources" buttons
   summary?: string | null; // 2-3 sentences on what the video covers, written by the AI
   created_at: string;
   creator_id?: string | null;

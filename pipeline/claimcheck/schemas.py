@@ -136,6 +136,22 @@ class QaOut(BaseModel):
     items: list[QaItemOut] = Field(default_factory=list)
 
 
+# --- Creator profiles found on the web (agents/creators.py) -------------------------------------
+class CreatorProfileOut(BaseModel):
+    """What the profile step returns about a YouTube show or channel, from web search excerpts only."""
+
+    identified: bool = Field(description="True only if the pages clearly describe this show or channel")
+    podcast: str = Field(default="", description="The show's name")
+    summary: str = Field(default="", description="1-2 neutral sentences: who hosts it and what it covers")
+    hosts: str = Field(default="", description="The host or hosts, as the pages name them")
+    host_background: str = Field(default="", description="Short: what the host is known for professionally")
+    host_bio: str = Field(default="", description="One or two sentences on the host or hosts")
+    topics: list[str] = Field(default_factory=list, description="Subjects the show usually covers")
+    known_for: str = Field(default="", description="What the show is known for, as the pages describe it")
+    criticism: str = Field(default="", description="Main public criticisms the pages report, attributed; empty if none")
+    country: str = Field(default="", description="The country the show is based in, if the pages say")
+
+
 # --- Speaker profiles (agents/speakers.py) -------------------------------------------------------
 class SpeakerProfileOut(BaseModel):
     """What the profile step returns about one named speaker, from web search excerpts only."""

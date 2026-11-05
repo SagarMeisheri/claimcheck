@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { DEFAULT_STEPS } from "@/lib/steps";
 import type { Step } from "@/lib/types";
 
-type Status = { status: string; skip_reason: string | null; label: string | null; pct: number; statements: number; steps?: Step[] };
+type Status = { status: string; skip_reason: string | null; label: string | null; pct: number; statements: number; looked_up?: number; steps?: Step[] };
 const RUNNING = ["queued", "processing"];
 const ICON: Record<Step["status"], string> = { done: "✓", running: "", pending: "", skipped: "–" };
 const SR: Record<Step["status"], string> = { done: "Done", running: "In progress", pending: "Waiting", skipped: "Skipped" };
@@ -20,6 +20,7 @@ export function CheckProgress({ videoId, compact = false, showSteps, initialStep
   const router = useRouter();
   const [s, setS] = useState<Status | null>(null);
   const seen = useRef(0);
+  const seenLooked = useRef<number | null>(null);
 
   useEffect(() => {
     let stop = false;
@@ -31,6 +32,11 @@ export function CheckProgress({ videoId, compact = false, showSteps, initialStep
         setS(j);
         // New answers were saved since the last look: refresh the page so they show up while the check runs.
         if (j.statements > seen.current) { seen.current = j.statements; router.refresh(); }
+        // Sources found for another answer (they can start while the video is still being read): show them too.
+        if (j.looked_up !== undefined) {
+          if (seenLooked.current !== null && j.looked_up !== seenLooked.current && j.statements <= seen.current) router.refresh();
+          seenLooked.current = j.looked_up;
+        }
         if (!RUNNING.includes(j.status)) { stop = true; window.clearInterval(id); router.refresh(); }
       } catch { /* keep the last state; try again next tick */ }
     }

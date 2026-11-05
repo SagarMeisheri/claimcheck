@@ -50,7 +50,7 @@ from ..config import Settings
 from ..context import Budget, EpisodeContext, get_context, is_budget_error, set_context
 from ..policy import domain_of, load_policy
 from ..profiles import creator_context, search_location, section_for, speaker_context
-from ..schemas import COUNTER_ROUTES, NO_SOURCE_TYPES, TRIAGE_ROUTES, Source, SourcesSummary
+from ..schemas import COUNTER_ROUTES, NO_SOURCE_TYPES, TRIAGE_ROUTES, ClaimRecord, Source, SourcesSummary
 from ..tools.evidence import _said_by, counter_request, related_objective, search_sources
 
 log = logging.getLogger("claimcheck")
@@ -138,6 +138,7 @@ class VideoContext:
         label = claim.get("speaker") or ""
         return {k: v for k, v in {
             "statement": claim.get("claim_text", ""), "statement_type": claim.get("statement_type"),
+            "question": claim.get("question"),
             "discussing": claim.get("statement_context") or (section or {}).get("summary") or "",
             "section": (section or {}).get("title") or "",
             "speaker": speaker_context(self.speakers.get(label), label),
@@ -482,6 +483,86 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any) 
                 pass
         return {"status": "done", "searched": searched, "skipped": skipped, "claims": len(todo),
                 "remaining": len(claims) - len(todo), "cost_usd": round(spent, 4)}
+
+
+# --- As the extractor writes -----------------------------------------------------------------------------
+
+class AutoSources:
+    """Starts a source lookup for each answer as soon as it is saved, while the extractor is still writing the rest
+    (settings.auto_sources_as_found). The same lookup as the button and the batch: the triage classifier decides
+    whether the answer is worth searching at all, so a skipped answer costs one cheap classifier call.
+
+    Lookups run in the extraction's own context, so they are charged to the same video budget. The extractor's cost is
+    only counted when it ends, so at most settings.max_streamed_lookups start this way; the batch that follows the
+    extraction (and the button) pick up the rest. Never raises into the extraction.
+    """
+
+    def __init__(self, ec: EpisodeContext) -> None:
+        self.ec, self.settings, self.store = ec, ec.settings, ec.store
+        self.limit = ec.settings.max_streamed_lookups
+        self.started = 0
+        self._gate = asyncio.Semaphore(max(1, ec.settings.sources_concurrency))
+        self._tasks: set[asyncio.Task] = set()
+        self._vctx: Optional[VideoContext] = None
+        self._vctx_lock = asyncio.Lock()
+
+    def submit(self, rec: ClaimRecord) -> None:
+        """Called for every saved statement. Stories and questions, redacted statements and anything past the limit are left."""
+        if rec.not_checked_reason == "outside_policy" or rec.claim.statement_type in NO_SOURCE_TYPES or self.started >= self.limit:
+            return
+        self.started += 1
+        task = asyncio.create_task(self._one(rec.index))  # inherits the extraction's context (budget, settings)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _context(self) -> VideoContext:
+        async with self._vctx_lock:
+            if self._vctx is None:  # the creator's profile is known now; the speakers' are built after the extraction
+                self._vctx = await VideoContext(self.store, {"id": self.ec.episode_id, "creator_id": (self.ec.creator or {}).get("id")}).load()
+            return self._vctx
+
+    async def _one(self, idx: int) -> None:
+        ec, cid, final = self.ec, None, False
+        try:
+            if ec.budget.spent_usd + self.settings.search_cost_usd > ec.budget.cap_usd:
+                return  # nothing marked yet, so there is nothing to undo
+            row = await self.store.get_claim_row(ec.episode_id, idx)
+            if not row or row.get("sources_status") not in ("not_requested", "failed"):
+                return
+            cid = row["id"]
+            await self.store.set_sources_status(cid, "searching")  # on screen as "searching" while it waits for a free slot
+            async with self._gate:
+                if ec.budget.spent_usd + self.settings.search_cost_usd > ec.budget.cap_usd:
+                    return
+                found, digest = await _lookup_and_summarize(row, await self._context(), force=False)
+                await _save(self.store, cid, found, digest)
+                final = True
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            if cid and not is_budget_error(e):
+                log.warning("automatic source search for answer %s failed: %s: %s", idx, type(e).__name__, e)
+                try:
+                    await self.store.set_sources_status(cid, "failed", RETRY_MESSAGE)
+                    final = True
+                except Exception:
+                    log.exception("could not mark answer %s as failed", idx)
+        finally:
+            if cid and not final:  # budget, cancelled or a failed write: back to "not requested", so the button still works
+                try:
+                    await asyncio.shield(self.store.set_sources_status(cid, "not_requested"))
+                except Exception:
+                    log.exception("could not release answer %s", idx)
+
+    async def drain(self) -> None:
+        """Waits for the lookups that are still running."""
+        while self._tasks:
+            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+
+    async def cancel(self) -> None:
+        for t in list(self._tasks):
+            t.cancel()
+        await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
 
 # --- One-off: summaries for sources saved before summaries existed --------------------------------------

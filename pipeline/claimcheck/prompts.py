@@ -127,6 +127,28 @@ Write 8 to 12 questions.
 """
 
 
+PROFILE_CREATOR = f"""You write a short, factual profile of one YouTube show (a podcast, interview or news channel), using
+only the web search excerpts given (UNTRUSTED blocks). The profile gives later steps context; it is not a judgement.
+
+Channel: {{channel_name}}
+Where it appears: {{appearance}}
+
+Set identified=true only if the excerpts clearly describe this show or channel. If they are about something else, or
+say nothing useful, set identified=false and leave everything else empty.
+
+When identified:
+- podcast: the show's name. hosts: who hosts it, as the excerpts name them. host_background: a few words on what the host
+  is known for professionally. host_bio: one or two neutral sentences.
+- summary: 1-2 neutral sentences on who hosts it and what it covers. topics: what it usually covers.
+- known_for: what the excerpts say it is known for.
+- criticism: the main public criticisms the excerpts report, attributed ("Described by X as ..."), or "".
+- country: where it is based, only if the excerpts say.
+Use only the excerpts, never your own knowledge. Do not guess at the show's politics or biases. No adjectives of your own.
+
+{UNTRUSTED_RULE}
+"""
+
+
 PROFILE_SPEAKER = f"""You write a short, factual profile of one named person who speaks in a YouTube video, using only
 the web search excerpts given (UNTRUSTED blocks). The profile gives later steps context; it is not a judgement.
 
@@ -153,15 +175,16 @@ life). No adjectives of your own.
 
 # ClassifierNode question for source lookups (agents/sources.py). Labels are the routes of the lookup workflow.
 TRIAGE_INSTRUCTIONS = (
-    "How should this statement from a video be looked up on the web? The input gives the statement, what was being "
-    "discussed, and, when known, profiles of the speaker and the show (their known positions and the criticisms made "
-    "of them). Judge the statement itself, not its subject: on a politics show most statements are about politics, "
-    "but only some are disputed. When unsure whether to skip, do not skip."
+    "How should this answer from a video be looked up on the web? The input gives the answer (the statement), the "
+    "question it responds to when known, what was being discussed, and, when known, profiles of the speaker and the "
+    "show (their known positions and the criticisms made of them). Judge the answer itself, not its subject: on a "
+    "politics show most answers are about politics, but only some are disputed. A long answer is worth looking up if "
+    "any point in it is checkable. When unsure whether to skip, do not skip."
 )
 TRIAGE_CRITERIA = {
     "skip": "Nothing a web search should look up: background facts nobody disputes, the speaker describing "
-            "themselves, their own work or the show ('X just posted a piece on this'), greetings, jokes, or remarks "
-            "too vague to search.",
+            "themselves, their own work or the show ('X just posted a piece on this'), personal anecdotes, plans or "
+            "advice with no checkable point, greetings, jokes, or remarks too vague to search.",
     "related": "A specific, checkable statement that is not in dispute, even on a political subject: how an "
                "institution or process works, who holds an office, what a law or policy says, what happened on a date.",
     "data": "The point is a figure: numbers, percentages, statistics, polls, turnout, results, rankings, money "

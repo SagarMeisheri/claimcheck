@@ -64,7 +64,9 @@ def _busy(key: str) -> bool:
 
 @app.get("/healthz")
 async def healthz() -> dict:
-    return {"ok": True, "fast_model": _settings.fast_model, "sources_search_mode": _settings.sources_search_mode}
+    return {"ok": True, "fast_model": _settings.fast_model, "sources_search_mode": _settings.sources_search_mode,
+            "auto_sources": _settings.auto_sources, "auto_sources_as_found": _settings.auto_sources_as_found,
+            "profile_creators": _settings.profile_creators, "max_cost_usd": _settings.max_cost_usd_per_episode}
 
 
 class RunRequest(BaseModel):

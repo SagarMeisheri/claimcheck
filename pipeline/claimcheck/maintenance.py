@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .channels import resolve_channel
+from .profiles import usable_creator
 from .tools.youtube import fetch_channels, fetch_many
 
 
@@ -27,7 +28,7 @@ async def relink_channels(store: Any, settings: Any) -> dict[str, int]:
         if not channel:
             continue
         fields: dict[str, Any] = {"channel_id": channel["id"]}
-        creator = await store.get_creator_by_channel(m.get("channel_id") or "")
+        creator = usable_creator(await store.get_creator_by_channel(m.get("channel_id") or ""))
         if creator:
             fields["creator_id"] = creator["id"]
             counts["creators"] += 1
