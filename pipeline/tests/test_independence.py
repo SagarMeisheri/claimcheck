@@ -45,7 +45,7 @@ def test_the_speakers_own_organisation_is_labelled_not_dropped():
     assert classify_source("https://www.reuters.com/markets/phonepe-merchants", "x", CTX, POLICY)[0] == INDEPENDENT  # about PhonePe, not by it
 
 
-def test_split_drops_the_episode_labels_the_rest_and_counts():
+def test_split_keeps_every_source_labelled_and_counts_them():
     kept, counts = split_sources([src("https://www.ulisten.ai/e/1"), src("https://www.phonepe.com/a"), src("https://rbi.org.in/b")], CTX, POLICY)
-    assert [(s.url, s.independence) for s in kept] == [("https://www.phonepe.com/a", OWN), ("https://rbi.org.in/b", INDEPENDENT)]
+    assert [(s.url, s.independence) for s in kept] == [("https://www.ulisten.ai/e/1", EPISODE), ("https://www.phonepe.com/a", OWN), ("https://rbi.org.in/b", INDEPENDENT)]
     assert counts == {INDEPENDENT: 1, OWN: 1, EPISODE: 1}

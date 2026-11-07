@@ -18,7 +18,7 @@ import asyncio
 import re
 from typing import Any, Optional
 
-from ..policy import blocklist, source_tier
+from ..policy import blocklist
 from ..schemas import Source
 
 _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")   # [text](url) -> text
@@ -73,6 +73,9 @@ def best_excerpt(excerpts: list[str], claim_text: str, limit: int) -> str:
     return clean_excerpt(text, limit)
 
 
+WHOLE_EXCERPT_CHARS = 1000
+
+
 def _client(settings: Any):
     from parallel import Parallel
 
@@ -89,9 +92,11 @@ def to_sources(results: list[Any], policy: dict[str, Any], limit: int, excerpt_c
             continue
         seen.add(url)
         excerpts = [e for e in (getattr(r, "excerpts", None) or []) if e and e.strip()]
+        # A long limit (the research, which reads only excerpts) keeps all the text the search returned; a short one picks the best passage.
+        text = clean_excerpt(" ".join(excerpts), excerpt_chars) if excerpt_chars >= WHOLE_EXCERPT_CHARS else best_excerpt(excerpts, claim_text, excerpt_chars)
         out.append(Source(url=url, title=clean_title(getattr(r, "title", None) or ""),
-                          excerpt=best_excerpt(excerpts, claim_text, excerpt_chars),
-                          publish_date=getattr(r, "publish_date", None), tier=source_tier(url, policy), rank=len(out)))
+                          excerpt=text,
+                          publish_date=getattr(r, "publish_date", None), rank=len(out)))
         if len(out) >= limit:
             break
     return out
@@ -109,60 +114,6 @@ def _said_by(ctx: dict[str, Any]) -> str:
     return f'{line} In answer to: "{question}"'.strip() if question else line
 
 
-def related_objective(query: str, ctx: Optional[dict[str, Any]] = None) -> str:
-    base = f"Find reports, data, official releases or news coverage about this statement: {query}"
-    said = _said_by(ctx or {})
-    return f"{base} Context: {said}" if said else base
-
-
-def counter_request(query: str, route: str, ctx: Optional[dict[str, Any]] = None) -> tuple[list[str], str]:
-    """Queries and objective for the second search. data: original figures and different numbers. contested: other
-    perspectives, aimed away from the speaker's and show's known positions (from their profiles)."""
-    ctx = ctx or {}
-    said = _said_by(ctx)
-    if route == "data":
-        queries = [query, f"{query} official statistics data"[:300]]
-        objective = ("Find primary sources for the figures in this statement: official statistics, the original study "
-                     "or dataset, regulators or international bodies, and sources that give different figures, periods "
-                     f"or definitions for the same thing. Statement: {query}")
-    else:
-        queries = [query, f"{query} criticism analysis"[:300]]
-        objective = ("Find independent analyses, official data and reporting that give other perspectives on, "
-                     f"qualify, or dispute this statement, from sources that do not share the speaker's viewpoint. Statement: {query}")
-    leanings = [x for x in [(ctx.get("speaker") or {}).get("known_positions"), (ctx.get("creator") or {}).get("biases")] if x]
-    criticism = [x for x in [(ctx.get("speaker") or {}).get("criticisms"), (ctx.get("creator") or {}).get("criticism")] if x]
-    if said:
-        objective += f" Context: {said}"
-    if leanings:
-        objective += " The speaker or show is described as: " + "; ".join(leanings)[:500] + "."
-    if criticism:
-        objective += " They are often criticised for: " + "; ".join(criticism)[:400] + ". Prefer sources that address this."
-    return queries, objective[:2000]
-
-
-async def extract_pages(urls: list[str], objective: str, settings: Any, *, max_chars: int = 3500) -> dict[str, str]:
-    """Reads pages: for each URL the passages most relevant to the objective, as one cleaned line of at most `max_chars`.
-    Returns url -> text for the pages that could be read (a missing URL could not be fetched). Raises on API errors or timeout."""
-    if not urls:
-        return {}
-    client = _client(settings)
-
-    def _run() -> Any:
-        return client.extract(urls=list(dict.fromkeys(urls))[:20], objective=objective[:2000],
-                              advanced_settings={"excerpt_settings": {"max_chars_per_result": max_chars}})
-
-    res = await asyncio.wait_for(asyncio.to_thread(_run), timeout=settings.tool_timeout_s)
-    out: dict[str, str] = {}
-    for r in getattr(res, "results", None) or []:
-        text = " ".join(e for e in (getattr(r, "excerpts", None) or []) if e and e.strip())
-        if not text and getattr(r, "full_content", None):
-            text = r.full_content
-        text = clean_excerpt(text, max_chars)
-        if text and getattr(r, "url", None):
-            out[r.url] = text
-    return out
-
-
 async def search_sources(claim_text: str, settings: Any, policy: dict[str, Any], *, objective: Optional[str] = None,
                          extra_queries: tuple[str, ...] | list[str] = (), location: Optional[str] = None,
                          exclude_urls: frozenset[str] | set[str] = frozenset()) -> list[Source]:
@@ -174,7 +125,7 @@ async def search_sources(claim_text: str, settings: Any, policy: dict[str, Any],
     def _run() -> list[Any]:
         res = client.search(
             search_queries=queries,
-            objective=objective or related_objective(query),
+            objective=objective or f"Find reports, data, official documents or news coverage about this statement: {query}",
             mode=settings.sources_search_mode,
             advanced_settings={"max_results": settings.sources_per_claim + 3 + len(exclude_urls),
                                "location": location or getattr(settings, "default_search_location", "in"),

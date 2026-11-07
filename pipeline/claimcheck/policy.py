@@ -30,22 +30,6 @@ def _matches(host: str, domain: str) -> bool:
     return host == domain or host.endswith("." + domain)
 
 
-def source_tier(url: str, policy: dict[str, Any] | None = None) -> int:
-    """Display label for a source: 1 = official / peer-reviewed, 2 = established news or research, 3 = other, 9 = blocklisted."""
-    pol = policy or load_policy()
-    src = pol["sources"]
-    host = domain_of(url)
-    if not host:
-        return 3
-    if any(_matches(host, d) for d in src["blocklist"]):
-        return 9
-    if any(host.endswith(s) for s in src["tier1_suffixes"]) or any(_matches(host, d) for d in src["tier1_domains"]):
-        return 1
-    if any(_matches(host, d) for d in src["tier2_domains"]):
-        return 2
-    return 3
-
-
 def is_never(model_tier: str, topics: list[str], policy: dict[str, Any] | None = None) -> bool:
     """Re-applies the never-show policy in code. The model can mark a statement 'never'; code can only add to that."""
     pol = policy or load_policy()

@@ -14,6 +14,7 @@ import { CheckedAt } from "@/components/CheckedAt";
 import { type CardPhase } from "./ClaimCard";
 import { StatementDetail } from "./StatementDetail";
 import { groupBySection } from "@/components/feed/StatementCarousel";
+import { InterviewProfile } from "@/components/Indicators";
 import { QaCard } from "./QaCard";
 import { groupByQuestion } from "@/lib/qa";
 import { Drawer, PaneNav } from "@/components/Drawer";
@@ -412,6 +413,8 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
             )}
           </>
         )}
+
+        {qa && !checking && <InterviewProfile claims={everything} />}
 
         <div className="score-timeline">
           {playable.length === 0

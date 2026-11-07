@@ -72,7 +72,7 @@ def metered_gemini(model: str):
     """A Gemini model that checks the cost cap and counts its tokens itself.
 
     For callers that use a model outside an agent runner, so BudgetPlugin never sees the call: ADK's LlmClassifier
-    (the source triage) calls the model directly.
+    (the answer tags) calls the model directly.
     """
     from google.adk.models.google_llm import Gemini
 

@@ -1,5 +1,5 @@
 import type { Source, SourcesMatch, SourcesRoute } from "@/lib/types";
-import { TIER_LABEL, domain, shortDate } from "@/lib/format";
+import { domain, shortDate } from "@/lib/format";
 
 export const SOURCES_NOTE =
   "Links found by a web search for this statement, in the search engine's order. Statements with figures or on disputed subjects also get a second search for official data, other figures or other viewpoints. The summaries are written by AI from the excerpts shown here and only describe what they say. None of this is a judgement of the statement or the speaker.";
@@ -63,7 +63,7 @@ function CounterGroup({ route, sources, summary, compact }: { route: "data" | "c
           {sources.map((s) => (
             <li key={s.url}>
               <a className="source-title" href={s.url} target="_blank" rel="noopener noreferrer">{s.title || domain(s.url)}</a>
-              <p className="meta source-site">{[domain(s.url), TIER_LABEL[s.tier], shortDate(s.publish_date)].filter(Boolean).join(" · ")}</p>
+              <p className="meta source-site">{[domain(s.url), shortDate(s.publish_date)].filter(Boolean).join(" · ")}</p>
               {s.excerpt && <p className="source-excerpt">{s.excerpt}</p>}
             </li>
           ))}
@@ -124,7 +124,7 @@ export function SourceList({ sources, summary, match, counter = [], counterSumma
           <li key={s.url}>
             <a className="source-title" href={s.url} target="_blank" rel="noopener noreferrer">{s.title || domain(s.url)}</a>
             <p className="meta source-site">
-              {[domain(s.url), TIER_LABEL[s.tier], shortDate(s.publish_date)].filter(Boolean).join(" · ")}
+              {[domain(s.url), shortDate(s.publish_date)].filter(Boolean).join(" · ")}
             </p>
             {s.excerpt && <p className="source-excerpt">{s.excerpt}</p>}
           </li>

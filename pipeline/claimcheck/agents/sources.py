@@ -1,37 +1,25 @@
-"""Sources for claims: a classifier decides how to look each statement up, then one or two Parallel searches run at
-the same time, and a cheap model summarises what they found. Nothing says whether a claim is right.
+"""Sources for answers: one lookup per answer, shared by the button, "Check sources for all" and the automatic path.
 
-Lookup workflow (ADK Workflow, one run per statement)                      build_lookup_workflow()
-  prepare   code             the statement plus its context: what was being discussed, who said it (speaker profile),
-                             which show (creator profile)
-  triage    ClassifierNode   one Choice question (prompts.TRIAGE_CRITERIA); the label is the route:
-              skip           background, self-description, too vague: no search (a viewer can still press the button)
-              related        one search on the statement's own words, with who / where / what in the objective
-              data           + a second search for original figures and different numbers for the same thing
-              contested      + a second search for other perspectives, aimed away from the speaker's and show's known
-                             positions and towards their known criticisms (from their profiles)
-  lookup    code             the searches, both at once (tools/evidence.py); a failed second search never sinks the first
-Then, in code: the summary (one ADK step, Gemini Flash) of the related excerpts and, separately, of the other ones,
-with the source match (relevance only). A summary using judging words (confirms, contradicts, true, false, ...) is
-dropped. If the summary fails or the budget runs out, the sources are saved without it.
+Lookup (lookup_answer), per answer:
+  plan     research.py: a planner writes the checkable points and up to 3 queries. An answer with nothing checkable (greeting,
+           background, a story, self-description) is skipped: no search (a viewer pressing the button is never skipped)
+  search   one Parallel search per query, all at the same time; every page returned is kept (research.py)
+  tag      one ADK classifier call per tag (tags.py): support, match, bias, stake and how the question was asked, each shown only what it
+           needs of the Q&A, the speaker's and the show's profiles and the search excerpts
+  save     the pages, the tags and the question tags are saved on the answer
 
-The classifier calls its model directly, so it uses a Gemini model that charges its own tokens to the video
-(guardrails/budget.metered_gemini). If it fails, the lookup still runs: statements with figures go to "data",
-the rest to "contested", so a classifier problem never silently drops the second search.
+So an answer costs 2 model calls, 3 searches and 5 classifier calls. Nothing says whether an answer is right: the tags describe what was found.
 
-One claim ("Check sources")                                  POST /claims/{id}/sources
-  a viewer asked, so "skip" still gets the one related search.
-Every statement of a video ("Check sources for all statements")      POST /episodes/{id}/sources-all
-  the same lookup for each claim that has none yet, a few at a time (settings.sources_concurrency), each saved the
-  moment it is ready. Statements the classifier skips go back to 'not requested' with sources_route 'skip', and the
-  next press doesn't take them again. Limits: at most settings.sources_all_max_searches lookups per press (earliest
-  claims first), never more than the video's remaining budget pays for, and claims with the same wording share one.
+One answer ("Check sources")                                  POST /claims/{id}/sources
+Every answer of a video ("Check sources for all statements")  POST /episodes/{id}/sources-all
+  a few at a time (settings.sources_concurrency), each saved the moment it is ready. Answers the planner skips go back to
+  'not requested' with sources_route 'skip', and the next press doesn't take them again. Limits: settings.max_searches_per_video lookups
+  per video in total, buttons and automatic ones together (0 = no limit; earliest answers first), never more than the video's remaining
+  budget pays for, and answers with the same wording share one.
+As the extractor writes (AutoSources): each saved answer starts its lookup at once, up to settings.max_streamed_lookups, because the
+  extractor's own cost is only counted when it ends.
 
-  Why not one search for many claims: Parallel accepts several queries per request but returns one merged result
-  list with no link back to the query that found each result, so results can't be attributed to a claim without a
-  model guessing. Within one claim that is fine, so the second search sends two queries in one request.
-
-Both paths hold a per-video lock, so two runs can't both pass the cost check and overspend.
+All paths hold a per-video lock, so two runs can't both pass the cost check and overspend.
 """
 
 from __future__ import annotations
@@ -39,19 +27,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import uuid
 from typing import Any, NamedTuple, Optional
 
-from google.adk.runners import InMemoryRunner
-from google.genai import types
-
-from .. import prompts
 from ..config import Settings
 from ..context import Budget, EpisodeContext, get_context, is_budget_error, set_context
-from ..policy import domain_of, load_policy
+from ..policy import load_policy
 from ..profiles import creator_context, search_location, section_for, speaker_context
-from ..schemas import COUNTER_ROUTES, NO_SOURCE_TYPES, TRIAGE_ROUTES, ClaimRecord, Source, SourcesSummary
-from ..tools.evidence import _said_by, counter_request, related_objective, search_sources
+from ..schemas import NO_SOURCE_TYPES, ClaimRecord, Source
 
 log = logging.getLogger("claimcheck")
 APP = "claimcheck_sources"
@@ -59,12 +41,10 @@ APP = "claimcheck_sources"
 # Statuses from which sources may be looked up (again). 'queued' is set by the web app when the button is pressed.
 STARTABLE = ("queued", "not_requested", "failed")
 RETRY_MESSAGE = "Couldn't look up sources right now. Try again later."
-MAX_SUMMARY_CHARS = 360
-# A summary describes the pages; one that grades the statement is dropped (the sources are shown without it).
+# Text that grades a statement: the Q&A view's questions must not use it (agents/qa.py).
 _JUDGING = re.compile(
     r"\b(confirm(s|ed|ing)?|corroborat\w*|support(s|ed|ing)?|back(s|ed)? up|contradict\w*|disput\w*|refut\w*|debunk\w*|"
     r"true|false|accurate|inaccurate|correct|incorrect|wrong|misleading|verif\w*|consistent with|inconsistent)\b", re.I)
-_HAS_FIGURE = re.compile(r"\d")
 
 _episode_locks: dict[str, asyncio.Lock] = {}
 
@@ -74,8 +54,20 @@ def lock_for(episode_id: str) -> asyncio.Lock:
 
 
 def same_wording(text: str) -> str:
-    """Key for claims that should share one search: lower case, letters and digits only."""
+    """Key for answers that should share one lookup: lower case, letters and digits only."""
     return re.sub(r"[^\w]+", " ", (text or "").lower()).strip()
+
+
+def search_cap_message(cap: int) -> str:
+    return f"This video has used its {cap} source lookups. No more can be run for it."
+
+
+async def search_room(store: Any, episode_id: str, settings: Settings, recheck: bool = False) -> Optional[int]:
+    """How many more source lookups this video may have (None = no limit). A recheck replaces lookups, so it only has the cap itself."""
+    cap = settings.max_searches_per_video
+    if cap <= 0:
+        return None
+    return cap if recheck else max(0, cap - await store.count_looked_up(episode_id))
 
 
 def budget_message(cap: float) -> str:
@@ -100,7 +92,7 @@ def precheck(row: Optional[dict[str, Any]], settings: Settings) -> tuple[bool, s
         return False, "Already searching.", 409
     if status not in STARTABLE:
         return False, "Sources can't be looked up for this statement.", 409
-    if float(ep.get("cost_usd") or 0) + settings.search_cost_usd > settings.max_cost_usd_per_episode:
+    if float(ep.get("cost_usd") or 0) + settings.lookup_cost_estimate_usd > settings.max_cost_usd_per_episode:
         return False, budget_message(settings.max_cost_usd_per_episode), 409
     return True, "", 200
 
@@ -130,7 +122,7 @@ class VideoContext:
         return self
 
     def for_claim(self, claim: dict[str, Any]) -> dict[str, Any]:
-        """What triage and the searches get about one statement."""
+        """What the planner and the tags get about one answer."""
         sections = self.episode.get("sections") or []
         idx = claim.get("section_idx")
         section = next((s for s in sections if s.get("idx") == idx), None) if idx is not None else None
@@ -138,7 +130,8 @@ class VideoContext:
         label = claim.get("speaker") or ""
         return {k: v for k, v in {
             "statement": claim.get("claim_text", ""), "statement_type": claim.get("statement_type"),
-            "question": claim.get("question"),
+            "question": claim.get("question"), "question_spoken": claim.get("question_quote"),
+            "question_kind": claim.get("question_kind"), "asked_by": claim.get("asked_by"),
             "video": {"id": self.episode.get("youtube_video_id"), "title": self.episode.get("title"),
                       "channel": (self.creator or {}).get("youtube_channel_name")},
             "discussing": claim.get("statement_context") or (section or {}).get("summary") or "",
@@ -152,234 +145,35 @@ class VideoContext:
         return search_location(self.creator, get_context().settings.default_search_location)
 
 
-# --- Summaries ------------------------------------------------------------------------------------
-
-def acceptable_summary(text: str) -> str:
-    """The summary, tidied; "" if it grades the statement or is empty."""
-    t = re.sub(r"\s*\[\d+\]", "", text or "")  # no reference numbers: the summary is plain text
-    t = re.sub(r"\s+([.,;:])", r"\1", re.sub(r"\s+", " ", t)).strip()
-    if not t or _JUDGING.search(t):
-        return ""
-    return t if len(t) <= MAX_SUMMARY_CHARS else t[:MAX_SUMMARY_CHARS].rsplit(" ", 1)[0] + "…"
-
-
-class Digest(NamedTuple):
-    """The summary step's output: summary and source match for the related sources ("" if none), and a summary of
-    the second search's sources."""
-    summary: str = ""
-    match: str = ""
-    counter_summary: str = ""
-
-
-async def summarize(claim_text: str, sources: list[Source], counter: Optional[list[Source]] = None,
-                    ctx: Optional[dict[str, Any]] = None) -> Digest:
-    """A plain 1-2 sentence summary of each group of excerpts, and how directly the related ones address the claim
-    (ADK step, Gemini 3.8 Flash). Never raises; an empty Digest on failure."""
-    ec = get_context()
-    counter = counter or []
-    if not (sources or counter) or not ec.settings.summarize_sources:
-        return Digest()
-    from .llm_agents import summarizer_agent
-
-    # Only the excerpts the reader sees, so every sentence of the summary can be checked against them.
-    pages = [{"n": i + 1, "group": "RELATED", "title": s.title, "site": domain_of(s.url), "text": s.excerpt}
-             for i, s in enumerate(sources) if s.excerpt]
-    pages += [{"n": i + 1, "group": "OTHER", "title": s.title, "site": domain_of(s.url), "text": s.excerpt}
-              for i, s in enumerate(counter) if s.excerpt]
-    if not pages:
-        return Digest()
-    said = _said_by(ctx or {})
-    try:
-        runner = InMemoryRunner(agent=summarizer_agent(ec.settings, name=f"source_summarizer_{uuid.uuid4().hex[:6]}"),
-                                app_name=APP, plugins=ec.plugins_factory())
-        session = await runner.session_service.create_session(app_name=APP, user_id="sources", state={
-            "claim_text": claim_text, "pages": pages, "claim_context": f"Context: {said}" if said else ""})
-        msg = types.Content(role="user", parts=[types.Part(text="Summarize the pages.")])
-        async for _ in runner.run_async(user_id="sources", session_id=session.id, new_message=msg):
-            pass
-        done = await runner.session_service.get_session(app_name=APP, user_id="sources", session_id=session.id)
-        raw = done.state.get("summary")
-        out = SourcesSummary.model_validate(raw) if raw else None
-    except Exception as e:
-        reason = "budget" if is_budget_error(e) else f"{type(e).__name__}: {e}"
-        ec.log("sources", "summary_failed", "skipped", reason[:200])
-        return Digest()
-    if out is None:
-        return Digest()
-    summary, counter_summary = acceptable_summary(out.summary), acceptable_summary(out.counter_summary)
-    for raw_text, kept in ((out.summary, summary), (out.counter_summary, counter_summary)):
-        if raw_text.strip() and not kept:
-            ec.log("sources", "summary_judging_words", "skipped", raw_text[:200])
-    return Digest(summary if sources else "", out.match if sources else "", counter_summary if counter else "")
-
-
-# --- Triage and searches ----------------------------------------------------------------------------
-
-def fallback_route(statement: str) -> str:
-    """If the classifier fails: figures go to 'data', anything else to 'contested', so the second search still runs."""
-    return "data" if _HAS_FIGURE.search(statement or "") else "contested"
-
-
-def _safe_classifier(inner: Any) -> Any:
-    """Wraps the triage classifier so a failure (refusal, bad JSON, API error, budget) becomes the fallback route
-    instead of failing the workflow. A budget error is not swallowed: the lookup must stop."""
-    from google.adk.labs.classifiers import BaseClassifier, ChoiceAnswer, ClassifierResponse
-
-    class SafeClassifier(BaseClassifier):
-        model: str = "triage"
-        inner_classifier: Any = None
-
-        async def classify(self, *, input, questions):
-            try:
-                return await self.inner_classifier.classify(input=input, questions=questions)
-            except Exception as e:
-                if is_budget_error(e):
-                    raise
-                get_context().log("sources", "triage_failed", "flagged", f"{type(e).__name__}: {e}"[:200])
-                label = fallback_route((input or {}).get("statement", "") if isinstance(input, dict) else str(input))
-                return ClassifierResponse(answers={
-                    name: ChoiceAnswer(choice=label, probabilities={k: float(k == label) for k in q.criteria})
-                    for name, q in questions.items()})
-
-    return SafeClassifier(inner_classifier=inner)
-
+# --- One lookup ----------------------------------------------------------------------------------------
 
 class Lookup(NamedTuple):
-    route: str
+    route: str  # "skip" (nothing checkable) or "related" (looked up)
     related: list[Source]
-    counter: list[Source]
-    triage: Optional[dict[str, Any]] = None
-    research: Any = None  # a research.Research when the answer was researched, else None
+    research: Any = None  # the research.Research when the answer was looked up
 
 
-async def gather_sources(ctx: dict[str, Any], route: str, location: Optional[str]) -> tuple[list[Source], list[Source], Any]:
-    """The sources for one answer: researched (agents/research.py) when settings.research_sources is on, with the plain search as
-    the fallback if the research can't run. Returns (related, counter, research or None)."""
-    ec = get_context()
-    if ec.settings.research_sources:
-        from .research import ResearchUnavailable, research_answer
+async def lookup_answer(claim: dict[str, Any], vctx: VideoContext, *, force: bool) -> Lookup:
+    """Plan, search, tag. `force` (a viewer pressed the button) searches an answer the planner found nothing checkable in."""
+    from .research import research_answer
+    from .tags import tag_answer
 
-        from .opinion import research_and_assess, wanted
-
-        try:
-            if wanted(ec.settings, route, ctx.get("statement_type")):
-                r = await research_and_assess(ctx, route, location)
-            else:
-                r = await research_answer(ctx, location)
-            return r.related, r.counter, r
-        except ResearchUnavailable as e:
-            ec.log("sources", "research_unavailable", "skipped", str(e)[:200])
-        except Exception as e:
-            if is_budget_error(e):
-                raise
-            ec.log("sources", "research_failed", "skipped", f"{type(e).__name__}: {e}"[:200])
-            log.warning("research failed, using the plain search: %s: %s", type(e).__name__, e)
-    related, counter = await run_searches(ctx["statement"], route, ctx, location)
-    return related, counter, None
-
-
-async def run_searches(statement: str, route: str, ctx: dict[str, Any], location: Optional[str]) -> tuple[list[Source], list[Source]]:
-    """The related search and, for data / contested, the second search, at the same time. Each is charged to the
-    video. Raises if the related search fails; a failed second search only leaves that group empty."""
-    ec = get_context()
-    s, policy = ec.settings, ec.policy
-    ec.budget.add(s.search_cost_usd)
-    tasks = [search_sources(statement, s, policy, objective=related_objective(statement, ctx), location=location)]
-    if route in COUNTER_ROUTES and s.counter_enabled:
-        ec.budget.add(s.search_cost_usd)
-        queries, objective = counter_request(statement, route, ctx)
-        tasks.append(search_sources(statement, s, policy, objective=objective, extra_queries=queries[1:], location=location))
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    if isinstance(results[0], BaseException):
-        raise results[0]
-    related: list[Source] = results[0]
-    counter: list[Source] = []
-    if len(results) > 1:
-        if isinstance(results[1], BaseException):
-            ec.log("sources", "counter_search_failed", "skipped", f"{type(results[1]).__name__}: {results[1]}"[:200])
-        else:
-            seen = {x.url for x in related}
-            counter = [x for x in results[1] if x.url not in seen]
-            for i, x in enumerate(counter):
-                x.rank, x.kind = i, "counter"
-    return related, counter
-
-
-def build_lookup_workflow(settings: Settings, box: dict[str, Any], *, force: bool, location: Optional[str]) -> Any:
-    """prepare -> triage (ClassifierNode) -> skip | lookup. The routed nodes write their result into `box`."""
-    from google.adk.agents.context import Context
-    from google.adk.labs.classifiers import Choice, ClassifierNode
-    from google.adk.workflow import START, Workflow, node
-
-    from .llm_agents import triage_classifier
-
-    async def prepare(ctx: Context) -> dict[str, Any]:
-        return ctx.state["triage_input"]
-
-    async def lookup(ctx: Context, node_input: dict[str, Any]) -> dict[str, Any]:
-        route = (ctx.state.get("triage") or {}).get("choice") or "related"
-        box["route"] = route
-        box["related"], box["counter"], box["research"] = await gather_sources(node_input, route, location)
-        return node_input
-
-    async def skip(node_input: dict[str, Any]) -> dict[str, Any]:
-        if force:  # a viewer pressed Check sources: they get the related search
-            box["route"] = "related"
-            box["related"], box["counter"], box["research"] = await gather_sources(node_input, "related", location)
-        else:
-            box["route"] = "skip"
-        return node_input
-
-    triage = ClassifierNode(
-        name="triage", classifier=_safe_classifier(triage_classifier(settings)), answer_key="triage",
-        question=Choice(instructions=prompts.TRIAGE_INSTRUCTIONS, criteria=dict(prompts.TRIAGE_CRITERIA)))
-    lookup_node = node(lookup, name="lookup")
-    return Workflow(name="source_lookup", edges=[
-        (START, node(prepare, name="prepare"), triage),
-        (triage, {"skip": node(skip, name="skip"), **{r: lookup_node for r in TRIAGE_ROUTES if r != "skip"}}),
-    ])
-
-
-async def lookup_claim(claim: dict[str, Any], vctx: VideoContext, *, force: bool) -> Lookup:
-    """Triage and search for one statement. Without triage (settings.triage_sources off) it is one related search."""
-    ec = get_context()
     ctx = vctx.for_claim(claim)
-    statement = claim["claim_text"]
-    location = vctx.location
-    if not ec.settings.triage_sources:
-        related, counter, research = await gather_sources(ctx, "related", location)
-        return Lookup("related", related, counter, None, research)
-    box: dict[str, Any] = {}
-    runner = InMemoryRunner(node=build_lookup_workflow(ec.settings, box, force=force, location=location),
-                            app_name=APP, plugins=ec.plugins_factory())
-    session = await runner.session_service.create_session(app_name=APP, user_id="sources", state={"triage_input": ctx})
-    msg = types.Content(role="user", parts=[types.Part(text="Look up sources for the statement.")])
-    async for _ in runner.run_async(user_id="sources", session_id=session.id, new_message=msg):
-        pass
-    done = await runner.session_service.get_session(app_name=APP, user_id="sources", session_id=session.id)
-    triage = done.state.get("triage")
-    if "route" not in box:  # the workflow ended without a routed node running: never expected, but never silent
-        raise RuntimeError("source lookup workflow ended without a route")
-    return Lookup(box["route"], box.get("related", []), box.get("counter", []), triage, box.get("research"))
+    r = await research_answer(ctx, vctx.location, force=force)
+    if r is None:
+        return Lookup("skip", [], None)
+    await tag_answer(ctx, r)  # sets the tags, correctness and match; never raises except for the budget
+    return Lookup("related", r.related, r)
 
 
-async def _lookup_and_summarize(claim: dict[str, Any], vctx: VideoContext, *, force: bool) -> tuple[Lookup, Digest]:
-    found = await lookup_claim(claim, vctx, force=force)
+async def _save(store: Any, claim_id: str, found: Lookup) -> None:
     if found.route == "skip":
-        return found, Digest()
-    if found.research is not None:  # the findings were verified one by one; their summary is made from them, not by another model call
-        r = found.research
-        return found, Digest(r.summary, r.match, r.counter_summary)
-    return found, await summarize(claim["claim_text"], found.related, found.counter, vctx.for_claim(claim))
-
-
-async def _save(store: Any, claim_id: str, found: Lookup, digest: Digest) -> None:
-    if found.route == "skip":
-        await store.save_sources_route(claim_id, "skip", found.triage)
+        await store.save_sources_route(claim_id, "skip")
         return
-    await store.save_claim_sources(claim_id, found.related, digest.summary, digest.match, counter=found.counter,
-                                   counter_summary=digest.counter_summary, route=found.route, triage=found.triage,
-                                   research=found.research.stored() if found.research is not None else None)
+    r = found.research
+    await store.save_claim_sources(claim_id, found.related, "", r.match, counter=[], counter_summary="", route="related", research=r.stored())
+    if r.question_analysis:
+        await store.save_question_analysis([claim_id], r.question_analysis)
 
 
 def _context(episode_id: str, ep: dict[str, Any], settings: Settings, store: Any) -> EpisodeContext:
@@ -391,10 +185,10 @@ def _context(episode_id: str, ep: dict[str, Any], settings: Settings, store: Any
                           plugins_factory=make_plugins_factory(settings))
 
 
-# --- One claim ---------------------------------------------------------------------------------------
+# --- One answer ---------------------------------------------------------------------------------------
 
 async def run_claim_sources(claim_id: str, *, settings: Settings, store: Any) -> dict[str, Any]:
-    """Looks up sources for one claim. Never raises: failures are written to the claim as 'failed' with a message."""
+    """Looks up sources for one answer. Never raises: failures are written to the answer as 'failed' with a message."""
     row = await store.get_claim_for_sources(claim_id)
     episode_id = (row or {}).get("episode_id", "")
     async with lock_for(episode_id):
@@ -403,20 +197,26 @@ async def run_claim_sources(claim_id: str, *, settings: Settings, store: Any) ->
             return {"claim_id": claim_id, "status": "failed", "reason": "Statement not found."}
         ep = row.get("episodes") or {}
         cap = settings.max_cost_usd_per_episode
-        if float(ep.get("cost_usd") or 0) + settings.search_cost_usd > cap:
+        if float(ep.get("cost_usd") or 0) + settings.lookup_cost_estimate_usd > cap:
             await store.set_sources_status(claim_id, "failed", budget_message(cap))
             return {"claim_id": claim_id, "status": "failed", "reason": budget_message(cap)}
+        room = await search_room(store, episode_id, settings)
+        if room is not None and room <= 0:
+            msg = search_cap_message(settings.max_searches_per_video)
+            await store.set_sources_status(claim_id, "failed", msg)
+            return {"claim_id": claim_id, "status": "failed", "reason": msg}
         ec = _context(episode_id, ep, settings, store)
         start = ec.budget.spent_usd
         token = set_context(ec)
         try:
             vctx = await VideoContext(store, {**ep, "id": episode_id}).load()
-            found, digest = await _lookup_and_summarize(row, vctx, force=True)
-            await _save(store, claim_id, found, digest)
-            result = {"claim_id": claim_id, "status": "done", "route": found.route, "sources": len(found.related),
-                      "other_sources": len(found.counter), "summary": bool(digest.summary), "match": digest.match}
+            found = await lookup_answer(row, vctx, force=True)
+            await _save(store, claim_id, found)
+            tags = (found.research.tags or {}) if found.research else {}
+            result = {"claim_id": claim_id, "status": "done", "sources": len(found.related), "match": (found.research.match if found.research else ""),
+                      "support": (tags.get("support") or {}).get("label", "")}
         except Exception as e:
-            log.warning("source search for claim %s failed: %s: %s", claim_id, type(e).__name__, e)
+            log.warning("source search for answer %s failed: %s: %s", claim_id, type(e).__name__, e)
             await store.set_sources_status(claim_id, "failed", RETRY_MESSAGE)
             result = {"claim_id": claim_id, "status": "failed", "reason": RETRY_MESSAGE}
         finally:
@@ -434,12 +234,12 @@ async def run_claim_sources(claim_id: str, *, settings: Settings, store: Any) ->
         return result
 
 
-# --- Every claim of a video --------------------------------------------------------------------------
+# --- Every answer of a video --------------------------------------------------------------------------
 
 async def run_video_sources(episode_id: str, *, settings: Settings, store: Any, recheck: bool = False) -> dict[str, Any]:
-    """Looks up sources for every statement of a video that has none yet. Never raises.
-    recheck: every answer is looked up again with the current method (finished ones too, and ones the classifier once skipped); each
-    new result replaces the old one, and an answer not reached (over budget) keeps the result it had."""
+    """Looks up sources for every answer of a video that has none yet. Never raises.
+    recheck: every answer is looked up again (finished ones too, and ones the planner once skipped); each new result replaces the
+    old one, and an answer not reached (over budget) keeps the result it had."""
     async with lock_for(episode_id):
         ep = await store.get_episode(episode_id)
         if not ep or ep.get("status") not in ("done", "in_review"):
@@ -448,17 +248,21 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any, 
         claims = sorted(await store.list_batch_claims(episode_id, recheck) if recheck else await store.list_batch_claims(episode_id),
                         key=lambda r: r.get("start_s") or 0)
         before = {c["id"]: c.get("sources_status") or "not_requested" for c in claims}  # what an unreached answer goes back to
-        groups: dict[str, list[dict[str, Any]]] = {}  # same wording -> claims sharing one lookup, earliest first
+        groups: dict[str, list[dict[str, Any]]] = {}  # same wording -> answers sharing one lookup, earliest first
         for c in claims:
             groups.setdefault(same_wording(c["claim_text"]), []).append(c)
         left = settings.max_cost_usd_per_episode - float(ep.get("cost_usd") or 0)
         each = settings.lookup_cost_estimate_usd  # the most one lookup can cost
         affordable = max(0, int(left / each + 1e-9)) if each > 0 else len(groups)
-        searches = list(groups.values())[:max(0, min(settings.sources_all_max_searches, affordable))]
+        room = await search_room(store, episode_id, settings, recheck)
+        limit = len(groups) if room is None else room  # None = no count limit: only the video's budget limits it
+        searches = list(groups.values())[:max(0, min(limit, affordable))]
         todo = [c for g in searches for c in g]
         if not todo:
             await store.update_episode(episode_id, {"sources_batch_status": None})
-            return {"status": "skipped", "reason": "Nothing to look up." if not claims else "Over the video's budget."}
+            reason = ("Nothing to look up." if not claims else search_cap_message(settings.max_searches_per_video) if room == 0
+                      else "Over the video's budget.")
+            return {"status": "skipped", "reason": reason}
 
         ec = _context(episode_id, ep, settings, store)
         start = ec.budget.spent_usd
@@ -477,17 +281,17 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any, 
             nonlocal done, searched, skipped
             async with gate:
                 if ec.budget.spent_usd + settings.search_cost_usd > ec.budget.cap_usd:
-                    return  # summaries used up the rest of the budget: these claims go back to 'not requested'
+                    return  # the lookups before it used up the rest of the budget: these answers go back to 'not requested'
                 try:
-                    found, digest = await _lookup_and_summarize(group[0], vctx, force=False)
+                    found = await lookup_answer(group[0], vctx, force=False)
                     if found.route == "skip":
                         skipped += 1
                     else:
                         searched += 1
-                    for c in group:  # claims with the same wording share the result
-                        await _save(store, c["id"], found, digest)
+                    for c in group:  # answers with the same wording share the result
+                        await _save(store, c["id"], found)
                 except Exception as e:
-                    log.warning("source search for claim %s failed: %s: %s", group[0]["id"], type(e).__name__, e)
+                    log.warning("source search for answer %s failed: %s: %s", group[0]["id"], type(e).__name__, e)
                     for c in group:
                         await store.set_sources_status(c["id"], "failed", RETRY_MESSAGE)
                 finished.update(c["id"] for c in group)
@@ -496,7 +300,7 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any, 
                     await progress()
 
         try:
-            for c in todo:  # every selected claim shows "searching" straight away
+            for c in todo:  # every selected answer shows "searching" straight away
                 await store.set_sources_status(c["id"], "searching")
             await store.update_episode(episode_id, {"sources_batch_status": "running"})
             await progress()
@@ -526,8 +330,8 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any, 
 
 class AutoSources:
     """Starts a source lookup for each answer as soon as it is saved, while the extractor is still writing the rest
-    (settings.auto_sources_as_found). The same lookup as the button and the batch: the triage classifier decides
-    whether the answer is worth searching at all, so a skipped answer costs one cheap classifier call.
+    (settings.auto_sources_as_found). The same lookup as the button and the batch: an answer with nothing checkable costs one
+    planner call.
 
     Lookups run in the extraction's own context, so they are charged to the same video budget. The extractor's cost is
     only counted when it ends, so at most settings.max_streamed_lookups start this way; the batch that follows the
@@ -565,6 +369,9 @@ class AutoSources:
         try:
             if ec.budget.spent_usd + self.settings.search_cost_usd > ec.budget.cap_usd:
                 return  # nothing marked yet, so there is nothing to undo
+            room = await search_room(self.store, ec.episode_id, self.settings)
+            if room is not None and room <= 0:
+                return
             row = await self.store.get_claim_row(ec.episode_id, idx)
             if not row or row.get("sources_status") not in ("not_requested", "failed"):
                 return
@@ -573,8 +380,8 @@ class AutoSources:
             async with self._gate:
                 if ec.budget.spent_usd + self.settings.search_cost_usd > ec.budget.cap_usd:
                     return
-                found, digest = await _lookup_and_summarize(row, await self._context(), force=False)
-                await _save(self.store, cid, found, digest)
+                found = await lookup_answer(row, await self._context(), force=False)
+                await _save(self.store, cid, found)
                 final = True
         except asyncio.CancelledError:
             raise
@@ -602,34 +409,3 @@ class AutoSources:
         for t in list(self._tasks):
             t.cancel()
         await asyncio.gather(*list(self._tasks), return_exceptions=True)
-
-
-# --- One-off: summaries for sources saved before summaries existed --------------------------------------
-
-async def summarize_missing(*, settings: Settings, store: Any, limit: int = 200) -> dict[str, Any]:
-    """Writes the sources summary and match for claims that have sources but no match yet, from their stored excerpts (no new
-    search). Charged to each video's budget; a video over its cap is skipped."""
-    done = skipped = 0
-    cost = 0.0
-    for row in await store.list_claims_missing_summary(limit):
-        episode_id = row["episode_id"]
-        async with lock_for(episode_id):
-            ep = row.get("episodes") or {}
-            ec = _context(episode_id, ep, settings, store)
-            if ec.budget.spent_usd >= ec.budget.cap_usd:
-                skipped += 1
-                continue
-            start = ec.budget.spent_usd
-            token = set_context(ec)
-            try:
-                found = [Source(**s) for s in sorted(row["claim_sources"], key=lambda s: s.get("rank") or 0)]
-                digest = await summarize(row["claim_text"], found)
-                await store.save_sources_summary(row["id"], digest.summary, digest.match)
-                done += bool(digest.summary or digest.match)
-            finally:
-                spent = round(ec.budget.spent_usd - start, 6)
-                cost += spent
-                await store.add_episode_cost(episode_id, spent, ec.budget.tokens_in, ec.budget.tokens_out)
-                await store.save_guardrail_events(episode_id, ec.events)
-                token.var.reset(token)
-    return {"summarised": done, "skipped_over_budget": skipped, "cost_usd": round(cost, 4)}

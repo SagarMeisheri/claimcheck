@@ -4,7 +4,6 @@
   python -m claimcheck.cli --sources CLAIM_ID            # look up sources for one stored claim
   python -m claimcheck.cli --sources-all EPISODE_ID      # look up sources for every statement of a video
   python -m claimcheck.cli --qa EPISODE_ID               # the questions for a finished video's Q&A tab
-  python -m claimcheck.cli --summarize-missing           # sources summary + match for claims looked up before them
   python -m claimcheck.cli --relink-channels             # give videos saved without a channel their channel + creator
 
 Needs the keys and Supabase settings from pipeline/.env (see .env.example).
@@ -25,8 +24,6 @@ def main() -> None:
     ap.add_argument("--sources", metavar="CLAIM_ID", help="look up sources for one stored claim")
     ap.add_argument("--sources-all", metavar="EPISODE_ID", help="look up sources for every statement of a video")
     ap.add_argument("--qa", metavar="EPISODE_ID", help="write the Q&A questions for a finished video")
-    ap.add_argument("--summarize-missing", action="store_true",
-                    help="write the sources summary for claims whose sources were saved without one (no new search)")
     ap.add_argument("--relink-channels", action="store_true",
                     help="give videos saved without a channel their channel (and creator profile, if any)")
     ap.add_argument("--json", action="store_true", help="print the full result as JSON")
@@ -60,11 +57,6 @@ def main() -> None:
         from .maintenance import relink_channels
 
         print(json.dumps(asyncio.run(relink_channels(store, settings)), indent=2))
-        return
-    if args.summarize_missing:
-        from .agents.sources import summarize_missing
-
-        print(json.dumps(asyncio.run(summarize_missing(settings=settings, store=store)), indent=2))
         return
     if args.sources_all:
         from .agents.sources import run_video_sources

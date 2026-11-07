@@ -12,44 +12,34 @@ export type Pestle = "political" | "economic" | "social" | "technological" | "le
 export interface Source {
   url: string;
   title: string | null;
-  tier: number; // display label only: 1 = official / peer-reviewed, 2 = established news or research, 3 = other
+  tier?: number; // unused: every source is treated alike
   excerpt: string; // text the search took from the page (may be empty)
   publish_date: string | null;
   rank: number; // the search engine's order, most relevant first
   kind?: "related" | "counter"; // which search found it: the statement's subject, or different figures / other views
-  independence?: "independent" | "own_organisation" | "same_episode" | null; // set when the answer was researched
+  independence?: "independent" | "own_organisation" | "same_episode" | null; // where a page comes from: a note for the reader, treated alike
 }
 
-/** How a page relates to one point of an answer. A description of the page, never a verdict on the speaker. */
-export type ResearchRelation = "same" | "different" | "different_scope" | "other_position";
-export interface ResearchFinding {
-  url: string; site: string; title: string;
-  independence: "independent" | "own_organisation";
-  relation: ResearchRelation;
-  finding: string; // what the page says about the point, from its own words
-  quote: string; // the page's exact words, checked against the page text
-  position: string; // a neutral label of the stance, for other positions
-}
-export type PointStatus = "same" | "different" | "different_scope" | "other_position" | "mixed" | "own_organisation_only" | "no_independent_source";
-export interface ResearchPoint { text: string; kind: string; status: PointStatus; findings: ResearchFinding[] }
-export type Camp = "ruling" | "opposition";
-export interface CampStance { stance: string; quote: string; who: string; url: string; site: string; title: string; date?: string | null }
-export type BiasKind = "stake" | "prior_stance" | "camp_match" | "one_sided" | "loaded_language" | "selective_use" | "leading_question" | "other_view_acknowledged";
-export interface BiasSignal { kind: BiasKind; text: string; quote: string }
-export type Grounding = "backed" | "partly_backed" | "unverified" | "not_backed" | "value_judgement";
-/** The assessment of an opinion: how it is backed, what the two camps say, and quoted bias signals. Every quote was checked against its source. */
-export interface Assessment {
-  bottom_line: string; grounding: Grounding; grounding_reason: string; bias: "balanced" | "leans" | "one_sided" | "cant_tell"; toward: Camp | "none";
-  bias_reason: string; signals: number[]; objection: string; speaker_record: string; stake: string; evidence: "strong" | "limited" | "none";
-}
-export interface Opinion {
-  version: number; camps: Record<Camp, string>; issue: string; stances: Record<Camp, CampStance[]>;
-  signals: BiasSignal[]; matches: Camp | "neither" | "unclear"; assessment: Assessment;
+export type PointStatus = "sources_found" | "no_source";
+export interface ResearchPoint { text: string; kind: string; status: PointStatus }
+/** What the independent sources show about an answer, worked out in code from the verified findings. "unverified" says nothing about the answer itself. */
+export type CorrectnessLabel = "supported" | "partly" | "contradicted" | "unverified" | "opinion";
+export interface CorrectnessBasis { site: string; url: string; relation: "page"; finding: string; quote: string } // a page the search returned: its title and search excerpt
+export interface Correctness { label: CorrectnessLabel; evidence: "strong" | "limited" | "none"; basis: CorrectnessBasis[] }
+/** How a question was asked, labelled by its wording. The quote is the question's own words, checked against the question. */
+export type QuestionType = "open" | "closed" | "leading" | "softball" | "challenging" | "unclear";
+export interface QuestionAnalysis { type: QuestionType; p?: number; quote?: string; spoken?: boolean } // spoken false: tagged from the AI's plain-words question, so leading wording may be missed
+/** The answer-tag classifier's output (ADK classifier, run after the sources are found). p is the classifier's probability for the label. */
+export interface AnswerTags { // each tag is its own classifier call, so any of them can be missing
+  support?: { label: CorrectnessLabel; p: number }; match?: { label: "high" | "medium" | "low"; p: number };
+  bias?: { label: "balanced" | "leans" | "one_sided" | "cant_tell"; p: number };
+  stake?: { yes: boolean; p: number };
+  question_type?: { label: QuestionType; p: number };
 }
 /** How an answer's sources were researched: its checkable points and what independent pages say about each. */
 export interface Research {
   version: number; points: ResearchPoint[]; positions: string[]; queries: string[];
-  opinion?: Opinion; dropped?: Record<string, number>; pages?: { url: string; site: string; title: string; independence: string }[];
+  correctness?: Correctness; tags?: AnswerTags; dropped?: Record<string, number>; pages?: { url: string; site: string; title: string; independence: string }[];
 }
 
 export interface Claim {
@@ -63,6 +53,7 @@ export interface Claim {
   question?: string | null; // the question this answer responds to (videos analysed since answers were extracted)
   asked_by?: string | null;
   question_kind?: "asked" | "implied" | null; // implied: the AI wrote the question for a passage nobody prompted
+  question_analysis?: QuestionAnalysis | null; // how the question was asked (open, closed, leading, softball, challenging)
   section_idx: number | null;
   pestle_area: Pestle;
   topic: string | null;

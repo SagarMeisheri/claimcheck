@@ -5,7 +5,7 @@ Creators come from the `creators` table (top YouTube podcasts, matched by YouTub
 
 How the profiles are used:
   extraction   the show and its hosts, so the host can be named
-  triage       statement + what was being discussed + speaker and show profiles -> how to look it up
+  tags         statement + question + what was being discussed + speaker and show profiles + pages -> the answer's tags
   searches     who said it and where steer the first search; known positions and criticisms aim the second one
   summary      the context line only helps pick out relevant excerpts
 Biases and criticisms are never shown to viewers (the database only exposes the neutral parts).
@@ -142,3 +142,12 @@ def section_for(start_s: int, sections: list[dict[str, Any]]) -> Optional[dict[s
         if s.get("start_s", 0) <= start_s:
             hit = s
     return hit
+
+
+SPEAKER_KEYS = ("name", "role", "affiliations", "leaning", "leaning_basis", "public_opinion")
+SHOW_KEYS = ("podcast", "hosts", "country", "leaning", "leaning_basis", "public_opinion")
+
+
+def profile_text(p: dict[str, Any], keys: tuple[str, ...]) -> str:
+    """A profile as plain 'key: value' lines, for the classifiers that read it."""
+    return "\n".join(f"{k}: {p[k]}" for k in keys if p.get(k))

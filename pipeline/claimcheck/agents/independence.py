@@ -5,10 +5,10 @@ speaker's own organisation saying the same thing (a company's press page for its
 anyone else says it. Each page gets a label, by code only (no model):
 
   same_episode      the episode itself, a transcript or a listing of it (policy.yaml sources.same_episode_hosts, the video's
-                    own id, or a title that is the video's title). Dropped.
+                    own id, or a title that is the video's title).
   own_organisation  the site of an organisation the speaker is tied to (their profile's affiliations and role) or of the show.
-                    Kept, labelled: it says what the organisation says, not what others say.
   independent       everything else.
+All three are kept and treated alike: the label only tells a reader where a page comes from.
 """
 
 from __future__ import annotations
@@ -90,13 +90,12 @@ def classify_source(url: str, title: str, ctx: dict[str, Any], policy: dict[str,
 
 
 def split_sources(sources: list[Source], ctx: dict[str, Any], policy: dict[str, Any]) -> tuple[list[Source], dict[str, int]]:
-    """The sources with their label set and the episode's own pages removed, and how many of each kind were seen."""
+    """Every source with its label set (nothing is removed), and how many of each kind were seen. The label is a note for the reader."""
     terms = org_terms(ctx)
     kept: list[Source] = []
     counts = {INDEPENDENT: 0, OWN: 0, EPISODE: 0}
     for s in sources:
         label, _ = classify_source(s.url, s.title, ctx, policy, terms)
         counts[label] += 1
-        if label != EPISODE:
-            kept.append(s.model_copy(update={"independence": label}))
+        kept.append(s.model_copy(update={"independence": label}))
     return kept, counts
