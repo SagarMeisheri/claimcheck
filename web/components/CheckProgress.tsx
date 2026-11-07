@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { stopVideo } from "@/app/actions";
 import { DEFAULT_STEPS } from "@/lib/steps";
 import type { Step } from "@/lib/types";
 
@@ -21,6 +22,13 @@ export function CheckProgress({ videoId, compact = false, showSteps, initialStep
   const [s, setS] = useState<Status | null>(null);
   const seen = useRef(0);
   const seenLooked = useRef<number | null>(null);
+  const [stopping, stop] = useTransition();
+  const [stopMsg, setStopMsg] = useState<string | null>(null);
+  const halt = () => stop(async () => {
+    const r = await stopVideo(videoId);
+    setStopMsg(r.ok ? null : r.message);
+    router.refresh();
+  });
 
   useEffect(() => {
     let stop = false;
@@ -53,8 +61,13 @@ export function CheckProgress({ videoId, compact = false, showSteps, initialStep
     <div className={`cprogress${compact ? " compact" : ""}`}>
       <div className="cprogress-top">
         <span><span className="spinner" aria-hidden="true" /> {label}</span>
-        <span className="meta">{pct}%</span>
+        <span className="cprogress-end">
+          <span className="meta">{pct}%</span>
+          <button type="button" className="btn secondary small cprogress-stop" onClick={halt} disabled={stopping}
+                  title="Stops reading this video. Answers already found are kept.">{stopping ? "Stopping…" : "Stop"}</button>
+        </span>
       </div>
+      {stopMsg && <p className="meta" role="status">{stopMsg}</p>}
       <div className="cprogress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={label}>
         <span style={{ width: `${Math.max(pct, 2)}%` }} />
       </div>

@@ -126,6 +126,11 @@ def test_each_query_is_its_own_search_and_every_page_is_kept_with_its_excerpt_an
     assert [p["status"] for p in r.points] == ["sources_found", "sources_found"] and r.counter == [] and r.match == "medium"
     assert r.positions == ["Civil services as a colonial legacy", "Civil services as nation builders"]
     assert "Positions people hold" in calls["objective"] and all(a != ANSWER for q in calls["search"] for a in q)
+    assert r.searches == [                                                                    # what each search returned, in its own order, duplicates and all
+        {"query": "Indian Civil Service purpose British Raj", "urls": ["https://www.ulisten.ai/episode/steel", "https://hist.example/ics"], "failed": False},
+        {"query": "IAS continuity Indian Civil Service 1947", "urls": ["https://think.example/legacy", "https://hist.example/ics"], "failed": False},
+        {"query": "historians Indian Civil Service role", "urls": ["https://gov.nic.in/rules"], "failed": False}]
+    assert r.stored()["searches"] == r.searches
 
 
 def test_the_query_cap_is_a_setting(monkeypatch):
@@ -145,6 +150,7 @@ def test_an_answer_with_nothing_checkable_is_skipped_unless_a_viewer_pressed_the
 def test_one_failed_search_does_not_sink_the_others_but_all_failing_raises(monkeypatch):
     r, calls, _ = run(monkeypatch, [RuntimeError("search down"), [src("https://a.example/1")], []])
     assert len(calls["search"]) == 3 and [p["site"] for p in r.pages] == ["a.example"]
+    assert [(x["failed"], x["urls"]) for x in r.searches] == [(True, []), (False, ["https://a.example/1"]), (False, [])]   # a failed search says so
     with pytest.raises(ResearchUnavailable, match="every search failed"):
         run(monkeypatch, [RuntimeError("down")] * 3)
 

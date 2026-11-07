@@ -9,17 +9,19 @@ export function ResearchPanel({ research }: { research: Research }) {
   if (!points.length) return null;
   return (
     <section className="rs" aria-label="How this answer was researched">
-      <h4 className="rs-title">What was searched</h4>
+      <h4 className="rs-title">What was checked</h4>
       {points.map((p, i) => (
         <div key={i} className="rs-point">
           <p className="rs-point-text">{p.text}</p>
         </div>
       ))}
       {research.positions?.length > 0 && <p className="meta">Positions looked for: {research.positions.join("; ")}.</p>}
-      <details className="fold">
-        <summary>{research.queries?.length ?? 0} searches, {research.pages?.length ?? 0} pages found</summary>
-        <ul className="nclist">{(research.queries ?? []).map((q, i) => <li key={i}>{q}</li>)}</ul>
-      </details>
+      {!research.searches?.length && (
+        <details className="fold">
+          <summary>{research.queries?.length ?? 0} searches, {research.pages?.length ?? 0} pages found</summary>
+          <ul className="nclist">{(research.queries ?? []).map((q, i) => <li key={i}>{q}</li>)}</ul>
+        </details>
+      )}
       <p className="meta rs-foot">{RESEARCH_NOTE}</p>
     </section>
   );

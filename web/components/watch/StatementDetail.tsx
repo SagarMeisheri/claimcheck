@@ -5,6 +5,7 @@ import { CheckSources, type SourcesResult } from "@/components/CheckSources";
 import { IndicatorEvidence } from "@/components/Indicators";
 import { ReportForm } from "@/components/ReportForm";
 import { ResearchPanel } from "@/components/ResearchPanel";
+import { SearchResults } from "@/components/SearchResults";
 import { SourceList } from "@/components/SourceList";
 import type { Claim } from "@/lib/types";
 import { SEARCHING, canCheckSources, hasSources, typeOf } from "@/lib/statements";
@@ -65,10 +66,10 @@ export function StatementDetail({ claim: c, videoId, phase, countdown, hasNext, 
 
       <IndicatorEvidence c={c} />
       {sourceable && c.sources_status === "done" && c.research && (c.research.points?.length ?? 0) > 0 && <ResearchPanel research={c.research} />}
-      {sourceable && c.sources_status === "done" && (
-        <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} counter={c.counter_sources}
-                    counterSummary={c.counter_summary} route={c.sources_route} />
-      )}
+      {sourceable && c.sources_status === "done" && (c.research?.searches?.length
+        ? <SearchResults research={c.research} sources={c.sources} />
+        : <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} counter={c.counter_sources}
+                      counterSummary={c.counter_summary} route={c.sources_route} />)}
       {lookup && c.sources_status !== "done" && (
         <CheckSources claimId={c.id} status={c.sources_status} error={c.sources_error} route={c.sources_route} onDone={onLookedUp} />
       )}

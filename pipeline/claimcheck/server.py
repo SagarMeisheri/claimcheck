@@ -94,19 +94,27 @@ async def run(req: RunRequest, x_pipeline_secret: Optional[str] = Header(default
 
 @app.post("/episodes/{episode_id}/cancel")
 async def cancel(episode_id: str, x_pipeline_secret: Optional[str] = Header(default=None)) -> dict:
-    """Stops a running analysis and marks the episode skipped. Works even if the run is no longer in memory."""
+    """Stops everything running for a video: its analysis, its "Check sources for all" run and any single lookups. Works even if the run is
+    no longer in memory (the service restarted): the database is reset either way. An analysis is marked skipped; answers that were
+    half-way through a lookup go back to 'not requested', so their buttons work again."""
     _auth(x_pipeline_secret)
-    task = _running.get(episode_id)
-    was_running = bool(task and not task.done())
-    if was_running:
-        task.cancel()
-        try:
-            await task
-        except BaseException:  # CancelledError or whatever the run raised while stopping
-            pass
+    claim_rows = _store.db.table("claims").select("id").eq("episode_id", episode_id).in_("sources_status", ["searching", "queued"]).execute().data or []
+    keys = [episode_id, f"sources-all:{episode_id}"] + [f"claim:{r['id']}" for r in claim_rows]
+    stopped = []
+    for key in keys:
+        task = _running.get(key)
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except BaseException:  # CancelledError or whatever the run raised while stopping
+                pass
+            stopped.append(key)
     _store.db.table("episodes").update({"status": "skipped", "skip_reason": "Cancelled."}
                                        ).eq("id", episode_id).in_("status", ["queued", "processing"]).execute()
-    return {"cancelled": True, "was_running": was_running}
+    _store.db.table("claims").update({"sources_status": "not_requested"}).eq("episode_id", episode_id).in_("sources_status", ["searching", "queued"]).execute()
+    _store.db.table("episodes").update({"sources_batch_status": None, "progress": {}}).eq("id", episode_id).execute()
+    return {"cancelled": True, "was_running": bool(stopped), "stopped": len(stopped)}
 
 
 @app.post("/episodes/{episode_id}/sources-all")

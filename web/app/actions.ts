@@ -212,6 +212,25 @@ export async function requestAllSources(videoId: string, recheck = false): Promi
   return { ok: true, message: "Searching sources for the claims. Each result appears as soon as it is ready." };
 }
 
+/** Stops a video's analysis and its "Check sources for all" run, and frees any answer left half-way through a lookup.
+ * Allowed for a reviewer, the visitor who submitted the video, or anyone when nobody is recorded as its submitter. */
+export async function stopVideo(videoId: string): Promise<ActionResult> {
+  const db = serviceDb();
+  const { data: ep } = await db.from("episodes").select("id, status, submitted_by, sources_batch_status").eq("youtube_video_id", videoId).maybeSingle();
+  if (!ep) return { ok: false, message: "Video not found." };
+  const reviewer = !!reviewerFromHeader((await headers()).get("authorization"));
+  if (!reviewer && ep.submitted_by && ep.submitted_by !== (await visitorHash())) return { ok: false, message: "Only the person who submitted this video can stop it." };
+  const res = await pipeline(`/episodes/${encodeURIComponent(ep.id)}/cancel`);
+  if (!res?.ok) { // the pipeline service is unreachable: reset the database directly
+    await db.from("episodes").update({ status: "skipped", skip_reason: "Cancelled." }).eq("id", ep.id).in("status", ["queued", "processing"]);
+    await db.from("claims").update({ sources_status: "not_requested" }).eq("episode_id", ep.id).in("sources_status", ["searching", "queued"]);
+    await db.from("episodes").update({ sources_batch_status: null }).eq("id", ep.id);
+  }
+  revalidatePath("/", "layout");
+  revalidatePath(`/v/${videoId}`);
+  return { ok: true, message: "Stopped.", episodeId: ep.id, videoId };
+}
+
 // --- Reviewer ----------------------------------------------------------------------------------
 
 async function assertReviewer(): Promise<string> {
