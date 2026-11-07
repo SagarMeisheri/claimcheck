@@ -62,12 +62,13 @@ class Research:
     correctness: Optional[dict[str, Any]] = None  # the support tag with the pages it rests on (agents/correctness.py), set by agents/tags.py
     tags: Optional[dict[str, Any]] = None  # the answer-tag classifier's output (agents/tags.py)
     all_pages: list[dict[str, Any]] = field(default_factory=list, repr=False)  # every page with its search excerpt, for the classifier (not stored)
+    searches: list[dict[str, Any]] = field(default_factory=list)  # per query: {"query", "urls" (in the order that search returned them), "failed"}
     question_analysis: Optional[dict[str, Any]] = field(default=None, repr=False)  # how the question was asked (from the answer tags), saved on the answer
 
     def stored(self) -> dict[str, Any]:
         """What is saved in claims.research and shown in the detail panel."""
         out = {"version": 2, "points": self.points, "positions": self.positions, "queries": self.queries, "dropped": self.dropped,
-               "pages": self.pages}
+               "pages": self.pages, "searches": self.searches}
         if self.correctness:
             out["correctness"] = self.correctness
         if self.tags:
@@ -233,10 +234,12 @@ async def research_answer(ctx: dict[str, Any], location: Optional[str], force: b
     if not lists:
         raise ResearchUnavailable("every search failed")
     sources = interleave([split_sources(lst, ctx, policy)[0] for lst in lists])  # nothing is removed; each source gets a label
+    searches = [{"query": q, "urls": [] if isinstance(r, Exception) else [x.url for x in r], "failed": isinstance(r, Exception)}
+                for q, r in zip(queries, results)]  # what each search returned, in its own order
 
     related = [x.model_copy(update={"kind": "related", "rank": i}) for i, x in enumerate(sources)]
     pages = [{"url": x.url, "site": domain_of(x.url), "title": x.title or domain_of(x.url), "independence": x.independence} for x in sources]
     all_pages = [{**pg, "date": x.publish_date, "text": x.excerpt} for pg, x in zip(pages, sources)]
     return Research(points=[{"text": p.text, "kind": p.kind, "status": "sources_found" if sources else "no_source"} for p in points],
                     positions=[p.label for p in plan.positions], queries=queries, related=related, counter=[], summary="", counter_summary="",
-                    match="medium" if sources else "low", pages=pages, all_pages=all_pages)
+                    match="medium" if sources else "low", pages=pages, all_pages=all_pages, searches=searches)

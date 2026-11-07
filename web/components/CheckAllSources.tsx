@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { requestAllSources } from "@/app/actions";
+import { requestAllSources, stopVideo } from "@/app/actions";
 
 type Live = { batch: string | null; looked_up: number; searching: number; label: string | null; pct: number };
 
@@ -60,6 +60,13 @@ export function CheckAllSources({ videoId, running: initialRunning, eligible, ca
     if (r.ok) { if (recheck) onRecheck?.(); setRunning(true); router.refresh(); }
   });
 
+  const halt = () => start(async () => {
+    const r = await stopVideo(videoId);
+    setMessage(r.ok ? null : r.message);
+    if (r.ok) setRunning(false);
+    router.refresh();
+  });
+
   if (running || pending) {
     const pct = live?.pct ?? 0;
     return (
@@ -68,6 +75,9 @@ export function CheckAllSources({ videoId, running: initialRunning, eligible, ca
           <Ring pct={live && live.pct > 0 ? pct : null} />
           {live?.label ?? "Starting…"}
         </button>
+        <button type="button" className="btn secondary small verify-all-stop" onClick={halt}
+                title="Stops checking sources. Answers already checked are kept.">Stop</button>
+        {message && <span className="meta verify-all-msg" role="status">{message}</span>}
       </p>
     );
   }

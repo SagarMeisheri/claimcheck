@@ -416,6 +416,8 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .verify-all-btn { display: inline-flex; align-items: center; gap: 0.5rem; }
 .verify-all-btn.is-running { opacity: 1; cursor: default; }
 .verify-all-msg { font-size: 0.85rem; }
+.cprogress-end { display: inline-flex; align-items: center; gap: 0.6rem; }
+.cprogress-stop, .verify-all-stop { padding-block: 0.15rem; }
 .ring { flex: none; transform: rotate(-90deg); }
 .ring-track { fill: none; stroke: var(--rule); stroke-width: 2.5; }
 .ring-fill { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; transition: stroke-dashoffset 0.4s ease; }
@@ -891,3 +893,13 @@ button.ind:hover { background: color-mix(in srgb, var(--tone) 20%, var(--paper-r
 .ind.is-approx { border-style: dashed; }
 .ind-approx { color: var(--ink-soft); font-weight: 700; }
 .ip-approx { margin: 0; font-size: .8rem; }
+
+/* What each search returned: the search term at the top, its pages below. */
+.sr { margin-top: 1rem; display: grid; gap: 1rem; }
+.sr-search { display: grid; gap: .5rem; border-top: 1px solid var(--rule); padding-top: .7rem; }
+.sr-head { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .6rem; }
+.sr-n { font-size: .7rem; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+.sr-term { font-family: var(--font-display); font-weight: 700; font-size: 1.02rem; overflow-wrap: anywhere; }
+.sr-count { font-size: .8rem; color: var(--ink-soft); }
+.sr-items { list-style: none; margin: 0; padding: 0; display: grid; gap: .7rem; }
+.sr-items .source-site { display: flex; flex-wrap: wrap; gap: .25rem .5rem; align-items: baseline; }
