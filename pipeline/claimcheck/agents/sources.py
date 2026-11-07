@@ -1,14 +1,15 @@
 """Sources for answers: one lookup per answer, shared by the button, "Check sources for all" and the automatic path.
 
-Lookup (lookup_answer), per answer:
-  plan     research.py: a planner writes the checkable points and up to 3 queries. An answer with nothing checkable (greeting,
-           background, a story, self-description) is skipped: no search (a viewer pressing the button is never skipped)
+Lookup (lookup_answer), per answer: the answer-tag Workflow (agents/qa_tags.py)
+  tag      one ADK classifier call: answer type, claim type and the conflict checks the speakers' incentive tags call for.
+           It routes the answer: a pure opinion is exempt (no planner, no search)
+  plan     research.py: a planner writes the checkable points and up to 3 queries; nothing checkable -> no search
   search   one Parallel search per query, all at the same time; every page returned is kept (research.py)
-  tag      one ADK classifier call per tag (tags.py): support, match, bias, stake and how the question was asked, each shown only what it
-           needs of the Q&A, the speaker's and the show's profiles and the search excerpts
-  save     the pages, the tags and the question tags are saved on the answer
+  ground   one classifier call: grounding, match (and missing context), then the skepticism rules in code
+  save     the pages and claims.qa_tags; an answer with no search keeps its tags with sources_route 'skip'
 
-So an answer costs 2 model calls, 3 searches and 5 classifier calls. Nothing says whether an answer is right: the tags describe what was found.
+So an answer costs 1 classifier call, or 1 planner call, 3 searches and 2 classifier calls when researched. How the question was
+asked is tagged once per video for all questions (agents/interview.py).
 
 One answer ("Check sources")                                  POST /claims/{id}/sources
 Every answer of a video ("Check sources for all statements")  POST /episodes/{id}/sources-all
@@ -32,7 +33,7 @@ from typing import Any, NamedTuple, Optional
 from ..config import Settings
 from ..context import Budget, EpisodeContext, get_context, is_budget_error, set_context
 from ..policy import load_policy
-from ..profiles import creator_context, search_location, section_for, speaker_context
+from ..profiles import creator_context, is_role_label, name_key, search_location, section_for, speaker_context
 from ..schemas import NO_SOURCE_TYPES, ClaimRecord, Source
 
 log = logging.getLogger("claimcheck")
@@ -82,7 +83,7 @@ def precheck(row: Optional[dict[str, Any]], settings: Settings) -> tuple[bool, s
     if ep.get("status") not in ("done", "in_review"):
         return False, "This video hasn't finished being analysed yet.", 409
     if row.get("statement_type") in NO_SOURCE_TYPES:
-        return False, "Questions and personal stories don't have sources to look up.", 409
+        return False, "Questions don't have sources to look up.", 409
     if row.get("policy_tier") == "never" or row.get("not_checked_reason") == "outside_policy":
         return False, "This statement is outside our content policy.", 409
     status = row.get("sources_status")
@@ -107,6 +108,7 @@ class VideoContext:
         self._loaded = False
         self.creator: Optional[dict[str, Any]] = None
         self.speakers: dict[str, dict[str, Any]] = {}
+        self.rows: dict[str, dict[str, Any]] = {}  # episode_speakers rows by label, with the speakers row and the incentive tags
 
     async def load(self) -> "VideoContext":
         if self._loaded:
@@ -117,6 +119,7 @@ class VideoContext:
                 self.creator = await self.store.get_creator(self.episode["creator_id"])
             for r in await self.store.get_episode_speakers(self.episode.get("id", "")):
                 self.speakers[r.get("label") or ""] = r.get("speakers") or {}
+                self.rows[r.get("label") or ""] = r
         except Exception:  # context makes lookups better; it is never a reason for one to fail
             log.exception("could not load profiles for episode %s", self.episode.get("id"))
         return self
@@ -128,17 +131,39 @@ class VideoContext:
         section = next((s for s in sections if s.get("idx") == idx), None) if idx is not None else None
         section = section or section_for(int(claim.get("start_s") or 0), sections)
         label = claim.get("speaker") or ""
+        row = self.row_for(label)
+        host = self.host_row()
         return {k: v for k, v in {
             "statement": claim.get("claim_text", ""), "statement_type": claim.get("statement_type"),
+            "context_quote": claim.get("context_quote"),
             "question": claim.get("question"), "question_spoken": claim.get("question_quote"),
             "question_kind": claim.get("question_kind"), "asked_by": claim.get("asked_by"),
             "video": {"id": self.episode.get("youtube_video_id"), "title": self.episode.get("title"),
                       "channel": (self.creator or {}).get("youtube_channel_name")},
             "discussing": claim.get("statement_context") or (section or {}).get("summary") or "",
             "section": (section or {}).get("title") or "",
-            "speaker": speaker_context(self.speakers.get(label), label),
+            "speaker": speaker_context((row or {}).get("speakers"), label),
+            "speaker_incentives": {**((row or {}).get("incentives") or {}), **((row or {}).get("incentives_internal") or {})},
+            "host": speaker_context((host or {}).get("speakers"), (host or {}).get("label", "")),
+            "host_incentives": {**((host or {}).get("incentives") or {}), **((host or {}).get("incentives_internal") or {})},
+            "description_notes": (self.episode.get("interaction") or {}).get("description_notes") or [],
             "creator": creator_context(self.creator),
         }.items() if v}
+
+    def row_for(self, label: str) -> Optional[dict[str, Any]]:
+        """The episode_speakers row for a speaker label: by label, by name, or "Host" -> the one host."""
+        if label in self.rows:
+            return self.rows[label]
+        key = name_key(label)
+        hit = next((r for r in self.rows.values() if name_key(r.get("label") or "") == key), None)
+        if hit or not is_role_label(label) or "host" not in label.lower():
+            return hit
+        hosts = [r for r in self.rows.values() if r.get("role") == "host"]
+        return hosts[0] if len(hosts) == 1 else None
+
+    def host_row(self) -> Optional[dict[str, Any]]:
+        hosts = [r for r in self.rows.values() if r.get("role") == "host" and r.get("speakers")]
+        return hosts[0] if hosts else None
 
     @property
     def location(self) -> Optional[str]:
@@ -148,32 +173,30 @@ class VideoContext:
 # --- One lookup ----------------------------------------------------------------------------------------
 
 class Lookup(NamedTuple):
-    route: str  # "skip" (nothing checkable) or "related" (looked up)
+    route: str  # "skip" (no search: a pure opinion, or nothing checkable) or "related" (looked up)
     related: list[Source]
     research: Any = None  # the research.Research when the answer was looked up
+    tags: Optional[dict[str, Any]] = None  # claims.qa_tags (agents/qa_tags.py)
 
 
 async def lookup_answer(claim: dict[str, Any], vctx: VideoContext, *, force: bool) -> Lookup:
-    """Plan, search, tag. `force` (a viewer pressed the button) searches an answer the planner found nothing checkable in."""
-    from .research import research_answer
-    from .tags import tag_answer
+    """Tag, and research when the claim type calls for it. `force` (a viewer pressed the button) searches an answer the planner found
+    nothing checkable in."""
+    from .qa_tags import tag_answer
 
-    ctx = vctx.for_claim(claim)
-    r = await research_answer(ctx, vctx.location, force=force)
-    if r is None:
-        return Lookup("skip", [], None)
-    await tag_answer(ctx, r)  # sets the tags, correctness and match; never raises except for the budget
-    return Lookup("related", r.related, r)
+    t = await tag_answer(vctx.for_claim(claim), vctx.location, force=force)
+    if t.research is None:
+        return Lookup("skip", [], None, t.tags)
+    return Lookup("related", t.research.related, t.research, t.tags)
 
 
 async def _save(store: Any, claim_id: str, found: Lookup) -> None:
     if found.route == "skip":
-        await store.save_sources_route(claim_id, "skip")
+        await store.save_sources_route(claim_id, "skip", qa_tags=found.tags)
         return
     r = found.research
-    await store.save_claim_sources(claim_id, found.related, "", r.match, counter=[], counter_summary="", route="related", research=r.stored())
-    if r.question_analysis:
-        await store.save_question_analysis([claim_id], r.question_analysis)
+    await store.save_claim_sources(claim_id, found.related, "", r.match, counter=[], counter_summary="", route="related",
+                                   research=r.stored(), qa_tags=found.tags)
 
 
 def _context(episode_id: str, ep: dict[str, Any], settings: Settings, store: Any) -> EpisodeContext:
@@ -212,9 +235,8 @@ async def run_claim_sources(claim_id: str, *, settings: Settings, store: Any) ->
             vctx = await VideoContext(store, {**ep, "id": episode_id}).load()
             found = await lookup_answer(row, vctx, force=True)
             await _save(store, claim_id, found)
-            tags = (found.research.tags or {}) if found.research else {}
             result = {"claim_id": claim_id, "status": "done", "sources": len(found.related), "match": (found.research.match if found.research else ""),
-                      "support": (tags.get("support") or {}).get("label", "")}
+                      "grounding": ((found.tags or {}).get("grounding") or {}).get("label", "")}
         except Exception as e:
             log.warning("source search for answer %s failed: %s: %s", claim_id, type(e).__name__, e)
             await store.set_sources_status(claim_id, "failed", RETRY_MESSAGE)
@@ -348,9 +370,13 @@ class AutoSources:
         self._vctx_lock = asyncio.Lock()
 
     def submit(self, rec: ClaimRecord) -> None:
-        """Called for every saved statement. Stories and questions, redacted statements and anything past the limit are left."""
+        """Called for every saved statement. Questions, redacted statements, answers by someone not profiled yet and anything past the
+        limit are left for the batch after extraction."""
         if rec.not_checked_reason == "outside_policy" or rec.claim.statement_type in NO_SOURCE_TYPES or self.started >= self.limit:
             return
+        label = (rec.claim.speaker or "").strip()
+        if label and not is_role_label(label) and name_key(label) not in self.ec.prepared_speakers:
+            return  # named, but not profiled yet: the batch after extraction takes it, once SpeakerProfiler has profiled them
         self.started += 1
         task = asyncio.create_task(self._one(rec.index))  # inherits the extraction's context (budget, settings)
         self._tasks.add(task)

@@ -9,7 +9,9 @@ from claimcheck.config import Settings
 from claimcheck.context import Budget, EpisodeContext, set_context
 from claimcheck.policy import load_policy
 from claimcheck.profiles import extraction_context, usable_creator
-from claimcheck.schemas import CreatorProfileOut
+from claimcheck.schemas import CreatorProfileOut, IncentiveOut, Opinion, Sponsor
+
+PAGES = [{"n": 1, "url": "https://press.example/review", "site": "press.example", "title": "Review", "text": "..."}]
 
 META = {"channel_id": "UC123", "channel_title": "Figuring Out", "title": "Episode 5"}
 
@@ -21,10 +23,18 @@ def out(**kw):
 
 
 def test_an_identified_channel_becomes_a_profile_with_only_what_the_pages_said():
-    row = creator_row(META, out(criticism="Described by some viewers as soft on guests."))
-    assert row["source"] == "web_search" and row["podcast"] == "Figuring Out" and row["country"] == "India"
+    row = creator_row(META, out(criticism=[Opinion(text="Soft on guests", by="some viewers", page=1), Opinion(text="Uncited", page=9)],
+                                sponsors=[Sponsor(name="Zerodha", category="broking", page=1)],
+                                incentives=[IncentiveOut(tag="sponsor_aligned", reason="Sponsored by a broker; covers markets.", page=1),
+                                            IncentiveOut(tag="access_preserving", reason="Described as soft on guests.", page=1),
+                                            IncentiveOut(tag="commercial", reason="No such page.", page=7)]), PAGES)
+    assert row["source"] == "web_search" and row["podcast"] == "Figuring Out" and row["country"] == "India" and row["profile_version"] == 2
     assert row["youtube_channel_ids"] == ["UC123"] and len(row["youtube_handles"]) == 1  # the arrays must match in length
-    assert row["profile"]["hosts"] == "Raj Shamani" and row["profile"]["criticism"].startswith("Described by")
+    p = row["profile"]
+    assert p["hosts"] == "Raj Shamani" and p["critiques"] == [{"text": "Soft on guests", "by": "some viewers", "url": "https://press.example/review", "site": "press.example"}]
+    assert p["sponsors"][0]["name"] == "Zerodha" and p["public_opinion"].startswith("Criticised by some viewers")
+    assert set(p["incentives"]) == {"sponsor_aligned"} and set(p["incentives_internal"]) == {"access_preserving"}  # an uncited tag is dropped
+    assert p["incentives"]["sponsor_aligned"]["url"] == "https://press.example/review"
     assert "biases" not in row["profile"] and "identified" not in row["profile"]
     assert extraction_context(row) == "Show: Figuring Out. Hosts: Raj Shamani."
 
@@ -46,13 +56,17 @@ class Store:
         self.saved.append(row)
         return {**row, "id": "c1"}
 
+    async def update_creator(self, creator_id, fields):
+        self.updated = (creator_id, fields)
+        return {"id": creator_id, "podcast": "Curated", "profile": fields.get("profile") or {"hosts": "A"}, **fields}
+
 
 def _ec(store, s):
     return EpisodeContext(episode_id="ep1", video_id="v", settings=s, policy=load_policy(), store=store,
                         budget=Budget(cap_usd=3.0), plugins_factory=lambda: [])
 
 
-def run(monkeypatch, found, written=None, fail=None, meta=META):
+def run(monkeypatch, found, written=None, fail=None, meta=META, existing=None):
     store = Store()
     ec = _ec(store, Settings())
 
@@ -70,7 +84,7 @@ def run(monkeypatch, found, written=None, fail=None, meta=META):
     async def go():
         token = set_context(ec)
         try:
-            return await profile_creator(meta)
+            return await profile_creator(meta, existing=existing)
         finally:
             token.var.reset(token)
 
@@ -78,7 +92,7 @@ def run(monkeypatch, found, written=None, fail=None, meta=META):
 
 
 def hit(url="https://example.com/about", excerpt="Figuring Out is a podcast hosted by Raj Shamani."):
-    return NS(url=url, title="About", excerpt=excerpt)
+    return {"n": 1, "url": url, "site": "example.com", "title": "About", "text": excerpt, "group": "SEARCH"}
 
 
 def test_a_found_profile_is_saved_and_returned(monkeypatch):
@@ -105,3 +119,11 @@ def test_a_failed_search_never_raises_and_saves_nothing(monkeypatch):
 def test_a_channel_without_an_id_is_skipped(monkeypatch):
     row, store, _ = run(monkeypatch, [hit()], out(), meta={"channel_title": "X"})
     assert row is None and store.saved == []
+
+
+def test_a_curated_show_is_brought_up_to_version_2_keeping_its_own_fields(monkeypatch):
+    curated = {"id": "cur1", "podcast": "Curated", "summary": "Curated summary.", "profile": {"hosts": "A", "biases": "curated note"}}
+    row, store, _ = run(monkeypatch, [hit()], out(hosts="Someone else"), existing=curated)
+    cid, fields = store.updated
+    assert cid == "cur1" and store.saved == [] and fields["profile_version"] == 2
+    assert fields["profile"]["hosts"] == "A" and fields["profile"]["biases"] == "curated note" and fields["summary"] == "Curated summary."

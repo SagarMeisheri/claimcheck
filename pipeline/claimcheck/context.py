@@ -59,6 +59,11 @@ class EpisodeContext:
     duration_s: int = 0  # video length, used to turn a statement's timestamp into progress
     creator: Optional[dict[str, Any]] = None  # the matched `creators` row, if the channel is a known show
     listed_people: list[dict[str, str]] = field(default_factory=list)  # guests / hosts named in the video description
+    # The people profiled and tagged before extraction (agents/people.py), by name_key: episode_speakers working rows with the
+    # speakers row under "speaker". Source lookups started while the extractor writes read their speaker from here.
+    prepared_speakers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    profiles_built: int = 0  # new profiles built from the web for this video (settings.max_speaker_profiles)
+    description_notes: list[str] = field(default_factory=list)  # how people are introduced and sponsor lines (profile_tags.description_notes)
     # The steps shown to the viewer while the video is analysed: [{"key", "label", "status", "detail"}].
     steps: list[dict[str, Any]] = field(default_factory=list)
 

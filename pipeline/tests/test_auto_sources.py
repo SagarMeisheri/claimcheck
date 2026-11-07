@@ -52,6 +52,7 @@ def make(settings=None, store=None, spent=0.0):
     store = store or Store()
     ec = EpisodeContext(episode_id="ep1", video_id="v", settings=settings, policy=POLICY, store=store,
                         budget=Budget(cap_usd=settings.max_cost_usd_per_episode, spent_usd=spent), plugins_factory=lambda: [])
+    ec.prepared_speakers = {"sohini rajola": {"label": "Sohini Rajola", "role": "guest"}}  # profiled before extraction
     return AutoSources(ec), store
 
 
@@ -98,12 +99,12 @@ def test_no_automatic_lookup_starts_once_the_video_has_used_its_total(monkeypatc
     assert calls == [] and store.saved == [] and store.status == []  # nothing marked, so the button still works
 
 
-def test_stories_questions_and_redacted_answers_are_never_looked_up(monkeypatch):
+def test_questions_and_redacted_answers_are_never_looked_up_but_stories_are(monkeypatch):
     calls = []
     patch_lookup(monkeypatch, calls=calls)
     auto, _ = make()
     run(auto, [answer(0, statement_type="story"), answer(1, statement_type="question"), answer(2, policy_tier="never")])
-    assert calls == [] and auto.started == 0
+    assert calls == ["id0"] and auto.started == 1  # a story can carry a self-serving claim: the claim-type classifier decides
 
 
 def test_an_answer_with_nothing_checkable_is_saved_as_a_skip(monkeypatch):
@@ -215,3 +216,11 @@ def test_an_answer_waiting_for_a_free_slot_already_shows_as_searching(monkeypatc
     assert ("id0", "searching") in waiting and ("id1", "searching") in waiting
     assert sorted(store.saved) == [("id0", "related"), ("id1", "related")]
 
+
+
+def test_an_answer_by_someone_not_profiled_yet_waits_for_the_batch(monkeypatch):
+    calls = []
+    patch_lookup(monkeypatch, calls=calls)
+    auto, store = make()
+    run(auto, [answer(0, speaker="Nithin Kamath"), answer(1, speaker="Guest 1"), answer(2)])
+    assert sorted(calls) == ["id1", "id2"]  # a role label has no profile to wait for; a new name does

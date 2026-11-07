@@ -1,6 +1,6 @@
-"""The pages an answer's correctness tag is shown with, and how many sites came back.
+"""The pages an answer's grounding tag is shown with, and how many sites came back.
 
-The label itself comes from the answer-tag classifier (agents/tags.py), which reads the search excerpts of every page. This module
+The label itself comes from the grounding classifier (agents/qa_tags.py), which reads the search excerpts of every page. This module
 only lists the pages the searches returned (the first few, each with its excerpt) and counts the sites, so a reader can see what the
 label was made from. Every page counts alike: no kind of site is preferred or discounted.
 """

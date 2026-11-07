@@ -282,7 +282,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   // --- Selection and detail --------------------------------------------------------------------
   const lookedUp = (c: Claim, r: SourcesResult) => setLooked((m) => ({ ...m, [c.id]: { ...c, sources_status: "done", sources: r.sources ?? [],
     sources_summary: r.summary ?? null, sources_match: r.match ?? null, counter_sources: r.counter ?? [],
-    counter_summary: r.counter_summary ?? null, research: r.research ?? null, sources_route: r.route ?? c.sources_route } }));
+    counter_summary: r.counter_summary ?? null, research: r.research ?? null, qa_tags: r.qa_tags ?? c.qa_tags ?? null, sources_route: r.route ?? c.sources_route } }));
   const select = (c: Claim) => { setSelectedId(c.id); if (wide) setDockOpen(true); else setDrawerOpen(true); };
   const selected = visible.find((c) => c.id === selectedId) ?? (docked ? playable[0] ?? null : null);
   const selAt = selected ? playable.findIndex((c) => c.id === selected.id) : -1;
@@ -414,7 +414,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           </>
         )}
 
-        {qa && !checking && <InterviewProfile claims={everything} />}
+        {qa && <InterviewProfile claims={everything} interaction={ep.interaction} onOpen={select} />}  {/* fills in as answers are tagged */}
 
         <div className="score-timeline">
           {playable.length === 0

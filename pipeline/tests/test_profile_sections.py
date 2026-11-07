@@ -9,7 +9,7 @@ from claimcheck.config import Settings
 from claimcheck.context import Budget, EpisodeContext, set_context
 from claimcheck.policy import load_policy
 from claimcheck.profiles import creator_context, speaker_context
-from claimcheck.schemas import CreatorProfileOut
+from claimcheck.schemas import CreatorProfileOut, Opinion, Political
 
 
 def test_a_curated_show_gives_its_biases_as_leaning_and_its_criticism_as_public_opinion():
@@ -29,21 +29,25 @@ def test_a_speakers_known_positions_and_criticisms_fill_the_two_fields_when_noth
     assert "leaning" not in speaker_context({"status": "ready", "name": "N", "profile": {"role": "Economist"}})
 
 
-def test_a_live_creator_profile_saves_leaning_and_public_opinion():
-    out = CreatorProfileOut(identified=True, podcast="Show", summary="A show.", hosts="A", leaning="Described by The Hindu as centre-left", leaning_basis="described",
-                            public_opinion="Praised by X for depth. Criticised by Y for length.")
-    p = creator_row({"channel_title": "Show", "channel_id": "UC1"}, out)["profile"]
-    assert p["leaning"].startswith("Described by The Hindu") and p["leaning_basis"] == "described" and p["public_opinion"].startswith("Praised by X")
+def test_a_live_creator_profile_saves_its_cited_leaning_and_public_opinion():
+    pages = [{"n": 1, "url": "https://thehindu.example/a", "site": "thehindu.example"}, {"n": 2, "url": "https://x.example/b", "site": "x.example"}]
+    out = CreatorProfileOut(identified=True, podcast="Show", summary="A show.", hosts="A",
+                            political=Political(leaning="Described by The Hindu as centre-left", basis="described", page=1),
+                            praise=[Opinion(text="depth", by="X", page=2)], criticism=[Opinion(text="length", by="Y", page=2)])
+    p = creator_row({"channel_title": "Show", "channel_id": "UC1"}, out, pages)["profile"]
+    assert p["leaning"].startswith("Described by The Hindu") and p["leaning_basis"] == "described" and p["political"]["url"] == "https://thehindu.example/a"
+    assert p["public_opinion"] == "Praised by X: depth Criticised by Y: length"
     none = creator_row({"channel_title": "Show", "channel_id": "UC1"}, CreatorProfileOut(identified=True, podcast="Show", summary="A show.", hosts="A"))["profile"]
     assert "leaning" not in none and "public_opinion" not in none
 
 
-def test_a_host_gets_their_own_leaning_and_public_opinion_from_one_search(monkeypatch):
+def test_a_host_gets_their_own_comprehensive_profile_from_the_web(monkeypatch):
     s = Settings(profile_speakers=True, max_cost_usd_per_episode=3.0)
     ec = EpisodeContext(episode_id="e", video_id="v", settings=s, policy=load_policy(), store=NS(), budget=Budget(cap_usd=3.0), plugins_factory=lambda: [])
     ec.log = lambda *a, **k: None
 
-    async def fake_build(label, meta, topics, described_as=""):
+    async def fake_build(label, meta, topics, described_as="", host=False):
+        assert host  # a host's searches include sponsors and ties to guests
         return {"status": "ready", "profile": {"leaning": "Described by X as liberal", "leaning_basis": "described", "public_opinion": "Praised by Y.", "affiliations": ["Org"]},
                 "sources": [{"url": "https://a.example", "title": "t"}]}
     monkeypatch.setattr(speakers, "build_profile", fake_build)

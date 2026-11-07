@@ -1,14 +1,20 @@
 """EpisodePipeline: the ADK app that turns one YouTube URL into a tagged breakdown of what was said.
 
-Before the pipeline: the video's channel row and, if the channel is a known show, its `creators` profile.
+Who is talking is worked out first, so every answer is read against its speaker's profile and incentives:
 
 EpisodePipeline (SequentialAgent)
-  IngestGate       code   metadata + input guardrails (public, finished)
-  ExtractorAgent   LLM    agentic video -> questions and their answers (who asked, who answered, tagged), sections, summary
-  ClaimFilter      code   cap, content policy in code, which statements can have sources looked up, sections cleaned
-  SpeakerProfiler  code   a profile for every named speaker, from the creator profile, the `speakers` table or a
-                          web search (agents/speakers.py)
-  Publisher        code   saves statements, sections and the result (sources are looked up later: sources.py)
+  IngestGate        code   metadata + input guardrails (public, finished): a rejected video costs nothing more
+  CreatorProfiler   code   the show's profile: curated, cached, or from the web (agents/creators.py), with its incentive tags
+  PeopleProfiler    code   who appears (hosts, the description's people, a model over the title and one search), each one's
+                           profile from the cache or the web, and their incentive tags (agents/people.py)
+  ExtractorAgent    LLM    agentic video -> questions and their answers (who asked, who answered, tagged), sections, summary
+  ClaimFilter       code   cap, content policy in code, which statements can have sources looked up, sections cleaned
+  SpeakerProfiler   code   anyone the extractor named who wasn't profiled yet (agents/speakers.py)
+  InterviewTagger   ADK    every question's type and the interview dynamic, in batched classifier calls (agents/interview.py)
+  Publisher         code   saves statements, sections and the result, and marks the video done
+Each stage's results are saved when it finishes (profiles, people, answers as they stream, question tags), so the page shows
+them while the later stages run.
+Answers are tagged and researched by agents/sources.py (as they are found, and after the run).
 
 The viewer sees the steps as a checklist (EpisodeContext.steps, saved in episodes.progress).
 """
@@ -32,8 +38,10 @@ from ..guardrails.input_checks import parse_video_id
 from ..policy import load_policy
 from ..profiles import usable_creator
 from ..store import make_store
-from .creators import profile_creator
+from .creators import CreatorProfiler
+from .interview import InterviewTagger
 from .llm_agents import extractor_agent
+from .people import PeopleProfiler
 from .speakers import SpeakerProfiler
 from .streaming import StatementStreamer
 from .stages import ClaimFilter, IngestGate, Publisher
@@ -46,9 +54,12 @@ def build_stages(settings: Settings) -> list:
     """Fresh (unparented) stage agents, so they can be placed in the pipeline or in the adk web wrapper."""
     return [
         IngestGate(name="ingest_gate"),
+        CreatorProfiler(name="creator_profiler"),
+        PeopleProfiler(name="people_profiler"),
         extractor_agent(settings),
         ClaimFilter(name="claim_filter"),
         SpeakerProfiler(name="speaker_profiler"),
+        InterviewTagger(name="interview_tagger"),
         Publisher(name="publisher"),
     ]
 
@@ -59,26 +70,26 @@ def build_pipeline(settings: Settings) -> SequentialAgent:
 
 # (agent name, label shown while it runs, % complete once it has finished)
 STAGE_PROGRESS = [
-    ("ingest_gate", "Checking the video details", 12),
+    ("ingest_gate", "Checking the video details", 3),
+    ("creator_profiler", "Profiling the show", 8),
+    ("people_profiler", "Profiling the host and guests", 16),
     ("extractor", "Reading the video, listing questions and answers", 82),
-    ("claim_filter", "Applying the content policy", 86),
-    ("speaker_profiler", "Building speaker profiles", 96),
+    ("claim_filter", "Applying the content policy", 85),
+    ("speaker_profiler", "Profiling anyone new who spoke", 90),
+    ("interview_tagger", "Tagging how each question was asked", 96),
     ("publisher", "Saving results", 100),
 ]
 _STAGE_INDEX = {name: i for i, (name, _, _) in enumerate(STAGE_PROGRESS)}
-
-# The checklist the viewer sees: "creator" runs before the pipeline, the rest are its stages.
-CREATOR_STEP = ("creator", "Matching the channel to a creator profile")
+_DETAIL_STAGES = ("creator_profiler", "people_profiler", "claim_filter", "speaker_profiler", "interview_tagger")
 
 
 def initial_steps() -> list[dict[str, Any]]:
-    return [{"key": CREATOR_STEP[0], "label": CREATOR_STEP[1], "status": "pending"}] + [
-        {"key": name, "label": label, "status": "pending"} for name, label, _ in STAGE_PROGRESS]
+    return [{"key": name, "label": label, "status": "pending"} for name, label, _ in STAGE_PROGRESS]
 
 
 def _step_detail(ev: Any) -> Optional[str]:
     """A stage's short result text ('12 of 40 statements ...'), shown under its step."""
-    if getattr(ev, "author", "") not in ("claim_filter", "speaker_profiler"):
+    if getattr(ev, "author", "") not in _DETAIL_STAGES:
         return None
     parts = getattr(getattr(ev, "content", None), "parts", None) or []
     text = "".join(getattr(p, "text", "") or "" for p in parts).strip()
@@ -137,18 +148,6 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
                         plugins_factory=make_plugins_factory(settings), duration_s=int(meta.get("duration_s") or 0),
                         creator=creator, steps=initial_steps())
     token = set_context(ec)
-    found_on_web = False
-    if saved_creator is None and settings.profile_creators:
-        # Not on the curated list and never looked up: one web search for the show, like a speaker's profile.
-        set_step(ec, CREATOR_STEP[0], "running", "Looking up the show on the web")
-        await report_progress(ec, CREATOR_STEP[1], 1)
-        creator = ec.creator = await profile_creator(meta)
-        found_on_web = creator is not None
-        if creator:
-            await store.update_episode(episode_id, {"creator_id": creator["id"]})
-    set_step(ec, CREATOR_STEP[0], "done" if creator else "skipped",
-             (f"{creator['podcast']} (found on the web)" if found_on_web else creator["podcast"]) if creator
-             else "Not one of the shows with a creator profile")
     runner = InMemoryRunner(agent=build_pipeline(settings), app_name=APP, plugins=ec.plugins_factory())
     session = await runner.session_service.create_session(app_name=APP, user_id="pipeline", state={
         "video_url": f"https://www.youtube.com/watch?v={video_id}", "episode_id": episode_id,

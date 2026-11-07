@@ -129,8 +129,8 @@ export async function requestSources(claimId: string): Promise<SourcesResult> {
   if (status === "done") return { ok: true, status, message: "Sources have already been looked up." };
   const stale = !!c.sources_requested_at && Date.now() - Date.parse(c.sources_requested_at) > STALE_MS;
   if ((status === "queued" || status === "searching") && !stale) return { ok: true, status, message: "Already searching." };
-  if (c.statement_type === "question" || c.statement_type === "story") {
-    return { ok: false, status, message: "Questions and personal stories don't have sources to look up." };
+  if (c.statement_type === "question") {
+    return { ok: false, status, message: "Questions don't have sources to look up." };
   }
   if (c.policy_tier === "never" || c.not_checked_reason === "outside_policy" || status === "not_eligible") {
     return { ok: false, status, message: "This statement is outside our content policy." };

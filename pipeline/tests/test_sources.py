@@ -135,12 +135,17 @@ class FakeStore:
     async def get_episode_speakers(self, eid):
         return getattr(self, "speakers", [])
 
-    async def save_sources_route(self, cid, route, triage=None):
+    async def save_sources_route(self, cid, route, triage=None, qa_tags=None):
+        self.tags = getattr(self, "tags", {})
+        self.tags[cid] = qa_tags
         self.routes = getattr(self, "routes", {})
         self.routes[cid] = route
         self.status[cid] = ("not_requested", None)
 
-    async def save_claim_sources(self, cid, found, summary="", match="", *, counter=None, counter_summary="", route=None, triage=None, research=None):
+    async def save_claim_sources(self, cid, found, summary="", match="", *, counter=None, counter_summary="", route=None, triage=None, research=None,
+                                 qa_tags=None):
+        self.tags = getattr(self, "tags", {})
+        self.tags[cid] = qa_tags
         self.routes = getattr(self, "routes", {})
         self.routes[cid] = route
         self.match = getattr(self, "match", {})
@@ -164,7 +169,7 @@ class FakeStore:
         self.events = events
 
 
-def fake_lookup(monkeypatch, urls=("https://a.example/x",), skip=(), fail=(), delay=0.0, active=None, qa=None):
+def fake_lookup(monkeypatch, urls=("https://a.example/x",), skip=(), fail=(), delay=0.0, active=None):
     """Replaces the lookup (planner, searches, tags) with one that charges a search and returns the given pages."""
     calls = []
 
@@ -181,12 +186,10 @@ def fake_lookup(monkeypatch, urls=("https://a.example/x",), skip=(), fail=(), de
         if claim["claim_text"] in fail:
             raise RuntimeError("search timeout")
         if claim["claim_text"] in skip:
-            return Lookup("skip", [], None)
+            return Lookup("skip", [], None, {"claim": {"type": "pure_opinion", "p": 0.9}, "grounding": {"label": "exempt"}})
         srcs = [Source(url=u, title="t", excerpt="e", rank=i) for i, u in enumerate(urls)]
         r = Research(points=[], positions=[], queries=["q"], related=srcs, counter=[], summary="", counter_summary="", match="medium")
-        r.tags = {"support": {"label": "partly", "p": 0.7}}
-        r.question_analysis = qa
-        return Lookup("related", srcs, r)
+        return Lookup("related", srcs, r, {"grounding": {"label": "plausible", "p": 0.7}, "chain": "Direct A → Objective fact → Plausible"})
 
     monkeypatch.setattr(sources, "lookup_answer", lookup)
     return calls
@@ -208,22 +211,20 @@ def test_opinions_forecasts_and_other_statements_can_have_sources_too():
         assert precheck(row(statement_type=kind), SETTINGS)[0], kind
 
 
-def test_questions_and_stories_have_no_sources_to_look_up():
-    for kind in ("question", "story"):
-        ok, msg, code = precheck(row(statement_type=kind), SETTINGS)
-        assert not ok and code == 409 and "Questions and personal stories" in msg
+def test_questions_have_no_sources_to_look_up_but_stories_do():
+    ok, msg, code = precheck(row(statement_type="question"), SETTINGS)
+    assert not ok and code == 409 and "Questions" in msg
+    assert precheck(row(statement_type="story"), SETTINGS)[0]  # the claim-type classifier decides what a story needs
 
 
 def test_one_answer_saves_every_page_the_lookup_found_and_its_tags_and_is_never_skipped(monkeypatch):
-    calls = fake_lookup(monkeypatch, urls=("https://someblog.in/a", "https://www.livemint.com/b"),
-                        qa={"type": "leading", "p": 0.8, "spoken": True})
+    calls = fake_lookup(monkeypatch, urls=("https://someblog.in/a", "https://www.livemint.com/b"))
     store = FakeStore(row())
     res = asyncio.run(run_claim_sources("c1", settings=SETTINGS, store=store))
-    assert res == {"claim_id": "c1", "status": "done", "sources": 2, "match": "medium", "support": "partly", "cost_usd": 0.005}
+    assert res == {"claim_id": "c1", "status": "done", "sources": 2, "match": "medium", "grounding": "plausible", "cost_usd": 0.005}
     assert store.saved["c1"] == ["https://someblog.in/a", "https://www.livemint.com/b"] and store.cost == [0.005]
     assert calls == [("GDP grew 7.4%", True)]                                           # the button forces the lookup
-    assert store.analysis["c1"] == {"type": "leading", "p": 0.8, "spoken": True}   # the question tags go on the answer
-    assert store.research["c1"]["tags"] == {"support": {"label": "partly", "p": 0.7}}
+    assert store.tags["c1"]["grounding"]["label"] == "plausible"                    # the answer's tags are saved with its pages
 
 
 def test_one_answer_with_no_pages_is_done_and_empty(monkeypatch):

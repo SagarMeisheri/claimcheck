@@ -83,6 +83,11 @@ def usable_creator(creator: Optional[dict[str, Any]]) -> Optional[dict[str, Any]
     return creator
 
 
+# The v2 profile keys the later steps get (profiles are numbered into items for the classifiers by numbered_profile).
+V2_KEYS = ("narrative", "expertise", "credentials", "businesses", "financial_interests", "political", "praise", "critiques",
+           "controversy_reports", "bias_claims", "sponsors", "ownership")
+
+
 def creator_context(creator: Optional[dict[str, Any]]) -> dict[str, Any]:
     """What the later steps get about the show. Empty if the channel isn't a known creator."""
     if not creator:
@@ -96,6 +101,7 @@ def creator_context(creator: Optional[dict[str, Any]]) -> dict[str, Any]:
         "country": creator.get("country"), "biases": p.get("biases"), "criticism": p.get("criticism"),
         "controversies": p.get("controversies"), "leaning": p.get("leaning") or p.get("biases"),
         "leaning_basis": p.get("leaning_basis") or ("curated" if p.get("biases") else ""), "public_opinion": opinion,
+        **{k: p.get(k) for k in V2_KEYS},
     }.items() if v}
 
 
@@ -110,6 +116,7 @@ def speaker_context(speaker: Optional[dict[str, Any]], label: str = "") -> dict[
         "leaning": p.get("leaning") or p.get("known_positions"),
         "leaning_basis": p.get("leaning_basis") or ("described" if p.get("known_positions") else ""),
         "public_opinion": p.get("public_opinion") or p.get("criticisms"),
+        **{k: p.get(k) for k in V2_KEYS},
     }.items() if v}
 
 
@@ -151,3 +158,135 @@ SHOW_KEYS = ("podcast", "hosts", "country", "leaning", "leaning_basis", "public_
 def profile_text(p: dict[str, Any], keys: tuple[str, ...]) -> str:
     """A profile as plain 'key: value' lines, for the classifiers that read it."""
     return "\n".join(f"{k}: {p[k]}" for k in keys if p.get(k))
+
+
+# --- Comprehensive (version 2) profiles ------------------------------------------------------------------
+PROFILE_VERSION = 2
+PROFILE_MAX_AGE_DAYS = 90
+# Where each cited list of a v2 profile is stored inside `profile`. The names avoid the keys the public_profile columns strip
+# (speakers: known_positions, criticisms; creators: biases, controversies, criticism), because these are attributed and shown.
+CITED_LISTS = {"businesses": "businesses", "financial_interests": "financial_interests", "praise": "praise", "criticism": "critiques",
+               "controversies": "controversy_reports", "bias_claims": "bias_claims", "sponsors": "sponsors", "ownership": "ownership"}
+
+
+def needs_rebuild(row: Optional[dict[str, Any]], now: Optional[Any] = None) -> bool:
+    """A ready profile from before version 2, or one older than PROFILE_MAX_AGE_DAYS, is rebuilt when a new video meets it."""
+    import datetime as dt
+
+    if not row:
+        return True
+    if int(row.get("profile_version") or 1) < PROFILE_VERSION:
+        return True
+    at = row.get("profiled_at")
+    if not at:
+        return False
+    try:
+        when = dt.datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return ((now or dt.datetime.now(dt.timezone.utc)) - when).days > PROFILE_MAX_AGE_DAYS
+
+
+def _clip(text: Any, n: int) -> str:
+    return " ".join(str(text or "").split())[:n]
+
+
+def cite(items: list[Any], pages: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
+    """A profile's cited items with the page each came from ({..., "url", "site"}); an item naming no real page is dropped."""
+    by_n = {pg["n"]: pg for pg in pages}
+    out: list[dict[str, Any]] = []
+    for it in items or []:
+        d = it.model_dump() if hasattr(it, "model_dump") else dict(it)
+        pg = by_n.get(d.pop("page", None))
+        if not pg:
+            continue
+        d = {k: (_clip(v, 300) if isinstance(v, str) else v) for k, v in d.items()}
+        if not any(isinstance(v, str) and v for v in d.values()):
+            continue
+        out.append({**d, "url": pg.get("url", ""), "site": pg.get("site", "")})
+        if len(out) >= limit:
+            break
+    return out
+
+
+INTERNAL_INCENTIVES = frozenset({"access_preserving", "audience_captured"})  # steer the skepticism rules; never shown
+
+
+def split_incentives(cited: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The profile writer's cited incentive tags as ({tag: {"reason", "url", "site"}} visible, internal). The first item per tag wins."""
+    visible: dict[str, Any] = {}
+    internal: dict[str, Any] = {}
+    for it in cited:
+        tag = it.get("tag")
+        if not tag or not it.get("reason"):
+            continue
+        target = internal if tag in INTERNAL_INCENTIVES else visible
+        target.setdefault(tag, {"reason": it["reason"], "url": it.get("url", ""), "site": it.get("site", "")})
+    return visible, internal
+
+
+def v2_fields(out: Any, pages: list[dict[str, Any]]) -> dict[str, Any]:
+    """The cited, comprehensive part of a profile (shared by speakers and creators), ready to merge into `profile`."""
+    fields: dict[str, Any] = {"narrative": _clip(getattr(out, "narrative", ""), 1800)}
+    for src, key in CITED_LISTS.items():
+        if hasattr(out, src):
+            fields[key] = cite(getattr(out, src), pages)
+    if hasattr(out, "expertise"):
+        fields["expertise"] = [_clip(x, 80) for x in out.expertise[:8] if str(x).strip()]
+        fields["credentials"] = _clip(out.credentials, 400)
+    pol = getattr(out, "political", None)
+    if pol is not None:
+        page = {pg["n"]: pg for pg in pages}.get(pol.page)
+        leaning = _clip(pol.leaning, 300) if pol.basis != "none" else ""
+        fields["political"] = {k: v for k, v in {
+            "leaning": leaning, "basis": pol.basis if leaning or pol.posts else "none",
+            "posts": [_clip(x, 160) for x in pol.posts[:6] if str(x).strip()],
+            "url": (page or {}).get("url", ""), "site": (page or {}).get("site", "")}.items() if v}
+        # The fields older code reads (profile_text, the web's leaning line).
+        fields["leaning"] = leaning or "; ".join(fields["political"].get("posts", []))
+        fields["leaning_basis"] = ("declared" if pol.posts else pol.basis) if fields["leaning"] else ""
+    if hasattr(out, "incentives"):
+        visible, internal = split_incentives(cite(getattr(out, "incentives"), pages, limit=12))
+        fields["incentives"], fields["incentives_internal"] = visible, internal
+    praise, crit = fields.get("praise") or [], fields.get("critiques") or []
+    opinion = [f"Praised by {x['by']}: {x['text']}" if x.get("by") else f"Praised: {x['text']}" for x in praise[:3]]
+    opinion += [f"Criticised by {x['by']}: {x['text']}" if x.get("by") else f"Criticised: {x['text']}" for x in crit[:3]]
+    fields["public_opinion"] = _clip(" ".join(opinion), 900)
+    return {k: v for k, v in fields.items() if v}
+
+
+def numbered_profile(p: dict[str, Any], keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    """A profile as numbered items for the incentive classifiers: each item is one fact, with the page it came from, so a
+    classifier can name the item its tag rests on (agents/profile_tags.py)."""
+    items: list[dict[str, Any]] = []
+
+    def add(kind: str, text: str, url: str = "", site: str = "") -> None:
+        text = _clip(text, 400)
+        if text:
+            items.append({"n": len(items) + 1, "kind": kind, "text": text, "url": url, "site": site})
+
+    for k in keys:
+        v = p.get(k)
+        if isinstance(v, list):
+            v = ", ".join(str(x) for x in v if isinstance(x, str))
+        if isinstance(v, str) and v:
+            add(k, v)
+    for b in p.get("businesses") or []:
+        add("business", f"{b.get('relation', '')} of {b.get('name', '')}" + (f" ({b['sector']})" if b.get("sector") else "")
+            + ("" if b.get("current", True) else " (former)"), b.get("url", ""), b.get("site", ""))
+    for f in p.get("financial_interests") or []:
+        add("financial_interest", f.get("what", ""), f.get("url", ""), f.get("site", ""))
+    for sp in p.get("sponsors") or []:
+        add("sponsor", f"Sponsor: {sp.get('name', '')}" + (f" ({sp['category']})" if sp.get("category") else ""), sp.get("url", ""), sp.get("site", ""))
+    for o in p.get("ownership") or []:
+        add("ownership", o.get("text", ""), o.get("url", ""), o.get("site", ""))
+    pol = p.get("political") or {}
+    if pol.get("leaning") or pol.get("posts"):
+        add("political", "; ".join(x for x in [pol.get("leaning", "")] + list(pol.get("posts") or []) if x), pol.get("url", ""), pol.get("site", ""))
+    for x in p.get("critiques") or []:
+        add("criticism", (f"{x['by']}: " if x.get("by") else "") + x.get("text", ""), x.get("url", ""), x.get("site", ""))
+    for x in p.get("controversy_reports") or []:
+        add("controversy", x.get("what", "") + (f" ({x['when']})" if x.get("when") else ""), x.get("url", ""), x.get("site", ""))
+    for x in p.get("bias_claims") or []:
+        add("bias_claim", (f"{x['by']}: " if x.get("by") else "") + x.get("claim", ""), x.get("url", ""), x.get("site", ""))
+    return items

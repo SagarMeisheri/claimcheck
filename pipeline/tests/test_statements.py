@@ -176,9 +176,9 @@ def test_prices_are_conservative_and_can_be_overridden(monkeypatch):
     assert Settings().prices["gemini-3.8-flash"] == (0.75, 3.75)
 
 
-def test_podcast_types_questions_and_stories_have_no_sources():
+def test_podcast_types_only_questions_have_no_sources():
     assert stmt(stype="advice").claim_type == "opinion"
     assert stmt(stype="story").claim_type == "anecdote" and stmt(stype="question").claim_type == "anecdote"
     rec = lambda t: ClaimRecord(index=0, start_s=0, claim=stmt(stype=t), effective_tier="normal")
     assert sources_status(rec("advice")) == "not_requested"
-    assert sources_status(rec("question")) == "not_eligible" and sources_status(rec("story")) == "not_eligible"
+    assert sources_status(rec("question")) == "not_eligible" and sources_status(rec("story")) == "not_requested"

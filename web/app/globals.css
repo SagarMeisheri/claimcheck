@@ -903,3 +903,11 @@ button.ind:hover { background: color-mix(in srgb, var(--tone) 20%, var(--paper-r
 .sr-count { font-size: .8rem; color: var(--ink-soft); }
 .sr-items { list-style: none; margin: 0; padding: 0; display: grid; gap: .7rem; }
 .sr-items .source-site { display: flex; flex-wrap: wrap; gap: .25rem .5rem; align-items: baseline; }
+
+/* Q&A taxonomy: the tagging string, interview patterns, cited profile facts and incentive tags */
+.qa-chain { margin: 0; font-size: 0.86rem; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.ip-patterns { margin: 0; padding-left: 1.1rem; display: grid; gap: .25rem; font-size: 0.86rem; }
+.profile-sec { margin: .6rem 0; }
+.profile-list { margin: .2rem 0 0; padding-left: 1.1rem; display: grid; gap: .2rem; font-size: 0.9rem; overflow-wrap: anywhere; }
+.profile-narrative { line-height: 1.5; }
+.incentives { list-style: none; margin: .3rem 0 0; padding: 0; display: grid; gap: .35rem; font-size: 0.9rem; overflow-wrap: anywhere; }

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { stopVideo } from "@/app/actions";
-import { DEFAULT_STEPS } from "@/lib/steps";
+import { DEFAULT_STEPS, stepsDone } from "@/lib/steps";
 import type { Step } from "@/lib/types";
 
 type Status = { status: string; skip_reason: string | null; label: string | null; pct: number; statements: number; looked_up?: number; steps?: Step[] };
@@ -13,7 +13,8 @@ const SR: Record<Step["status"], string> = { done: "Done", running: "In progress
 
 /**
  * Progress for a video being analysed: a bar, and the list of steps with the ones already done ticked, the current
- * one spinning and the rest waiting. Polls every 3 s and refreshes the page when the analysis ends.
+ * one spinning and the rest waiting. Polls every 3 s and refreshes the page whenever a step finishes or answers arrive, so
+ * each step's results (profiles, people, answers, tags) show while the later steps run, and once more when it ends.
  */
 export function CheckProgress({ videoId, compact = false, showSteps, initialSteps = [] }: {
   videoId: string; compact?: boolean; showSteps?: boolean; initialSteps?: Step[];
@@ -22,6 +23,7 @@ export function CheckProgress({ videoId, compact = false, showSteps, initialStep
   const [s, setS] = useState<Status | null>(null);
   const seen = useRef(0);
   const seenLooked = useRef<number | null>(null);
+  const seenSteps = useRef(stepsDone(initialSteps));
   const [stopping, stop] = useTransition();
   const [stopMsg, setStopMsg] = useState<string | null>(null);
   const halt = () => stop(async () => {
@@ -38,8 +40,12 @@ export function CheckProgress({ videoId, compact = false, showSteps, initialStep
         if (!r.ok || stop) return;
         const j = (await r.json()) as Status;
         setS(j);
+        // Another step finished (the show's profile, the people, the question tags...): refresh so what it found shows now.
+        const done = stepsDone(j.steps);
+        const stepped = done > seenSteps.current;
+        if (stepped) seenSteps.current = done;
         // New answers were saved since the last look: refresh the page so they show up while the check runs.
-        if (j.statements > seen.current) { seen.current = j.statements; router.refresh(); }
+        if (j.statements > seen.current || stepped) { seen.current = Math.max(seen.current, j.statements); router.refresh(); }
         // Sources found for another answer (they can start while the video is still being read): show them too.
         if (j.looked_up !== undefined) {
           if (seenLooked.current !== null && j.looked_up !== seenLooked.current && j.statements <= seen.current) router.refresh();
@@ -86,7 +92,7 @@ export function CheckProgress({ videoId, compact = false, showSteps, initialStep
           ))}
         </ol>
       )}
-      {!compact && <p className="meta">Questions and answers appear as they are found. This updates on its own.</p>}
+      {!compact && <p className="meta">Profiles, questions and answers appear as each step finishes. This updates on its own.</p>}
     </div>
   );
 }

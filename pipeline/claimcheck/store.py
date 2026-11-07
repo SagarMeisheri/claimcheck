@@ -47,22 +47,27 @@ class Store(Protocol):
     async def get_claim_row(self, episode_id: str, idx: int) -> Optional[dict[str, Any]]: ...
     async def list_claims_for_qa(self, episode_id: str) -> list[dict[str, Any]]: ...
     async def count_looked_up(self, episode_id: str) -> int: ...
+    async def save_qa_tags(self, claim_id: str, tags: dict[str, Any]) -> None: ...
     async def save_question_analysis(self, claim_ids: list[str], analysis: dict[str, Any]) -> None: ...
+    async def list_claim_ids(self, episode_id: str) -> dict[int, str]: ...
     async def start_claim_sources(self, claim_id: str) -> bool: ...
     async def set_sources_status(self, claim_id: str, status: str, error: Optional[str] = None) -> None: ...
     async def save_claim_sources(self, claim_id: str, sources: list[Source], summary: str = "", match: str = "", *,
                                  counter: Optional[list[Source]] = None, counter_summary: str = "",
                                  route: Optional[str] = None, triage: Optional[dict[str, Any]] = None,
-                                 research: Optional[dict[str, Any]] = None) -> None: ...
-    async def save_sources_route(self, claim_id: str, route: str, triage: Optional[dict[str, Any]] = None) -> None: ...
+                                 research: Optional[dict[str, Any]] = None, qa_tags: Optional[dict[str, Any]] = None) -> None: ...
+    async def save_sources_route(self, claim_id: str, route: str, triage: Optional[dict[str, Any]] = None,
+                                 qa_tags: Optional[dict[str, Any]] = None) -> None: ...
     # Creators, speakers, sections
     async def get_creator_by_channel(self, youtube_channel_id: str) -> Optional[dict[str, Any]]: ...
     async def get_creator(self, creator_id: str) -> Optional[dict[str, Any]]: ...
     async def save_creator(self, row: dict[str, Any]) -> Optional[dict[str, Any]]: ...
+    async def update_creator(self, creator_id: str, fields: dict[str, Any]) -> Optional[dict[str, Any]]: ...
     async def get_speaker(self, key: str) -> Optional[dict[str, Any]]: ...
     async def save_speaker(self, row: dict[str, Any]) -> Optional[dict[str, Any]]: ...
     async def save_episode_speakers(self, episode_id: str, rows: list[dict[str, Any]]) -> None: ...
     async def get_episode_speakers(self, episode_id: str) -> list[dict[str, Any]]: ...
+    async def save_speaker_incentives(self, episode_id: str, label: str, visible: dict[str, Any], internal: dict[str, Any]) -> None: ...
     async def save_sections(self, episode_id: str, sections: list[dict[str, Any]]) -> None: ...
     async def add_episode_cost(self, episode_id: str, usd: float, tokens_in: int, tokens_out: int) -> None: ...
     # YouTube API data upkeep
@@ -100,6 +105,11 @@ class SupabaseStore:
         """Adds a creator found by a web search (no rank). Returns the saved row."""
         r = self.db.table("creators").insert(row).execute()
         return r.data[0] if r.data else None
+
+    async def update_creator(self, creator_id: str, fields: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Replaces a creator's profile with a rebuilt one (profile_version 2). Returns the saved row."""
+        r = self.db.table("creators").update(fields).eq("id", creator_id).execute()
+        return r.data[0] if r.data else await self.get_creator(creator_id)
 
     async def get_creator(self, creator_id: str) -> Optional[dict[str, Any]]:
         if not creator_id:
@@ -158,23 +168,23 @@ class SupabaseStore:
         r = (self.db.table("claims")
              .select("id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, question, question_quote, asked_by, question_kind, section_idx, "
                      "pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, refers_to_visual, sources_status, "
-                     "episodes(id, youtube_video_id, title, status, cost_usd, creator_id, sections)")
+                     "episodes(id, youtube_video_id, title, status, cost_usd, creator_id, sections, interaction)")
              .eq("id", claim_id).limit(1).execute())
         return r.data[0] if r.data else None
 
     async def get_episode(self, episode_id):
-        r = (self.db.table("episodes").select("id, youtube_video_id, title, status, cost_usd, creator_id, sections")
+        r = (self.db.table("episodes").select("id, youtube_video_id, title, status, cost_usd, creator_id, sections, interaction")
              .eq("id", episode_id).limit(1).execute())
         return r.data[0] if r.data else None
 
     async def list_batch_claims(self, episode_id, recheck=False):
-        """Statements "Check sources for all" may take: not a question or story, not redacted, no sources yet, not running,
+        """Statements "Check sources for all" may take: not a question, not redacted, no sources yet, not running,
         and not already set aside by the classifier (sources_route 'skip'; a viewer can still press Check sources).
         recheck: every such statement, including finished lookups and ones the classifier once skipped, but never one running."""
         r = (self.db.table("claims")
-             .select("id, idx, start_s, speaker, claim_text, statement_context, question, question_quote, asked_by, question_kind, section_idx, pestle_area, topic, topics, "
-                     "statement_type, policy_tier, sources_status, sources_route")
-             .eq("episode_id", episode_id).not_.in_("statement_type", ["question", "story"])
+             .select("id, idx, start_s, speaker, claim_text, context_quote, statement_context, question, question_quote, asked_by, question_kind, section_idx, pestle_area, "
+                     "topic, topics, statement_type, policy_tier, sources_status, sources_route")
+             .eq("episode_id", episode_id).neq("statement_type", "question")
              .in_("sources_status", ["not_requested", "failed"] + (["done"] if recheck else [])).neq("policy_tier", "never")
              .or_("not_checked_reason.is.null,not_checked_reason.neq.outside_policy").order("start_s").limit(200).execute())
         return [c for c in (r.data or []) if recheck or c.get("sources_route") != "skip"]
@@ -190,16 +200,24 @@ class SupabaseStore:
         r = self.db.table("claims").select("id", count="exact").eq("episode_id", episode_id).eq("sources_status", "done").limit(1).execute()
         return int(r.count or 0)
 
+    async def save_qa_tags(self, claim_id, tags):
+        self.db.table("claims").update({"qa_tags": tags}).eq("id", claim_id).execute()
+
     async def save_question_analysis(self, claim_ids, analysis):
-        """The same label on every answer of one exchange."""
+        """The same question tag on every answer to one question (agents/interview.py)."""
         if claim_ids:
             self.db.table("claims").update({"question_analysis": analysis}).in_("id", claim_ids).execute()
+
+    async def list_claim_ids(self, episode_id):
+        """{extraction index: claims.id} for a video's saved statements."""
+        r = self.db.table("claims").select("id, idx").eq("episode_id", episode_id).limit(1000).execute()
+        return {int(x["idx"]): x["id"] for x in (r.data or [])}
 
     async def get_claim_row(self, episode_id, idx):
         """One saved statement by its position in the extraction, with what a source lookup needs."""
         r = (self.db.table("claims")
-             .select("id, idx, episode_id, start_s, speaker, claim_text, statement_context, question, question_quote, asked_by, question_kind, section_idx, pestle_area, topic, "
-                     "topics, statement_type, policy_tier, not_checked_reason, sources_status")
+             .select("id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, question, question_quote, asked_by, question_kind, section_idx, "
+                     "pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status")
              .eq("episode_id", episode_id).eq("idx", idx).limit(1).execute())
         return r.data[0] if r.data else None
 
@@ -213,7 +231,7 @@ class SupabaseStore:
         self.db.table("claims").update({"sources_status": status, "sources_error": error}).eq("id", claim_id).execute()
 
     async def save_claim_sources(self, claim_id, sources, summary="", match="", *, counter=None, counter_summary="",
-                                 route=None, triage=None, research=None):
+                                 route=None, triage=None, research=None, qa_tags=None):
         """Both groups of sources (related, then counter) and the summaries, in one go."""
         self.db.table("claim_sources").delete().eq("claim_id", claim_id).execute()
         rows = [{**s.model_dump(), "kind": "related", "claim_id": claim_id} for s in sources]
@@ -227,12 +245,13 @@ class SupabaseStore:
         if triage is not None:
             fields["sources_triage"] = triage
         fields["research"] = research  # None for a plain search, so an earlier lookup's research never lingers
+        fields["qa_tags"] = qa_tags
         self.db.table("claims").update(fields).eq("id", claim_id).execute()
 
-    async def save_sources_route(self, claim_id, route, triage=None):
-        """The classifier set this statement aside: no search; it goes back to 'not requested' for the button."""
+    async def save_sources_route(self, claim_id, route, triage=None, qa_tags=None):
+        """No search was needed (a pure opinion, or nothing checkable): no sources; the answer keeps its tags."""
         self.db.table("claims").update({"sources_route": route, "sources_triage": triage, "sources_status": "not_requested",
-                                        "sources_error": None}).eq("id", claim_id).execute()
+                                        "sources_error": None, "qa_tags": qa_tags}).eq("id", claim_id).execute()
 
     # --- Speakers and sections ---------------------------------------------------------------------
 
@@ -252,9 +271,13 @@ class SupabaseStore:
                                                      on_conflict="episode_id,label").execute()
 
     async def get_episode_speakers(self, episode_id):
-        r = (self.db.table("episode_speakers").select("label, role, statements, speaker_id, speakers(*)")
+        r = (self.db.table("episode_speakers").select("label, role, statements, speaker_id, incentives, incentives_internal, speakers(*)")
              .eq("episode_id", episode_id).execute())
         return r.data or []
+
+    async def save_speaker_incentives(self, episode_id, label, visible, internal):
+        self.db.table("episode_speakers").update({"incentives": visible, "incentives_internal": internal}).eq(
+            "episode_id", episode_id).eq("label", label).execute()
 
     async def save_sections(self, episode_id, sections):
         """episodes.sections, and each statement's section_idx (the last section starting at or before it)."""

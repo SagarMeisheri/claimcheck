@@ -16,7 +16,7 @@ from .. import prompts
 from ..config import Settings
 from ..context import get_context
 from ..guardrails.injection import screen_text, wrap_untrusted
-from ..schemas import CreatorProfileOut, ExtractionResult, QaOut, ResearchPlan, SpeakerProfileOut
+from ..schemas import CreatorProfileOut, ExtractionResult, PeopleOut, QaOut, ResearchPlan, SpeakerProfileOut
 
 
 def _model(name: str, settings: Settings) -> Any:
@@ -109,17 +109,30 @@ def research_planner_agent(s: Settings, name: str = "research_planner") -> LlmAg
 
 # --- Creator and speaker profiles ------------------------------------------------------------------
 
-def creator_profiler_agent(s: Settings, name: str = "creator_profiler") -> LlmAgent:
+def _profile_cfg(s: Settings) -> types.GenerateContentConfig:
+    """The profile writers think more than the other steps: they bring 20+ pages into one cited profile."""
+    cfg = types.GenerateContentConfig()
+    cfg.thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel((s.profile_thinking or "medium").upper()))
+    return cfg
+
+
+def people_finder_agent(s: Settings, name: str = "people_finder") -> LlmAgent:
+    """Who appears in a video, from its title, description and one search (agents/people.py)."""
     cfg = types.GenerateContentConfig()
     cfg.thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel("LOW"))
+    return LlmAgent(name=name, model=_model(s.profile_model, s), instruction=prompts.PEOPLE, include_contents="none",
+                    output_schema=PeopleOut, output_key="people", generate_content_config=cfg)
+
+
+def creator_profiler_agent(s: Settings, name: str = "creator_profiler") -> LlmAgent:
+    cfg = _profile_cfg(s)
     return LlmAgent(name=name, model=_model(s.profile_model, s), instruction=prompts.PROFILE_CREATOR,
                     include_contents="none", output_schema=CreatorProfileOut, output_key="profile",
                     generate_content_config=cfg, before_model_callback=inject_pages)
 
 
 def speaker_profiler_agent(s: Settings, name: str = "speaker_profiler") -> LlmAgent:
-    cfg = types.GenerateContentConfig()
-    cfg.thinking_config = types.ThinkingConfig(thinking_level=types.ThinkingLevel("LOW"))
+    cfg = _profile_cfg(s)
     return LlmAgent(name=name, model=_model(s.profile_model, s), instruction=prompts.PROFILE_SPEAKER,
                     include_contents="none", output_schema=SpeakerProfileOut, output_key="profile",
                     generate_content_config=cfg, before_model_callback=inject_pages)
