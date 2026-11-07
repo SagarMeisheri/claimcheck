@@ -139,6 +139,15 @@ def extractor_people(listed: list[dict[str, Any]], people: list[dict[str, Any]])
     return text
 
 
+def people_line(rows: list[dict[str, Any]]) -> str:
+    """The step's detail on screen: 'Raj Shamani (host) · Varun Mayya (guest): commercial, financial'. Visible tags only."""
+    parts = []
+    for r in rows:
+        tags = ", ".join(t.replace("_", " ") for t in (r.get("incentives") or {}))
+        parts.append(f"{r['label']} ({r.get('role') or 'guest'})" + (f": {tags}" if tags else "") + ("" if r.get("speaker_id") else ", no profile"))
+    return " · ".join(parts)[:160]
+
+
 class PeopleProfiler(BaseAgent):
     """Pipeline stage before the extractor: who appears, their profiles and their incentive tags."""
 
@@ -164,8 +173,5 @@ class PeopleProfiler(BaseAgent):
                 if is_budget_error(e):
                     raise
                 log.exception("people profiles failed for %s", ec.episode_id)
-        named = sum(1 for r in rows if r.get("speaker_id"))
-        tagged = sum(1 for r in rows if r.get("incentives") or r.get("incentives_internal"))
         yield Event(author=self.name, invocation_id=ctx.invocation_id, actions=EventActions(state_delta=delta),
-                    content=types.Content(role="model", parts=[types.Part(
-                        text=f"{named} of {len(rows)} people have a profile; {tagged} have incentive tags")]))
+                    content=types.Content(role="model", parts=[types.Part(text=people_line(rows) if rows else "Nobody named before the video is read")]))

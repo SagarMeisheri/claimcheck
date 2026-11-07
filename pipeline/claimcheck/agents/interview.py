@@ -1,6 +1,7 @@
 """The interview as a whole, after extraction: how each question was asked, and how host and guest dealt with each other.
 
-Batched ADK classifier calls (pipeline stage InterviewTagger, after the statements are saved):
+Batched ADK classifier calls (pipeline stage InterviewTagger, before Publisher marks the video done, so the tags are on the page
+by then):
   - one Choice per distinct question the host asked (agents/qa_tags.QUESTIONS["question_type"]: factual / explanatory /
     experiential / evaluative / speculative / challenging), up to BATCH questions per call. Every call is shown every question of the
     video (the host's own words and who asked), never an answer, and answers only its own batch.
@@ -118,7 +119,7 @@ async def tag_interview(records: list[ClaimRecord], host_tags: list[str], guest_
 
 
 class InterviewTagger(BaseAgent):
-    """Pipeline stage after Publisher: the question types and the dynamic, saved on the answers and the video."""
+    """Pipeline stage before Publisher: the question types and the dynamic, saved on the answers and the video."""
 
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
         ec = get_context()
@@ -131,6 +132,7 @@ class InterviewTagger(BaseAgent):
             guest = sorted({t for r in rows if r.get("role") != "host" for t in (r.get("incentives") or {})})
             try:
                 by_idx, dynamic = await tag_interview(records, host, guest)
+                await ec.store.save_statements(ec.episode_id, records)  # most were saved as they streamed; this saves the rest (no-op for those)
                 ids = await ec.store.list_claim_ids(ec.episode_id)
                 groups: dict[str, list[str]] = {}
                 analyses: dict[str, dict[str, Any]] = {}

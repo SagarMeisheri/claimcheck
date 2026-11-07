@@ -147,3 +147,10 @@ def test_every_question_of_a_video_is_tagged_in_batched_calls_without_any_answer
     assert len(calls[0][0]["questions"]) == 30 and "answer" not in str(calls[0][0]).lower().replace("answer_", "")
     assert by_idx[0] == by_idx[30] == {"type": "challenging", "p": 0.9, "spoken": False} and by_idx[1]["spoken"] is True
     assert 31 not in by_idx and dynamic == {"dynamic": "neutral", "p": 0.7}
+
+
+def test_the_people_step_shows_who_was_profiled_and_their_visible_stakes():
+    line = people.people_line([{"label": "Raj Shamani", "role": "host", "speaker_id": "s1", "incentives": {}},
+                               {"label": "Varun Mayya", "role": "guest", "speaker_id": "s2", "incentives": {"commercial": {}, "financial": {}}},
+                               {"label": "Someone", "role": "guest", "speaker_id": None}])
+    assert line == "Raj Shamani (host) · Varun Mayya (guest): commercial, financial · Someone (guest), no profile"

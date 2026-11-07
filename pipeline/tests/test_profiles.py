@@ -71,9 +71,9 @@ def test_the_checklist_marks_earlier_steps_done_when_a_step_starts():
     set_step(ec, "claim_filter", "running")
     status = {s["key"]: s["status"] for s in ec.steps}
     assert list(status) == ["ingest_gate", "creator_profiler", "people_profiler", "extractor", "claim_filter", "speaker_profiler",
-                            "publisher", "interview_tagger"]  # who is talking is worked out before the video is read
+                            "interview_tagger", "publisher"]  # who is talking first; the video is marked done last
     assert status == {"ingest_gate": "done", "creator_profiler": "skipped", "people_profiler": "done", "extractor": "done",
-                      "claim_filter": "running", "speaker_profiler": "pending", "publisher": "pending", "interview_tagger": "pending"}
+                      "claim_filter": "running", "speaker_profiler": "pending", "interview_tagger": "pending", "publisher": "pending"}
     set_step(ec, "nope", "done")  # unknown steps are ignored
 
 

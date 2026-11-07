@@ -10,8 +10,10 @@ EpisodePipeline (SequentialAgent)
   ExtractorAgent    LLM    agentic video -> questions and their answers (who asked, who answered, tagged), sections, summary
   ClaimFilter       code   cap, content policy in code, which statements can have sources looked up, sections cleaned
   SpeakerProfiler   code   anyone the extractor named who wasn't profiled yet (agents/speakers.py)
-  Publisher         code   saves statements, sections and the result
   InterviewTagger   ADK    every question's type and the interview dynamic, in batched classifier calls (agents/interview.py)
+  Publisher         code   saves statements, sections and the result, and marks the video done
+Each stage's results are saved when it finishes (profiles, people, answers as they stream, question tags), so the page shows
+them while the later stages run.
 Answers are tagged and researched by agents/sources.py (as they are found, and after the run).
 
 The viewer sees the steps as a checklist (EpisodeContext.steps, saved in episodes.progress).
@@ -57,8 +59,8 @@ def build_stages(settings: Settings) -> list:
         extractor_agent(settings),
         ClaimFilter(name="claim_filter"),
         SpeakerProfiler(name="speaker_profiler"),
-        Publisher(name="publisher"),
         InterviewTagger(name="interview_tagger"),
+        Publisher(name="publisher"),
     ]
 
 
@@ -73,9 +75,9 @@ STAGE_PROGRESS = [
     ("people_profiler", "Profiling the host and guests", 16),
     ("extractor", "Reading the video, listing questions and answers", 82),
     ("claim_filter", "Applying the content policy", 85),
-    ("speaker_profiler", "Profiling anyone new who spoke", 91),
-    ("publisher", "Saving results", 95),
-    ("interview_tagger", "Tagging how each question was asked", 100),
+    ("speaker_profiler", "Profiling anyone new who spoke", 90),
+    ("interview_tagger", "Tagging how each question was asked", 96),
+    ("publisher", "Saving results", 100),
 ]
 _STAGE_INDEX = {name: i for i, (name, _, _) in enumerate(STAGE_PROGRESS)}
 _DETAIL_STAGES = ("creator_profiler", "people_profiler", "claim_filter", "speaker_profiler", "interview_tagger")

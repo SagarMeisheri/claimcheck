@@ -337,23 +337,23 @@ class SpeakerProfiler(BaseAgent):
     """Pipeline step after the content policy: everyone the extractor named, profiled and tagged; who speaks in the video."""
 
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
+        from .people import people_line
         from .profile_tags import tag_rows
 
         ec = get_context()
         st = ctx.session.state
         rows: list[dict[str, Any]] = []
+        new: list[dict[str, Any]] = []
         if not st.get("gate", {}).get("skip"):
             records = [ClaimRecord.model_validate(r) for r in st.get("claim_records", [])]
             try:
                 rows = await profile_speakers(records, st.get("metadata") or {})
-                for r in rows:
-                    r.pop("new", None)
+                new = [r for r in rows if r.pop("new", False) and not is_role_label(r["label"])]
                 tag_rows(rows, rows, ec.creator, ec.video_id)  # code only: the tags come with the profiles
                 await ec.store.save_episode_speakers(ec.episode_id, [db_row(r) for r in rows])
                 ec.prepared_speakers.update({name_key(r["label"]): r for r in rows if r.get("speaker_id")})
             except Exception:
                 log.exception("speaker profiles failed for %s", ec.episode_id)
-        named = sum(1 for r in rows if r.get("speaker_id"))
         yield Event(author=self.name, invocation_id=ctx.invocation_id,
                     actions=EventActions(state_delta={"speaker_rows": [db_row(r) for r in rows]}),
-                    content=types.Content(role="model", parts=[types.Part(text=f"{named} of {len(rows)} speakers have a profile")]))
+                    content=types.Content(role="model", parts=[types.Part(text=people_line(new) if new else "No one new")]))

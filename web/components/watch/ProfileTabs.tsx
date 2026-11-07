@@ -183,7 +183,7 @@ export function PeoplePanel({ people, creator }: { people: EpisodeSpeaker[]; cre
   const order = [...people].sort((a, b) => (a.role === "host" ? 0 : a.role === "guest" ? 1 : 2) - (b.role === "host" ? 0 : b.role === "guest" ? 1 : 2)
     || b.statements - a.statements);
   const [sel, setSel] = useState(order[0]?.label ?? "");
-  if (!order.length) return <p className="meta">People appear once the video has been read.</p>;
+  if (!order.length) return <p className="meta">People appear once the host and guests have been profiled.</p>;
   const p = order.find((x) => x.label === sel) ?? order[0];
   const name = (x: EpisodeSpeaker) => x.speaker?.name ?? x.label;
   const role = p.role ? ROLE_LINE[p.role] : "Speaker";
@@ -200,7 +200,7 @@ export function PeoplePanel({ people, creator }: { people: EpisodeSpeaker[]; cre
       </div>
       <div className="person" role="tabpanel">
         <h3 className="profile-name">{name(p)}</h3>
-        <p className="meta person-role">{role}{creator && p.role === "host" ? ` · ${creator.podcast}` : ""} · {p.statements} {p.statements === 1 ? "statement" : "statements"}</p>
+        <p className="meta person-role">{role}{creator && p.role === "host" ? ` · ${creator.podcast}` : ""}{p.statements ? ` · ${p.statements} ${p.statements === 1 ? "statement" : "statements"}` : ""}</p>
         {p.speaker ? (
           <>
             {p.speaker.summary && <p>{p.speaker.summary}</p>}

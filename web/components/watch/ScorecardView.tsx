@@ -414,7 +414,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           </>
         )}
 
-        {qa && !checking && <InterviewProfile claims={everything} interaction={ep.interaction} onOpen={select} />}
+        {qa && <InterviewProfile claims={everything} interaction={ep.interaction} onOpen={select} />}  {/* fills in as answers are tagged */}
 
         <div className="score-timeline">
           {playable.length === 0
