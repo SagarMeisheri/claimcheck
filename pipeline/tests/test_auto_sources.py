@@ -4,12 +4,11 @@ import asyncio
 from types import SimpleNamespace as NS
 
 from claimcheck.agents import sources
-from claimcheck.agents.sources import AutoSources, Digest, Lookup, VideoContext
+from claimcheck.agents.sources import AutoSources, Lookup, VideoContext
 from claimcheck.agents.stages import build_record
 from claimcheck.config import Settings
 from claimcheck.context import Budget, BudgetExceeded, EpisodeContext
 from claimcheck.policy import load_policy
-from claimcheck.tools.evidence import related_objective
 
 POLICY = load_policy()
 
@@ -27,6 +26,9 @@ class Store:
         self.rows = rows or {}
         self.status = []  # (claim id, status) in order
         self.saved = []
+
+    async def count_looked_up(self, episode_id):
+        return getattr(self, "looked", 0)
 
     async def get_claim_row(self, episode_id, idx):
         return self.rows.get(idx, {"id": f"id{idx}", "idx": idx, "claim_text": f"answer {idx}", "statement_type": "factual_claim",
@@ -67,12 +69,12 @@ def patch_lookup(monkeypatch, route="related", fail=None, calls=None):
             calls.append(claim["id"])
         if fail:
             raise fail
-        return Lookup(route, [], [], None), Digest("A summary.", "high", "")
+        return Lookup(route, [], None)
 
-    async def save(store, claim_id, found, digest):
+    async def save(store, claim_id, found):
         store.saved.append((claim_id, found.route))
 
-    monkeypatch.setattr(sources, "_lookup_and_summarize", lookup)
+    monkeypatch.setattr(sources, "lookup_answer", lookup)
     monkeypatch.setattr(sources, "_save", save)
 
 
@@ -86,6 +88,16 @@ def test_each_answer_starts_a_lookup_and_is_saved(monkeypatch):
     assert ("id0", "searching") in store.status  # shown as searching straight away
 
 
+def test_no_automatic_lookup_starts_once_the_video_has_used_its_total(monkeypatch):
+    calls = []
+    patch_lookup(monkeypatch, calls=calls)
+    store = Store()
+    store.looked = 200
+    auto, _ = make(Settings(auto_sources_as_found=True, max_cost_usd_per_episode=3.0, max_searches_per_video=200), store)
+    run(auto, [answer(0), answer(1)])
+    assert calls == [] and store.saved == [] and store.status == []  # nothing marked, so the button still works
+
+
 def test_stories_questions_and_redacted_answers_are_never_looked_up(monkeypatch):
     calls = []
     patch_lookup(monkeypatch, calls=calls)
@@ -94,7 +106,7 @@ def test_stories_questions_and_redacted_answers_are_never_looked_up(monkeypatch)
     assert calls == [] and auto.started == 0
 
 
-def test_a_skip_from_the_classifier_is_saved_as_a_skip(monkeypatch):
+def test_an_answer_with_nothing_checkable_is_saved_as_a_skip(monkeypatch):
     patch_lookup(monkeypatch, route="skip")
     auto, store = make()
     run(auto, [answer(0)])
@@ -147,7 +159,7 @@ def test_cancelling_leaves_nothing_stuck_searching(monkeypatch):
     async def slow(claim, vctx, *, force):
         await asyncio.sleep(10)
 
-    monkeypatch.setattr(sources, "_lookup_and_summarize", slow)
+    monkeypatch.setattr(sources, "lookup_answer", slow)
     auto, store = make()
 
     async def go():
@@ -159,12 +171,13 @@ def test_cancelling_leaves_nothing_stuck_searching(monkeypatch):
     assert store.status[0] == ("id0", "searching") and store.status[-1] == ("id0", "not_requested")
 
 
-def test_the_question_reaches_the_classifier_and_the_search():
+def test_the_question_the_host_asked_reaches_the_planner_and_the_tags():
     vctx = VideoContext(NS(), {"id": "ep1"})
-    ctx = vctx.for_claim({"claim_text": "NPCI was funded with Rs 100 crore.", "statement_type": "factual_claim", "question": "How was NPCI funded?"})
-    assert ctx["question"] == "How was NPCI funded?"
-    assert 'In answer to: "How was NPCI funded?"' in related_objective(ctx["statement"], ctx)
-    assert "In answer to" not in related_objective("A statement.", {})
+    claim = {"claim_text": "Banks chipped in.", "statement_type": "factual_claim", "question": "How was NPCI funded?", "question_quote": "And how was it funded?",
+             "question_kind": "asked", "asked_by": "Host", "start_s": 150}
+    ctx = vctx.for_claim(claim)
+    assert ctx["question"] == "How was NPCI funded?" and ctx["question_spoken"] == "And how was it funded?" and ctx["asked_by"] == "Host"
+    assert ctx["question_kind"] == "asked" and "previous_exchange" not in ctx
 
 
 def test_either_switch_turns_automatic_checking_on():
@@ -178,12 +191,12 @@ def test_an_answer_waiting_for_a_free_slot_already_shows_as_searching(monkeypatc
 
     async def lookup(claim, vctx, *, force):
         await release.wait()
-        return Lookup("related", [], [], None), Digest()
+        return Lookup("related", [], None)
 
-    async def save(store, claim_id, found, digest):
+    async def save(store, claim_id, found):
         store.saved.append((claim_id, found.route))
 
-    monkeypatch.setattr(sources, "_lookup_and_summarize", lookup)
+    monkeypatch.setattr(sources, "lookup_answer", lookup)
     monkeypatch.setattr(sources, "_save", save)
     auto, store = make(Settings(auto_sources_as_found=True, max_cost_usd_per_episode=3.0, sources_concurrency=1))
 
@@ -201,3 +214,4 @@ def test_an_answer_waiting_for_a_free_slot_already_shows_as_searching(monkeypatc
     waiting = asyncio.run(go())
     assert ("id0", "searching") in waiting and ("id1", "searching") in waiting
     assert sorted(store.saved) == [("id0", "related"), ("id1", "related")]
+

@@ -10,10 +10,6 @@ export const PESTLE: Record<Pestle, string> = {
 };
 
 /** Labels for the kind of site a source comes from. Other sites are shown too, just without a label. */
-export const TIER_LABEL: Record<number, string> = {
-  1: "Official source",
-  2: "News or research organisation",
-};
 
 export function clock(s: number): string {
   const h = Math.floor(s / 3600);

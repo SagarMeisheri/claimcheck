@@ -1,14 +1,6 @@
-from claimcheck.policy import blocklist, is_never, load_policy, source_tier
+from claimcheck.policy import blocklist, is_never, load_policy
 
 POLICY = load_policy()
-
-
-def test_source_tiers():
-    assert source_tier("https://www.rbi.org.in/x", POLICY) == 1
-    assert source_tier("https://pmay-urban.gov.in/x", POLICY) == 1  # .gov.in suffix
-    assert source_tier("https://www.thehindu.com/x", POLICY) == 2
-    assert source_tier("https://someblog.in/x", POLICY) == 3
-    assert source_tier("https://twitter.com/x", POLICY) == 9
 
 
 def test_model_can_add_never_but_code_also_applies_it():

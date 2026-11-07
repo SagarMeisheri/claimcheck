@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { CheckSources, type SourcesResult } from "@/components/CheckSources";
+import { IndicatorEvidence } from "@/components/Indicators";
 import { ReportForm } from "@/components/ReportForm";
-import { OpinionPanel, ResearchPanel } from "@/components/ResearchPanel";
+import { ResearchPanel } from "@/components/ResearchPanel";
 import { SourceList } from "@/components/SourceList";
 import type { Claim } from "@/lib/types";
 import { SEARCHING, canCheckSources, hasSources, typeOf } from "@/lib/statements";
@@ -62,8 +63,8 @@ export function StatementDetail({ claim: c, videoId, phase, countdown, hasNext, 
         <ReportForm claimId={c.id} hasSources={c.sources.length > 0} />
       </div>
 
-      {sourceable && c.sources_status === "done" && c.research?.opinion && <OpinionPanel opinion={c.research.opinion} />}
-      {sourceable && c.sources_status === "done" && c.research && c.research.points.length > 0 && <ResearchPanel research={c.research} />}
+      <IndicatorEvidence c={c} />
+      {sourceable && c.sources_status === "done" && c.research && (c.research.points?.length ?? 0) > 0 && <ResearchPanel research={c.research} />}
       {sourceable && c.sources_status === "done" && (
         <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} counter={c.counter_sources}
                     counterSummary={c.counter_summary} route={c.sources_route} />

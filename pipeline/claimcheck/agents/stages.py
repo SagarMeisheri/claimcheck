@@ -96,6 +96,7 @@ def build_record(i: int, raw: dict[str, Any], ec: Any, log: bool = True) -> Opti
         return None
     claim.speaker = speaker_label(claim.speaker, ec)
     claim.question = " ".join((claim.question or "").split())[:300]
+    claim.question_quote = "" if claim.question_kind == "implied" or not claim.question else " ".join((claim.question_quote or "").split())[:400]
     claim.asked_by = "" if claim.question_kind == "implied" or not claim.question else speaker_label(" ".join((claim.asked_by or "").split())[:80], ec)
     tier, reason = classify_statement(claim, ec.policy)
     rec = ClaimRecord(index=i, start_s=ts_to_seconds(claim.start_ts), claim=claim, effective_tier=tier, not_checked_reason=reason)

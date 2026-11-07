@@ -70,16 +70,16 @@ class Settings:
     excerpt_chars: int = int(_env("CLAIMCHECK_EXCERPT_CHARS", "320"))
     # One short neutral line per source, written by a cheap model from the page text (agents/sources.py). If it
     # fails or the budget runs out, the sources are still saved and the excerpt is shown instead.
-    summarize_sources: bool = _env("CLAIMCHECK_SUMMARIZE_SOURCES", "1") == "1"
     summary_model: str = field(default_factory=lambda: _env("CLAIMCHECK_SUMMARY_MODEL", "gemini-3.8-flash"))
     # Thinking for the sources summary + match: minimal, low, medium, high or "default". Low keeps it ~$0.003 a claim.
     summary_thinking: str = field(default_factory=lambda: _env("CLAIMCHECK_SUMMARY_THINKING", "low"))
     # "Check sources for all statements" (agents/sources.py): the same search for every statement, a few at a time.
-    # Searches per press (earliest claims first; press again for the rest). Claims with the same wording share one.
-    sources_all_max_searches: int = int(_env("CLAIMCHECK_SOURCES_ALL_MAX_SEARCHES", "75"))
+    # Source lookups (searches) per video in total: the button, "Check all" and the automatic ones together; earliest claims first, claims
+    # with the same wording share one. 0 = no limit. The per-video cost cap applies as well.
+    max_searches_per_video: int = int(_env("CLAIMCHECK_MAX_SEARCHES_PER_VIDEO", "200"))
     sources_concurrency: int = int(_env("CLAIMCHECK_SOURCES_CONCURRENCY", "5"))
     # Automatic source checking, so nobody has to press "Check sources" (agents/sources.py):
-    #   auto_sources           after the whole video is read, look up every answer the triage classifier doesn't skip
+    #   auto_sources           after the whole video is read, look up every answer the planner finds something checkable in
     #   auto_sources_as_found  also start each answer's lookup as soon as it is saved, while the extractor is still
     #                          writing (implies the one above, which then picks up whatever was left)
     # A lookup started during extraction is paid from the same video budget as the extraction, whose cost is only
@@ -92,23 +92,17 @@ class Settings:
     # skip (background, self-description, vague), related (one search), data or contested (one more search for
     # different figures or other perspectives, aimed with the speaker's and creator's profiles).
     # Researching an answer (agents/research.py): a planner turns the answer into checkable points with new queries (not the
-    # answer's own words), pages from the speaker's own organisation and the episode itself are set aside, the best pages are
-    # read (not only their search excerpts) and each finding carries a quote checked against the page. If it fails, the
-    # lookup falls back to the plain search and summary.
-    research_sources: bool = _env("CLAIMCHECK_RESEARCH_SOURCES", "1") == "1"
+    # answer's own words), one web request with at most research_max_searches queries finds the pages, and every page it returns is kept. Only the search excerpts are
+    # used: no page is fetched. If it fails, the lookup falls back to the plain search and summary.
     research_max_points: int = int(_env("CLAIMCHECK_RESEARCH_MAX_POINTS", "2"))
-    research_pages: int = int(_env("CLAIMCHECK_RESEARCH_PAGES", "5"))  # pages read per answer
-    research_retry: bool = _env("CLAIMCHECK_RESEARCH_RETRY", "1") == "1"  # one rewritten-query retry for an unanswered point
-    # Rough costs, used only to plan budgets (the model calls are counted from tokens; extract_cost_usd is an assumption).
-    extract_cost_usd: float = float(_env("CLAIMCHECK_EXTRACT_COST_USD", "0.005"))
-    research_cost_estimate_usd: float = float(_env("CLAIMCHECK_RESEARCH_COST_ESTIMATE_USD", "0.012"))  # planner + reader
-    # Opinion assessment (agents/opinion.py): for opinions and contested answers, what the governing side and the opposition say,
-    # evidenced bias signals from the speaker's and show's profiles, and a judge's short assessment. Needs research_sources.
-    opinion_check: bool = _env("CLAIMCHECK_OPINION_CHECK", "1") == "1"
-    opinion_cost_estimate_usd: float = float(_env("CLAIMCHECK_OPINION_COST_ESTIMATE_USD", "0.03"))  # stance plan+search+read, bias, judge
-    triage_sources: bool = _env("CLAIMCHECK_TRIAGE_SOURCES", "1") == "1"
-    counter_search: bool = _env("CLAIMCHECK_COUNTER_SEARCH", "1") == "1"
-    triage_model: str = field(default_factory=lambda: _env("CLAIMCHECK_TRIAGE_MODEL", "gemini-3.8-flash"))
+    research_max_searches: int = int(_env("CLAIMCHECK_RESEARCH_MAX_SEARCHES", "3"))  # queries per answer, sent in one web request
+    # Rough costs, used only to plan budgets (the model calls are counted from tokens).
+    research_plan_cost_estimate_usd: float = float(_env("CLAIMCHECK_RESEARCH_PLAN_COST_ESTIMATE_USD", "0.006"))  # the planner call
+    # Answer tags (agents/tags.py): after an answer's sources are found, each tag is its own ADK classifier call (a Choice or Binary
+    # question: support, match, bias, stake, question type), each shown only the input it needs.
+    tag_answers: bool = _env("CLAIMCHECK_TAG_ANSWERS", "1") == "1"
+    tag_model: str = field(default_factory=lambda: _env("CLAIMCHECK_TAG_MODEL", "gemini-3.8-flash"))
+    tag_cost_estimate_usd: float = float(_env("CLAIMCHECK_TAG_COST_ESTIMATE_USD", "0.04"))  # all seven tag calls (measured about $0.04)
     # Speaker profiles (agents/speakers.py): one web search + one model call per new named speaker, then reused.
     # A channel that isn't on the curated creator list is looked up on the web once (agents/creators.py) and remembered.
     profile_creators: bool = _env("CLAIMCHECK_PROFILE_CREATORS", "1") == "1"
@@ -123,15 +117,7 @@ class Settings:
     search_cost_usd: float = float(_env("CLAIMCHECK_SEARCH_COST_USD", "0.005"))
     # Rough cost of one sources summary, used only to plan how many lookups a video's budget can pay for
     # (the real cost is counted from tokens). ~$0.003 on Gemini 3.8 Flash with low thinking.
-    summary_cost_estimate_usd: float = float(_env("CLAIMCHECK_SUMMARY_COST_ESTIMATE_USD", "0.003"))
 
-    # Rough cost of one triage call (~$0.0015 measured on Flash with low thinking). The real cost is counted from tokens.
-    triage_cost_estimate_usd: float = float(_env("CLAIMCHECK_TRIAGE_COST_ESTIMATE_USD", "0.0015"))
-
-    @property
-    def counter_enabled(self) -> bool:
-        """The second search needs the classifier: without it there is no way to pick the statements that get one."""
-        return self.triage_sources and self.counter_search
 
     @property
     def auto_sources_enabled(self) -> bool:
@@ -146,17 +132,8 @@ class Settings:
 
     @property
     def lookup_cost_estimate_usd(self) -> float:
-        """The most one lookup can cost (triage, both searches, the summary), for planning a "Check sources for all
-        statements" press. Statements the classifier routes to one search or skips cost less."""
-        if self.research_sources:  # points x searches, pages read, planner and reader
-            searches = max(1, self.research_max_points) + 1
-            return (self.search_cost_usd * searches + self.extract_cost_usd * (2 if self.research_retry else 1)
-                    + self.research_cost_estimate_usd * (2 if self.research_retry else 1)
-                    + (self.opinion_cost_estimate_usd if self.opinion_check else 0.0)
-                    + (self.triage_cost_estimate_usd if self.triage_sources else 0.0))
-        searches = 2 if self.counter_enabled else 1
-        return (self.search_cost_usd * searches + (self.summary_cost_estimate_usd if self.summarize_sources else 0.0)
-                + (self.triage_cost_estimate_usd if self.triage_sources else 0.0))
+        """The most one lookup can cost (the planner, its searches, the answer tags), for planning how many fit in a video's budget."""
+        return self.search_cost_usd * max(1, self.research_max_searches) + self.research_plan_cost_estimate_usd + (self.tag_cost_estimate_usd if self.tag_answers else 0.0)
 
 
 def get_settings() -> Settings:

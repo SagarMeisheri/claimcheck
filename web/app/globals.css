@@ -28,6 +28,9 @@
   --m-medium: #8a5a0f;
   --m-low: #626c68;
 
+  /* Indicator chips: blue found / neutral, amber look closer, red independent sources differ, grey unknown, purple opinion. */
+  --ind-red: #a8281f;
+
   --font-display: "Anek Latin", "Anek Devanagari", system-ui, sans-serif;
   --font-body: "Mukta", "Noto Sans Devanagari", system-ui, sans-serif;
   --narrow: 44rem;
@@ -59,6 +62,7 @@
     --m-high: #93c0f2;
     --m-medium: #e3ac5c;
     --m-low: #8a9592;
+    --ind-red: #f08a82;
   }
 }
 
@@ -841,3 +845,49 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .op-value { margin: 0; font-weight: 600; }
 .op-side { display: grid; gap: .3rem; margin-top: .3rem; }
 .op-side-name { margin: 0; font-weight: 600; font-size: .85rem; }
+
+/* Indicators: colour, glyph and one word per chip. Tones: blue found / neutral, amber look closer, red independent sources differ, grey unknown, purple opinion. */
+.ind-row { margin: 0 0 .45rem; display: flex; flex-wrap: wrap; gap: .3rem .4rem; align-items: center; }
+.ind { --tone: var(--m-low); display: inline-flex; align-items: center; gap: .3rem; font: inherit; font-size: .78rem; line-height: 1.2; padding: .16rem .55rem .16rem .45rem;
+  border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--tone) 11%, var(--paper-raised)); color: var(--ink); }
+button.ind { cursor: pointer; }
+button.ind:hover { background: color-mix(in srgb, var(--tone) 20%, var(--paper-raised)); }
+.ind.is-blue { --tone: var(--m-high); }
+.ind.is-amber { --tone: var(--m-medium); }
+.ind.is-red { --tone: var(--ind-red); }
+.ind.is-grey { --tone: var(--m-low); }
+.ind.is-purple { --tone: var(--t-advice); }
+.ind-cat { font-size: .68rem; letter-spacing: .03em; text-transform: uppercase; color: var(--ink-soft); }
+.ind-glyph { color: var(--tone); font-weight: 700; }
+.ind-word { font-weight: 600; color: var(--tone); }
+.ind b { font-variant-numeric: tabular-nums; }
+.ind.is-meter { padding-right: .55rem; --tone: var(--m-high); }
+.ind-bars { display: inline-flex; gap: 2px; }
+.ind-bars i { width: .5rem; height: .8rem; border-radius: 2px; border: 1px solid var(--tone); background: transparent; }
+.ind-bars i.on { background: var(--tone); }
+.qa-src .ind-row { margin-bottom: .35rem; }
+.ind-detail { margin-top: 1rem; display: grid; gap: .8rem; }
+
+/* Interview profile: how the questions were asked and what the sources show about the answers, as counts. */
+.ip { margin: 0 0 1rem; padding: .7rem .9rem; display: grid; gap: .7rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 10px; }
+.ip-title { margin: 0; font-family: var(--font-display); font-size: 1rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.ip-block { display: grid; gap: .35rem; }
+.ip-label { margin: 0; font-size: .82rem; color: var(--ink-soft); }
+.ip-bar { margin: 0; display: flex; gap: 2px; height: .65rem; border-radius: 999px; overflow: hidden; }
+.ip-bar span { min-width: .4rem; background: var(--tone, var(--m-low)); }
+.ip-bar .is-blue { --tone: var(--m-high); } .ip-bar .is-amber { --tone: var(--m-medium); } .ip-bar .is-red { --tone: var(--ind-red); }
+.ip-bar .is-grey { --tone: var(--m-low); } .ip-bar .is-purple { --tone: var(--t-advice); }
+.ip-legend, .ip-stats { margin: 0; display: flex; flex-wrap: wrap; gap: .3rem .45rem; align-items: center; }
+.ip-stat { font-size: .82rem; color: var(--ink-soft); padding-right: .5rem; border-right: 1px solid var(--rule); }
+.ip-stat:last-child { border-right: 0; }
+.ip-stat b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.ip-stat.is-amber { color: var(--m-medium); font-weight: 600; }
+.ip-pattern { margin: 0; font-size: .85rem; padding: .4rem .6rem; border-left: 3px solid var(--m-medium); background: color-mix(in srgb, var(--m-medium) 9%, var(--paper-raised)); border-radius: 0 6px 6px 0; cursor: help; }
+
+/* The question's tags sit on the same line as "Asked by", wrapping below it on narrow screens. Dashed = approximate (tagged from the plain-words question). */
+.qa-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .7rem; margin: .15rem 0 .1rem; }
+.qa-meta .qa-asked { margin: 0; }
+.qa-meta .ind-row { margin: 0; }
+.ind.is-approx { border-style: dashed; }
+.ind-approx { color: var(--ink-soft); font-weight: 700; }
+.ip-approx { margin: 0; font-size: .8rem; }
