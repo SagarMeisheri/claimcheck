@@ -22,26 +22,49 @@ export interface Source {
 
 export type PointStatus = "sources_found" | "no_source";
 export interface ResearchPoint { text: string; kind: string; status: PointStatus }
-/** What the independent sources show about an answer, worked out in code from the verified findings. "unverified" says nothing about the answer itself. */
-export type CorrectnessLabel = "supported" | "partly" | "contradicted" | "unverified" | "opinion";
-export interface CorrectnessBasis { site: string; url: string; relation: "page"; finding: string; quote: string } // a page the search returned: its title and search excerpt
-export interface Correctness { label: CorrectnessLabel; evidence: "strong" | "limited" | "none"; basis: CorrectnessBasis[] }
-/** How a question was asked, labelled by its wording. The quote is the question's own words, checked against the question. */
-export type QuestionType = "open" | "closed" | "leading" | "softball" | "challenging" | "unclear";
-export interface QuestionAnalysis { type: QuestionType; p?: number; quote?: string; spoken?: boolean } // spoken false: tagged from the AI's plain-words question, so leading wording may be missed
-/** The answer-tag classifier's output (ADK classifier, run after the sources are found). p is the classifier's probability for the label. */
-export interface AnswerTags { // each tag is its own classifier call, so any of them can be missing
-  support?: { label: CorrectnessLabel; p: number }; match?: { label: "high" | "medium" | "low"; p: number };
-  bias?: { label: "balanced" | "leans" | "one_sided" | "cant_tell"; p: number };
-  stake?: { yes: boolean; p: number };
-  question_type?: { label: QuestionType; p: number };
+/** A page the grounding rests on: its title and search excerpt. */
+export interface GroundingBasis { site: string; url: string; relation: "page"; finding: string; quote: string }
+/** How each question was asked (agents/interview.py, one batched classifier call per video, never shown the answer). */
+export type QuestionType = "factual" | "explanatory" | "experiential" | "evaluative" | "speculative" | "challenging" | "unclear";
+export interface QuestionAnalysis { type: QuestionType; p?: number; spoken?: boolean } // spoken false: tagged from the AI's plain-words question
+export type AnswerType = "direct" | "narrative" | "structured" | "pivot" | "evasive" | "unclear";
+export type ClaimKind = "objective_fact" | "anchored_opinion" | "pure_opinion" | "prediction";
+/** Is it backed by evidence? ungrounded: a self-serving claim that rests on the speaker's own word (the self-report rule). */
+export type Grounding = "grounded" | "plausible" | "contradicted" | "exempt" | "ungrounded";
+export type QaFlag = "missing_context" | "staged_pushback" | "self_serving_pivot";
+/** The answer's tags (agents/qa_tags.py): ADK classifiers, then the skepticism rules in code. Any part can be missing. */
+export interface QaTags {
+  version: number;
+  answer?: { type: AnswerType; p: number };
+  claim?: { type: ClaimKind; p: number };
+  grounding?: { label: Grounding; p: number; was?: Grounding; evidence: "strong" | "limited" | "none"; basis: GroundingBasis[] };
+  match?: { label: "high" | "medium" | "low"; p: number };
+  flags?: QaFlag[];
+  conflict?: { kind: "self_report" | "self_serving_pivot"; disclosure?: "disclosed" | "undisclosed" };
+  chain?: string;
 }
-/** How an answer's sources were researched: its checkable points and what independent pages say about each. */
+/** How an answer's sources were researched: its checkable points and every page the searches returned. */
 export interface Research {
-  version: number; points: ResearchPoint[]; positions: string[]; queries: string[];
-  correctness?: Correctness; tags?: AnswerTags; dropped?: Record<string, number>;
+  version: number; points: ResearchPoint[]; positions: string[]; queries: string[]; dropped?: Record<string, number>;
   searches?: { query: string; urls: string[]; failed?: boolean }[]; // what each search returned, in its own order
   pages?: { url: string; site: string; title: string; independence: string }[]; // every page the searches returned
+}
+/** One incentive tag of a person for a video, with the fact it rests on and where that fact was found. */
+export type IncentiveTag = "commercial" | "financial" | "ideological" | "reputational" | "academic" | "sponsor_aligned" | "invested_peer" | "adversarial";
+export interface Incentive { reason: string; url?: string; site?: string }
+/** How host and guest dealt with each other (agents/interview.py), and what the description tells viewers. */
+export interface Interaction { dynamic?: "promotional" | "neutral" | "adversarial"; p?: number; description_notes?: string[] }
+/** A fact in a profile, linked to the search page it came from. */
+export interface Cited { url?: string; site?: string }
+export interface ProfileV2 {
+  narrative?: string; expertise?: string[]; credentials?: string;
+  businesses?: (Cited & { name: string; relation: string; sector?: string; current?: boolean })[];
+  financial_interests?: (Cited & { what: string })[];
+  political?: Cited & { leaning?: string; basis?: string; posts?: string[] };
+  praise?: (Cited & { text: string; by?: string })[]; critiques?: (Cited & { text: string; by?: string })[];
+  controversy_reports?: (Cited & { what: string; when?: string })[]; bias_claims?: (Cited & { claim: string; by?: string })[];
+  sponsors?: (Cited & { name: string; category?: string })[]; ownership?: (Cited & { text: string })[];
+  incentives?: Partial<Record<IncentiveTag, Incentive>>;
 }
 
 export interface Claim {
@@ -55,7 +78,8 @@ export interface Claim {
   question?: string | null; // the question this answer responds to (videos analysed since answers were extracted)
   asked_by?: string | null;
   question_kind?: "asked" | "implied" | null; // implied: the AI wrote the question for a passage nobody prompted
-  question_analysis?: QuestionAnalysis | null; // how the question was asked (open, closed, leading, softball, challenging)
+  question_analysis?: QuestionAnalysis | null; // how the question was asked (factual ... challenging), one call per video
+  qa_tags?: QaTags | null; // the answer's tags: answer type, claim type, grounding, conflict flags
   section_idx: number | null;
   pestle_area: Pestle;
   topic: string | null;
@@ -122,6 +146,7 @@ export interface Episode {
   creator?: CreatorProfile | null; // the show's profile, if the channel is a known creator
   speakers?: EpisodeSpeaker[];
   qa?: QaEntry[] | null; // the Q&A page's questions; only loaded for a single video
+  interaction?: Interaction | null; // the interview dynamic
   statement_counts: Partial<Record<StatementType, number>>; // every tagged statement, by type
   // Derived for the feed
   pestle_areas?: Pestle[];
@@ -152,7 +177,7 @@ export interface CreatorProfile {
   youtube_handles: string[];
   country: string;
   summary: string | null;
-  public_profile: { hosts?: string; host_background?: string; host_bio?: string; topics?: string[]; known_for?: string; leaning?: string; leaning_basis?: string; public_opinion?: string };
+  public_profile: ProfileV2 & { hosts?: string; host_background?: string; host_bio?: string; topics?: string[]; known_for?: string; leaning?: string; leaning_basis?: string; public_opinion?: string };
 }
 
 /** Who speaks in a video, and their profile if one was found (neutral parts only). */
@@ -160,9 +185,10 @@ export interface EpisodeSpeaker {
   label: string;
   role: "host" | "guest" | null;
   statements: number;
+  incentives?: Partial<Record<IncentiveTag, Incentive>> | null; // this person's incentive tags for this video
   speaker: {
     id: string; name: string; summary: string | null; sources: { url: string; title: string | null }[];
-    public_profile: { role?: string; background?: string; affiliations?: string[]; topics?: string[]; leaning?: string; leaning_basis?: string; public_opinion?: string };
+    public_profile: ProfileV2 & { role?: string; background?: string; affiliations?: string[]; topics?: string[]; leaning?: string; leaning_basis?: string; public_opinion?: string };
   } | null;
 }
 

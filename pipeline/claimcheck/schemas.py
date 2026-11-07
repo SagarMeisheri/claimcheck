@@ -13,10 +13,10 @@ from pydantic import BaseModel, Field, model_validator
 PestleArea = Literal["political", "economic", "social", "technological", "legal", "environmental"]
 PolicyTier = Literal["normal", "never"]
 ClaimType = Literal["fact", "opinion", "prediction", "anecdote"]
-# What kind of statement it is. Questions and personal stories assert nothing a source could address, so they have
-# no "Check sources"; every other type does (unless redacted by the content policy).
+# What kind of statement it is. Only a question is never looked up; for everything else the answer-tag classifier's claim type
+# decides (agents/qa_tags.py): a personal story can still carry a checkable or self-serving claim.
 StatementType = Literal["factual_claim", "opinion", "forecast", "advice", "story", "question", "other"]
-NO_SOURCE_TYPES: frozenset[str] = frozenset({"question", "story"})
+NO_SOURCE_TYPES: frozenset[str] = frozenset({"question"})
 SourcesStatus = Literal["not_eligible", "not_requested", "queued", "searching", "done", "failed"]
 
 # Tags used before the four-tag set; they read as criticism of a named speaker, so they are folded into "other".
@@ -156,42 +156,136 @@ class ResearchPlan(BaseModel):
     positions: list[Position] = Field(default_factory=list, description="When disputed: 2-3 positions held on the issue; empty otherwise")
 
 
-# --- Creator profiles found on the web (agents/creators.py) -------------------------------------
+# --- Profiles (agents/creators.py, agents/speakers.py) ---------------------------------------------
+# Every item a profile lists names the search page it came from (`page`, the page's number in the prompt). Code maps it to the
+# page's URL and drops an item whose page doesn't exist, so each fact a viewer sees links to where it was found.
+
+class CitedText(BaseModel):
+    text: str = Field(description="One short fact as the page states it, attributed where it is a view ('Described by X as ...')")
+    page: int = Field(description="The number of the page it comes from")
+
+
+class Business(BaseModel):
+    name: str = Field(description="The company, fund or organisation")
+    relation: Literal["founder", "executive", "investor", "board", "advisor", "employee", "owner", "other"]
+    sector: str = Field(default="", description="What it does, in a few words")
+    current: bool = Field(default=True, description="False if the pages say the tie has ended")
+    page: int
+
+
+class FinancialInterest(BaseModel):
+    what: str = Field(description="A holding, fund, product they sell (book, course, supplement, app), paid partnership or sponsorship")
+    page: int
+
+
+class Political(BaseModel):
+    leaning: str = Field(default="", description="Their political or ideological leaning as the pages state it, attributed; empty if none")
+    basis: Literal["declared", "described", "none"] = Field(default="none", description="declared: a party, elected or government post; described: the pages attribute a leaning; else none")
+    posts: list[str] = Field(default_factory=list, description="Party memberships, elected, ministerial or advisory government posts they hold or held")
+    page: int = 0
+
+
+class Opinion(BaseModel):
+    text: str = Field(description="What is said about them")
+    by: str = Field(default="", description="Who says it (a newspaper, a critic, an organisation)")
+    page: int
+
+
+class Controversy(BaseModel):
+    what: str = Field(description="The controversy, neutrally, as the pages report it")
+    when: str = Field(default="", description="When, if the pages say")
+    page: int
+
+
+class BiasClaim(BaseModel):
+    claim: str = Field(description="The accusation of bias or conflict of interest, as made")
+    by: str = Field(default="", description="Who made it")
+    page: int
+
+
+class Sponsor(BaseModel):
+    name: str
+    category: str = Field(default="", description="What the sponsor sells")
+    page: int
+
+
+IncentiveTag = Literal["commercial", "financial", "ideological", "reputational", "academic",
+                       "sponsor_aligned", "adversarial", "access_preserving", "audience_captured"]
+
+
+class IncentiveOut(BaseModel):
+    """Why someone is in a conversation, as the pages show it."""
+
+    tag: IncentiveTag
+    reason: str = Field(description="One short sentence: the fact on the page that shows it, attributed")
+    page: int = Field(description="The number of the page that shows it")
+
+
+INCENTIVES_FIELD = ("Incentive tags the pages plainly show, each with the page: commercial (sells a book, product, course, service or "
+                    "show of their own), financial (holds equity or investments in companies, assets or a sector), ideological (a "
+                    "party, government post, policy or worldview they advocate), reputational (dealing with a controversy or rebuilding "
+                    "an image), academic (a researcher or institution with findings or a post to defend); for a host or show: "
+                    "sponsor_aligned (sponsors or paid partners in the subjects the show covers), adversarial (known for tough, "
+                    "accountability-style questioning), access_preserving (reported as soft on big-name guests), audience_captured "
+                    "(reported as telling its audience what it wants to hear). Never a tag a page doesn't show; empty if none.")
+
+
 class CreatorProfileOut(BaseModel):
     """What the profile step returns about a YouTube show or channel, from web search excerpts only."""
 
     identified: bool = Field(description="True only if the pages clearly describe this show or channel")
     podcast: str = Field(default="", description="The show's name")
     summary: str = Field(default="", description="1-2 neutral sentences: who hosts it and what it covers")
+    narrative: str = Field(default="", description="A neutral profile of the show in 120-200 words, every view attributed, from the pages only")
     hosts: str = Field(default="", description="The host or hosts, as the pages name them")
     host_background: str = Field(default="", description="Short: what the host is known for professionally")
     host_bio: str = Field(default="", description="One or two sentences on the host or hosts")
     topics: list[str] = Field(default_factory=list, description="Subjects the show usually covers")
     known_for: str = Field(default="", description="What the show is known for, as the pages describe it")
-    criticism: str = Field(default="", description="Main public criticisms the pages report, attributed; empty if none")
     country: str = Field(default="", description="The country the show is based in, if the pages say")
-    leaning: str = Field(default="", description="The political or ideological leaning the pages attribute to the show, attributed ('Described by X as ...'); empty if they say nothing")
-    leaning_basis: Literal["described", "none"] = Field(default="none", description="'described' if the pages attribute a leaning to the show, else 'none'")
-    public_opinion: str = Field(default="", description="How the public and the press view the show, both favourable and critical, each attributed ('Praised by X for ...', 'Criticised by Y for ...'); empty if the pages say nothing")
+    ownership: list[CitedText] = Field(default_factory=list, description="Who owns, funds or distributes the show (a network, investors, a company)")
+    sponsors: list[Sponsor] = Field(default_factory=list, description="Sponsors and advertisers the pages name")
+    political: Political = Field(default_factory=Political)
+    praise: list[Opinion] = Field(default_factory=list, description="Favourable views of the show, attributed")
+    criticism: list[Opinion] = Field(default_factory=list, description="Critical views of the show, attributed")
+    controversies: list[Controversy] = Field(default_factory=list)
+    bias_claims: list[BiasClaim] = Field(default_factory=list, description="Accusations that the show is biased, captured by its audience, soft on guests or paid for coverage")
+    incentives: list[IncentiveOut] = Field(default_factory=list, description=INCENTIVES_FIELD)
 
 
-# --- Speaker profiles (agents/speakers.py) -------------------------------------------------------
 class SpeakerProfileOut(BaseModel):
-    """What the profile step returns about one named speaker, from web search excerpts only."""
+    """What the profile step returns about one named person, from web search excerpts only."""
 
     identified: bool = Field(description="True only if the pages clearly describe one public person who fits the video context")
     summary: str = Field(default="", description="1-2 neutral sentences: who they are and what they are known for")
+    narrative: str = Field(default="", description="A neutral profile in 150-250 words: who they are, their work, their interests and how they are seen, every view attributed, from the pages only")
     role: str = Field(default="", description="Current main role, e.g. 'Economist, former RBI governor'")
     background: str = Field(default="", description="Professional background in one or two sentences")
+    expertise: list[str] = Field(default_factory=list, description="Fields they are an expert or practitioner in, as the pages show")
+    credentials: str = Field(default="", description="Degrees, posts or achievements the pages give for that expertise")
     affiliations: list[str] = Field(default_factory=list, description="Organisations, parties, companies or shows they are tied to")
     topics: list[str] = Field(default_factory=list, description="Subjects they usually speak on")
-    known_positions: str = Field(default="", description="Public positions or leanings as the pages describe them, attributed ('described as...'); empty if none")
-    criticisms: str = Field(default="", description="Main public criticisms as the pages report them, attributed; empty if none")
-    leaning: str = Field(default="", description="Their political or ideological leaning as the pages state it, attributed ('Described by X as ...', or the party or government post they hold or held); empty if the pages say nothing")
-    leaning_basis: Literal["declared", "described", "none"] = Field(default="none", description="'declared' if they hold or held a party or government post or speak for a party; 'described' if the pages attribute a leaning to them; else 'none'")
-    public_opinion: str = Field(default="", description="How the public and the press view them, both favourable and critical, each attributed ('Praised by X for ...', 'Criticised by Y for ...'); empty if the pages say nothing")
+    businesses: list[Business] = Field(default_factory=list, description="Companies, funds and organisations they founded, run, invest in or advise")
+    financial_interests: list[FinancialInterest] = Field(default_factory=list, description="Holdings, products they sell, paid partnerships")
+    political: Political = Field(default_factory=Political)
+    praise: list[Opinion] = Field(default_factory=list, description="Favourable views of them, attributed")
+    criticism: list[Opinion] = Field(default_factory=list, description="Critical views of them, attributed")
+    controversies: list[Controversy] = Field(default_factory=list)
+    bias_claims: list[BiasClaim] = Field(default_factory=list, description="Accusations of bias or conflicts of interest made against them")
+    sponsors: list[Sponsor] = Field(default_factory=list, description="For a host: sponsors and paid partners of their shows")
+    incentives: list[IncentiveOut] = Field(default_factory=list, description=INCENTIVES_FIELD)
 
 
+# --- Who appears in a video (agents/people.py) ----------------------------------------------------
+class PersonOut(BaseModel):
+    name: str = Field(description="The person's full name, exactly as the title, description or pages give it")
+    role: str = Field(default="", description="How they are introduced, in a few words ('Co-founder of Zerodha')")
+    is_host: bool = Field(default=False, description="True if they host the show or this video")
+    promotes: list[str] = Field(default_factory=list, description="What the description promotes for this person: their book, product, course, company, fund, app or show, as named there")
+
+
+class PeopleOut(BaseModel):
+    people: list[PersonOut] = Field(default_factory=list, description="The hosts and guests who appear and speak in this video; never people who are only talked about")
 
 
 class ClaimRecord(BaseModel):

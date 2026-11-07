@@ -98,17 +98,19 @@ class Settings:
     research_max_searches: int = int(_env("CLAIMCHECK_RESEARCH_MAX_SEARCHES", "3"))  # queries per answer, sent in one web request
     # Rough costs, used only to plan budgets (the model calls are counted from tokens).
     research_plan_cost_estimate_usd: float = float(_env("CLAIMCHECK_RESEARCH_PLAN_COST_ESTIMATE_USD", "0.006"))  # the planner call
-    # Answer tags (agents/tags.py): after an answer's sources are found, each tag is its own ADK classifier call (a Choice or Binary
-    # question: support, match, bias, stake, question type), each shown only the input it needs.
+    # Answer tags (agents/qa_tags.py): one ADK classifier call per answer (answer type, claim type and the conditional conflict checks),
+    # a second when it is researched (grounding, match, missing context); question types and the dynamic are batched once per video
+    # (agents/interview.py).
     tag_answers: bool = _env("CLAIMCHECK_TAG_ANSWERS", "1") == "1"
     tag_model: str = field(default_factory=lambda: _env("CLAIMCHECK_TAG_MODEL", "gemini-3.8-flash"))
-    tag_cost_estimate_usd: float = float(_env("CLAIMCHECK_TAG_COST_ESTIMATE_USD", "0.04"))  # all seven tag calls (measured about $0.04)
+    tag_cost_estimate_usd: float = float(_env("CLAIMCHECK_TAG_COST_ESTIMATE_USD", "0.03"))  # one answer's two calls, the grounding one with ~30 pages
     # Speaker profiles (agents/speakers.py): one web search + one model call per new named speaker, then reused.
     # A channel that isn't on the curated creator list is looked up on the web once (agents/creators.py) and remembered.
     profile_creators: bool = _env("CLAIMCHECK_PROFILE_CREATORS", "1") == "1"
     profile_speakers: bool = _env("CLAIMCHECK_PROFILE_SPEAKERS", "1") == "1"
     max_speaker_profiles: int = int(_env("CLAIMCHECK_MAX_SPEAKER_PROFILES", "6"))  # new profiles per video
     profile_model: str = field(default_factory=lambda: _env("CLAIMCHECK_PROFILE_MODEL", "gemini-3.8-flash"))
+    profile_thinking: str = field(default_factory=lambda: _env("CLAIMCHECK_PROFILE_THINKING", "medium"))
     default_search_location: str = field(default_factory=lambda: _env("CLAIMCHECK_SEARCH_LOCATION", "in"))
     # YouTube API data older than this is refreshed (YouTube allows at most 30 days).
     youtube_refresh_days: int = int(_env("CLAIMCHECK_YOUTUBE_REFRESH_DAYS", "25"))

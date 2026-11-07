@@ -13,7 +13,7 @@ up "steel frame"), repeats of the episode itself, and the speaker's own organisa
   keep    every page returned is kept, in the order it came back, all treated alike. Pages that are the episode's own or the speaker's
           own organisation's carry a label (independence.py) for the reader, which changes nothing else.
 
-The answer-tag classifier (agents/tags.py) then reads every page's excerpt together with the Q&A and the profiles. Nothing here says
+The grounding classifier (agents/qa_tags.py) then reads every page's excerpt together with the Q&A and the profiles. Nothing here says
 the speaker is right or wrong. If every search fails it raises ResearchUnavailable and the answer is marked failed (it can be retried).
 """
 
@@ -59,20 +59,13 @@ class Research:
     match: str
     dropped: dict[str, int] = field(default_factory=dict)
     pages: list[dict[str, str]] = field(default_factory=list)  # every page the searches returned
-    correctness: Optional[dict[str, Any]] = None  # the support tag with the pages it rests on (agents/correctness.py), set by agents/tags.py
-    tags: Optional[dict[str, Any]] = None  # the answer-tag classifier's output (agents/tags.py)
     all_pages: list[dict[str, Any]] = field(default_factory=list, repr=False)  # every page with its search excerpt, for the classifier (not stored)
     searches: list[dict[str, Any]] = field(default_factory=list)  # per query: {"query", "urls" (in the order that search returned them), "failed"}
-    question_analysis: Optional[dict[str, Any]] = field(default=None, repr=False)  # how the question was asked (from the answer tags), saved on the answer
 
     def stored(self) -> dict[str, Any]:
         """What is saved in claims.research and shown in the detail panel."""
-        out = {"version": 2, "points": self.points, "positions": self.positions, "queries": self.queries, "dropped": self.dropped,
+        out = {"version": 3, "points": self.points, "positions": self.positions, "queries": self.queries, "dropped": self.dropped,
                "pages": self.pages, "searches": self.searches}
-        if self.correctness:
-            out["correctness"] = self.correctness
-        if self.tags:
-            out["tags"] = self.tags
         return out
 
 

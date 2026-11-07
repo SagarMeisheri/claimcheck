@@ -16,8 +16,8 @@ import { TypeTag } from "./ClaimCard";
  * and the answer. Clicking the question plays the video from there. Under each answer sit indicator chips and a Sources
  * tag; the summaries and the full source list open in the detail panel when a chip, the tag or Details is clicked. A card never changes size when a lookup runs: progress shows in place. When sources are looked up automatically (`auto`)
  * there is no button: the card shows a spinner from the moment the answer appears, until its sources arrive.
- * The question carries a chip for how it was asked; the answer carries chips for what sources show, bias, stake and evidence. Each
- * chip opens the detail panel, where its quote is.
+ * The question carries a chip for what kind of question it was; the answer carries the rest of the tagging chain: how it was
+ * answered, what it claims, whether evidence backs it, and any conflict. Each chip opens the detail panel, where its basis is.
  */
 export function QaCard({ group, auto, running, activeId, selectedId, onPlay, onSelect, onLookedUp }: {
   group: QaGroup; auto: boolean; running: boolean; activeId: string | null; selectedId: string | null;
@@ -59,7 +59,7 @@ function Answer({ c, auto, running, onPlay, onSelect, onLookedUp }: {
   const who = speakerName(c.speaker);
   const sourceable = c.sources_status !== "not_eligible" && hasSources(c.statement_type);
   const done = c.sources_status === "done";
-  const indicated = !!(c.research?.correctness || c.research?.tags);
+  const indicated = !!c.qa_tags;
   const skipped = c.sources_route === "skip";
   const check = (
     <CheckSources claimId={c.id} status={c.sources_status} error={null} route={c.sources_route} compact onBusy={onBusy} onDone={(r) => onLookedUp(c, r)} />
@@ -68,7 +68,7 @@ function Answer({ c, auto, running, onPlay, onSelect, onLookedUp }: {
   const autoState = ["searching", "queued", "failed"].includes(c.sources_status) ? check
     : c.sources_status === "not_requested" && !skipped && running
       ? <p className="ccard-verifying" role="status" aria-live="polite"><span className="spinner" aria-hidden="true" /> Checking sources…</p>
-      : <p className="meta qa-note">{skipped ? "Not looked up: it reads as background, or the speaker on themselves." : "Sources weren't looked up for this answer."}</p>;
+      : <p className="meta qa-note">{skipped ? "Not looked up: nothing in it a source could check." : "Sources weren't looked up for this answer."}</p>;
   return (
     <div className={`qa-ans${busy ? " is-verifying" : ""}`}>
       <p className="qa-ans-head">
@@ -77,7 +77,10 @@ function Answer({ c, auto, running, onPlay, onSelect, onLookedUp }: {
         <button type="button" className="qa-ts" onClick={() => onPlay(c)} aria-label={`Play from ${clock(c.start_s)}`}>▶ {clock(c.start_s)}</button>
       </p>
       <p className="qa-ans-text">{c.claim_text}</p>
-      {sourceable && (
+      {sourceable && skipped && indicated && c.sources_status !== "searching" && (
+        <div className="qa-src"><AnswerIndicators c={c} onOpen={() => onSelect(c)} /></div>  // tagged, no search needed (an opinion, or nothing checkable)
+      )}
+      {sourceable && !(skipped && indicated && c.sources_status !== "searching") && (
         <div className="qa-src">
           {done ? (
             <>

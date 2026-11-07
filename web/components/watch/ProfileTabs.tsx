@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { CreatorProfile, EpisodeSpeaker, Section } from "@/lib/types";
+import type { Cited, CreatorProfile, EpisodeSpeaker, ProfileV2, Section } from "@/lib/types";
+import { IncentiveChips } from "@/components/Indicators";
 import { clock, domain } from "@/lib/format";
 
 type Tab = "summary" | "chapters" | "creator" | "speakers";
 
-const PROFILE_NOTE = "Compiled with AI from public web sources. It describes who they are, not whether anything said is right.";
+const PROFILE_NOTE = "Compiled with AI from public web search results; each fact links to the page it came from, and every view is attributed to who holds it. It describes who they are and what they have a stake in, not whether anything said is right.";
 
 /**
  * Tabs under the video: the AI summary, the chapters (parts of the conversation), the show's profile, and who speaks.
@@ -105,6 +106,44 @@ function LeaningAndOpinion({ p }: { p: { leaning?: string; leaning_basis?: strin
   );
 }
 
+function Src({ x }: { x: Cited }) {
+  return x.url ? <> <a className="meta" href={x.url} target="_blank" rel="noopener noreferrer nofollow">{x.site || domain(x.url)}</a></> : null;
+}
+
+function CitedList<T extends Cited>({ title, items, text }: { title: string; items?: T[]; text(x: T): string }) {
+  if (!items?.length) return null;
+  return (
+    <div className="profile-sec">
+      <p className="profile-k">{title}</p>
+      <ul className="profile-list">{items.map((x, i) => <li key={i}>{text(x)}<Src x={x} /></li>)}</ul>
+    </div>
+  );
+}
+
+const RELATION: Record<string, string> = { founder: "Founder", executive: "Executive", investor: "Investor", board: "Board member", advisor: "Advisor", employee: "Works at", owner: "Owner", other: "Tied to" };
+
+/** The comprehensive (version 2) part of a profile: expertise, money, politics and how they are seen, each fact cited. */
+function ProfileDetails({ p }: { p: ProfileV2 }) {
+  const pol = p.political;
+  return (
+    <>
+      {p.narrative && <p className="profile-narrative">{p.narrative}</p>}
+      {!!p.expertise?.length && <p><span className="profile-k">Expertise</span> {p.expertise.join(", ")}{p.credentials ? <span className="meta"> · {p.credentials}</span> : null}</p>}
+      <CitedList title="Businesses and roles" items={p.businesses} text={(b) => `${RELATION[b.relation] ?? "Tied to"}: ${b.name}${b.sector ? ` (${b.sector})` : ""}${b.current === false ? ", former" : ""}`} />
+      <CitedList title="Financial interests" items={p.financial_interests} text={(f) => f.what} />
+      {pol && (pol.leaning || pol.posts?.length) ? (
+        <p><span className="profile-k">Politics</span> {[pol.leaning, ...(pol.posts ?? [])].filter(Boolean).join("; ")}<Src x={pol} /></p>
+      ) : null}
+      <CitedList title="Sponsors" items={p.sponsors} text={(x) => `${x.name}${x.category ? ` (${x.category})` : ""}`} />
+      <CitedList title="Ownership and funding" items={p.ownership} text={(x) => x.text} />
+      <CitedList title="Praise" items={p.praise} text={(x) => (x.by ? `${x.by}: ` : "") + x.text} />
+      <CitedList title="Criticism" items={p.critiques} text={(x) => (x.by ? `${x.by}: ` : "") + x.text} />
+      <CitedList title="Controversies" items={p.controversy_reports} text={(x) => x.what + (x.when ? ` (${x.when})` : "")} />
+      <CitedList title="Claims of bias or conflicts of interest" items={p.bias_claims} text={(x) => (x.by ? `${x.by}: ` : "") + x.claim} />
+    </>
+  );
+}
+
 /** The show's profile: neutral facts only. */
 export function CreatorPanel({ creator }: { creator: CreatorProfile }) {
   return (
@@ -119,7 +158,8 @@ export function CreatorPanel({ creator }: { creator: CreatorProfile }) {
       {creator.public_profile.hosts && <p><span className="profile-k">Hosts</span> {creator.public_profile.hosts}</p>}
       {creator.public_profile.host_bio && <p><span className="profile-k">Background</span> {creator.public_profile.host_bio}</p>}
       {creator.public_profile.known_for && <p><span className="profile-k">Known for</span> {creator.public_profile.known_for}</p>}
-      <LeaningAndOpinion p={creator.public_profile} />
+      {creator.public_profile.narrative ? <ProfileDetails p={creator.public_profile} /> : <LeaningAndOpinion p={creator.public_profile} />}
+      {creator.public_profile.incentives && <div className="profile-sec"><p className="profile-k">What the show has a stake in</p><IncentiveChips incentives={creator.public_profile.incentives} detail /></div>}
       {!!creator.public_profile.topics?.length && (
         <p className="profile-topics">{creator.public_profile.topics.map((t) => <span key={t} className="chip static">{t}</span>)}</p>
       )}
@@ -168,7 +208,10 @@ export function PeoplePanel({ people, creator }: { people: EpisodeSpeaker[]; cre
             {!!p.speaker.public_profile.affiliations?.length && (
               <p><span className="profile-k">Affiliations</span> {p.speaker.public_profile.affiliations.join(", ")}</p>
             )}
-            <LeaningAndOpinion p={p.speaker.public_profile} />
+            {p.incentives && Object.keys(p.incentives).length > 0 && (
+              <div className="profile-sec"><p className="profile-k">In this video, a stake in</p><IncentiveChips incentives={p.incentives} detail /></div>
+            )}
+            {p.speaker.public_profile.narrative ? <ProfileDetails p={p.speaker.public_profile} /> : <LeaningAndOpinion p={p.speaker.public_profile} />}
             {!!p.speaker.sources?.length && (
               <p className="meta">From: {p.speaker.sources.slice(0, 3).map((x, i) => (
                 <span key={x.url}>{i > 0 && ", "}<a href={x.url} target="_blank" rel="noopener noreferrer">{domain(x.url)}</a></span>
