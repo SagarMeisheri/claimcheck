@@ -57,6 +57,10 @@ export const DISCLOSURE_UI = {
 
 export const SELF_REPORT_UI: IndicatorUi = { word: "Self-report", glyph: "◆", tone: "amber", hint: "The claim serves the speaker's own commercial or financial interest." };
 
+/** What the Conflict and Stake chips say when nothing was found, so every tagged answer shows both results. */
+export const NO_CONFLICT_UI: IndicatorUi = { word: "None", glyph: "○", tone: "grey", hint: "No conflict of interest was found: the answer doesn't serve a commercial or financial interest of the speaker's." };
+export const NO_STAKE_UI: IndicatorUi = { word: "None", glyph: "○", tone: "grey", hint: "The answer doesn't serve an interest of the speaker's, so there was nothing to disclose." };
+
 export const INCENTIVE_UI: Record<IncentiveTag, IndicatorUi> = {
   commercial: { word: "Commercial", glyph: "$", tone: "amber", hint: "Sells a book, product, course, service or show of their own." },
   financial: { word: "Financial", glyph: "%", tone: "amber", hint: "Holds equity or investments in companies, assets or a sector." },
