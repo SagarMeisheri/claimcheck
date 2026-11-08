@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { clock } from "@/lib/format";
 import {
-  ANSWER_UI, CLAIM_UI, DISCLOSURE_UI, DYNAMIC_UI, FLAG_UI, GROUNDING_UI, INCENTIVE_UI, NO_CONFLICT_UI, NO_STAKE_UI, PATTERN_UI, QUESTION_UI, SELF_REPORT_UI,
+  ANSWER_UI, CLAIM_UI, DISCLOSURE_UI, DYNAMIC_UI, FLAG_UI, GROUNDING_UI, INCENTIVE_UI, NO_CONFLICT_UI, NO_PROFILE_UI, NO_STAKE_UI, PATTERN_UI, QUESTION_UI, SELF_REPORT_UI, STAKE_KIND_WORD, TOUCHES_UI,
   chainOf, flagsOf, interviewProfile, type IndicatorUi, type TagFilter,
 } from "@/lib/indicators";
-import type { AnswerType, Claim, Grounding, Incentive, IncentiveTag, Interaction, QuestionAnalysis, QuestionType } from "@/lib/types";
+import type { AnswerType, Claim, QaTags, Grounding, Incentive, IncentiveTag, Interaction, QuestionAnalysis, QuestionType } from "@/lib/types";
 
 /**
  * The indicators beside a question and its answer, from the Q&A taxonomy:
@@ -42,6 +42,15 @@ export function QuestionIndicator({ analysis, onOpen }: { analysis: QuestionAnal
   );
 }
 
+/** The Stake chip: the kind of profile item the answer ties to (amber when undisclosed), or None. */
+function stakeUi(stake: QaTags["stake"]): IndicatorUi {
+  if (!stake) return NO_STAKE_UI;
+  const word = STAKE_KIND_WORD[stake.item.kind] ?? "Profile";
+  const base = stake.link === "touches" ? TOUCHES_UI : SELF_REPORT_UI;
+  return { word: `${word}${stake.disclosure === "undisclosed" ? ", undisclosed" : stake.disclosure === "disclosed" ? ", disclosed" : ""}`, glyph: base.glyph, tone: stake.disclosure === "disclosed" ? "blue" : "amber",
+           hint: `${stake.link === "touches" ? TOUCHES_UI.hint : "The answer favours this item of the speaker's profile."}` };
+}
+
 /** One answer's chips: how it was answered, what it claims, whether evidence backs it, and any conflict. */
 export function AnswerIndicators({ c, onOpen }: { c: Claim; onOpen(): void }) {
   const t = c.qa_tags;
@@ -53,8 +62,9 @@ export function AnswerIndicators({ c, onOpen }: { c: Claim; onOpen(): void }) {
       {t.answer && <Chip ui={ANSWER_UI[t.answer.type]} tag={`a-${t.answer.type}`} category="Answer" onOpen={onOpen} />}
       {t.claim && <Chip ui={CLAIM_UI[t.claim.type]} category="Claim" onOpen={onOpen} />}
       {g && <Chip ui={GROUNDING_UI[g.label]} tag={`g-${g.label}`} category="Evidence" onOpen={onOpen} extra={g.was ? `Without the self-report rule it would read ${GROUNDING_UI[g.was].word}.` : undefined} />}
-      <Chip ui={t.conflict ? (t.conflict.kind === "self_report" ? SELF_REPORT_UI : FLAG_UI.self_serving_pivot) : NO_CONFLICT_UI} category="Conflict" onOpen={onOpen} />
-      <Chip ui={t.conflict?.disclosure ? DISCLOSURE_UI[t.conflict.disclosure] : NO_STAKE_UI} category="Stake" onOpen={onOpen} />
+      <Chip ui={t.conflict ? (t.conflict.kind === "self_report" ? SELF_REPORT_UI : FLAG_UI.self_serving_pivot) : t.profile_checked === undefined && !t.stake ? NO_PROFILE_UI : NO_CONFLICT_UI}
+            category="Conflict" onOpen={onOpen} extra={t.stake?.link === "benefits" ? `Tied to: ${t.stake.item.text}` : undefined} />
+      <Chip ui={stakeUi(t.stake)} category="Stake" onOpen={onOpen} extra={t.stake ? `${t.stake.item.text}${t.stake.disclosure ? ` (${t.stake.disclosure})` : ""}` : undefined} />
       {flags.filter((f) => f !== "self_serving_pivot").map((f) => <Chip key={f} ui={FLAG_UI[f]} category="Flag" onOpen={onOpen} />)}
     </p>
   );
@@ -82,6 +92,18 @@ export function IndicatorEvidence({ c }: { c: Claim }) {
           <p className="op-label">How it was answered</p>
           <p className="op-value"><Chip ui={ANSWER_UI[t.answer.type]} tag={`a-${t.answer.type}`} category="Answer" />{t.claim && <> <Chip ui={CLAIM_UI[t.claim.type]} category="Claim" /></>}</p>
           <p className="meta">{ANSWER_UI[t.answer.type].hint}{t.claim ? ` ${CLAIM_UI[t.claim.type].hint}` : ""}</p>
+        </div>
+      )}
+      {t && (t.stake || t.profile_checked !== undefined) && (
+        <div className="op-block">
+          <p className="op-label">Compared with {c.speaker ?? "the speaker"}&apos;s profile</p>
+          {t.stake ? (
+            <>
+              <p className="op-value"><Chip ui={t.stake.link === "touches" ? TOUCHES_UI : SELF_REPORT_UI} category={t.stake.link === "touches" ? "Stake" : "Conflict"} /></p>
+              <blockquote className="rs-quote">{t.stake.item.text}{t.stake.item.url ? <> <a className="meta" href={t.stake.item.url} target="_blank" rel="noopener noreferrer nofollow">{t.stake.item.site || "source"}</a></> : null}</blockquote>
+              <p className="meta">{t.stake.link === "touches" ? TOUCHES_UI.hint : SELF_REPORT_UI.hint}{t.stake.disclosure ? ` ${DISCLOSURE_UI[t.stake.disclosure].hint}` : ""}</p>
+            </>
+          ) : <p className="meta">{t.profile_checked} profile {t.profile_checked === 1 ? "item" : "items"} checked; the answer ties to none of them.</p>}
         </div>
       )}
       {(t?.conflict || flagsOf(c).length > 0) && (

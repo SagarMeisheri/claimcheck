@@ -4,8 +4,7 @@ import type { Step } from "./types";
  *  Keys and labels match the pipeline (pipeline/claimcheck/agents/pipeline.py: initial_steps). */
 export const DEFAULT_STEPS: Step[] = [
   { key: "ingest_gate", label: "Checking the video details", status: "pending" },
-  { key: "creator_profiler", label: "Profiling the show", status: "pending" },
-  { key: "people_profiler", label: "Profiling the host and guests", status: "pending" },
+  { key: "people_profiler", label: "Profiling the show, hosts and guests", status: "pending" },
   { key: "extractor", label: "Reading the video, listing questions and answers", status: "pending" },
   { key: "claim_filter", label: "Applying the content policy", status: "pending" },
   { key: "speaker_profiler", label: "Profiling anyone new who spoke", status: "pending" },

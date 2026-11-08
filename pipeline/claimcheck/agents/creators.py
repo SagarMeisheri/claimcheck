@@ -125,30 +125,36 @@ def creator_needs_profile(saved: Optional[dict[str, Any]]) -> bool:
     return saved is None or needs_rebuild(saved)
 
 
+async def resolve_creator(meta: dict[str, Any]) -> tuple[Optional[dict[str, Any]], bool]:
+    """The show's profile for this video: curated, cached, or from the web. (creator, built from the web now). Sets ec.creator and the
+    episode's creator_id. Never raises."""
+    ec = get_context()
+    saved = None
+    try:
+        saved = await ec.store.get_creator_by_channel(meta.get("channel_id") or "")
+    except Exception:
+        log.exception("creator lookup failed for %s", meta.get("channel_id"))
+    creator = usable_creator(saved)
+    built = False
+    if ec.settings.profile_creators and creator_needs_profile(saved):
+        creator = await profile_creator(meta, existing=saved)
+        built = creator is not None
+    ec.creator = creator
+    if creator:
+        await ec.store.update_episode(ec.episode_id, {"creator_id": creator["id"]})
+    return creator, built
+
+
 class CreatorProfiler(BaseAgent):
-    """Pipeline stage after the gate: the show's profile (curated, cached, or from the web), so the people and the answers that
-    follow are read against it. Sets the extractor's show line."""
+    """The show's profile as a stage of its own. Not in the pipeline any more: PeopleProfiler resolves the show as the first part of
+    its one profiling step (agents/people.py); this stays for running the show step alone."""
 
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
-        ec = get_context()
         st = ctx.session.state
-        meta = st.get("metadata") or {}
         text = "skipped"
         if not st.get("gate", {}).get("skip"):
-            saved = None
-            try:
-                saved = await ec.store.get_creator_by_channel(meta.get("channel_id") or "")
-            except Exception:
-                log.exception("creator lookup failed for %s", meta.get("channel_id"))
-            creator = usable_creator(saved)
-            found = False
-            if ec.settings.profile_creators and creator_needs_profile(saved):
-                creator = await profile_creator(meta, existing=saved)
-                found = creator is not None
-            ec.creator = creator
-            if creator:
-                await ec.store.update_episode(ec.episode_id, {"creator_id": creator["id"]})
+            creator, found = await resolve_creator(st.get("metadata") or {})
             text = (f"{creator['podcast']} (profiled from the web)" if found else creator["podcast"]) if creator else "No profile for this channel"
         yield Event(author=self.name, invocation_id=ctx.invocation_id,
-                    actions=EventActions(state_delta={"creator_context": extraction_context(ec.creator)}),
+                    actions=EventActions(state_delta={"creator_context": extraction_context(get_context().creator)}),
                     content=types.Content(role="model", parts=[types.Part(text=text)]))

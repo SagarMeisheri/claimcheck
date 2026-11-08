@@ -47,7 +47,7 @@ export const GROUNDING_UI: Record<Grounding, IndicatorUi> = {
 export const FLAG_UI: Record<QaFlag, IndicatorUi> = {
   missing_context: { word: "Missing context", glyph: "⋯", tone: "amber", hint: "The facts check out, but the pages give a figure, period or caveat the answer leaves out." },
   staged_pushback: { word: "Staged pushback", glyph: "◔", tone: "amber", hint: "A generic criticism, from a host tied to the guest, that sets up a ready rebuttal." },
-  self_serving_pivot: { word: "Self-serving pivot", glyph: "↪", tone: "amber", hint: "The reframe steers toward the speaker's own product, company or holding." },
+  self_serving_pivot: { word: "Self-serving pivot", glyph: "↪", tone: "amber", hint: "The reframe steers toward something in the speaker's own profile." },
 };
 
 export const DISCLOSURE_UI = {
@@ -55,11 +55,20 @@ export const DISCLOSURE_UI = {
   undisclosed: { word: "Undisclosed", glyph: "◆", tone: "amber", hint: "The answer serves an interest of the speaker's that viewers weren't told about." },
 } satisfies Record<string, IndicatorUi>;
 
-export const SELF_REPORT_UI: IndicatorUi = { word: "Self-report", glyph: "◆", tone: "amber", hint: "The claim serves the speaker's own commercial or financial interest." };
+export const SELF_REPORT_UI: IndicatorUi = { word: "Self-serving", glyph: "◆", tone: "amber", hint: "The answer favours something in the speaker's own profile: a company, holding, sponsor, office or cause they are tied to." };
 
 /** What the Conflict and Stake chips say when nothing was found, so every tagged answer shows both results. */
-export const NO_CONFLICT_UI: IndicatorUi = { word: "None", glyph: "○", tone: "grey", hint: "No conflict of interest was found: the answer doesn't serve a commercial or financial interest of the speaker's." };
-export const NO_STAKE_UI: IndicatorUi = { word: "None", glyph: "○", tone: "grey", hint: "The answer doesn't serve an interest of the speaker's, so there was nothing to disclose." };
+export const NO_CONFLICT_UI: IndicatorUi = { word: "None", glyph: "○", tone: "grey", hint: "The answer was compared with the speaker's whole profile and doesn't favour anything in it." };
+export const NO_STAKE_UI: IndicatorUi = { word: "None", glyph: "○", tone: "grey", hint: "The answer was compared with the speaker's whole profile and ties to nothing in it." };
+export const NO_PROFILE_UI: IndicatorUi = { word: "No profile", glyph: "?", tone: "grey", hint: "No profile was found for the speaker, so there was nothing to compare the answer with." };
+
+/** The Stake chip names the kind of profile item the answer ties to; the item itself, its page and disclosure are in the hint and the detail panel. */
+export const STAKE_KIND_WORD: Record<string, string> = {
+  commercial: "Commercial", financial: "Financial", ideological: "Ideological", reputational: "Reputational", academic: "Institutional",
+  business: "Business", financial_interest: "Financial", sponsor: "Sponsor", ownership: "Ownership", political: "Political",
+  role: "Role", affiliations: "Affiliation", sponsor_aligned: "Sponsor", invested_peer: "Invested peer", audience_captured: "Audience",
+};
+export const TOUCHES_UI: IndicatorUi = { word: "Touches stake", glyph: "◇", tone: "amber", hint: "The answer is about something in the speaker's profile, but doesn't clearly help or hurt it." };
 
 export const INCENTIVE_UI: Record<IncentiveTag, IndicatorUi> = {
   commercial: { word: "Commercial", glyph: "$", tone: "amber", hint: "Sells a book, product, course, service or show of their own." },

@@ -41,6 +41,9 @@ export interface QaTags {
   match?: { label: "high" | "medium" | "low"; p: number };
   flags?: QaFlag[];
   conflict?: { kind: "self_report" | "self_serving_pivot"; disclosure?: "disclosed" | "undisclosed" };
+  /** The answer set against the speaker's profile: the profile item it benefits ("benefits", also a conflict) or concerns ("touches"). */
+  stake?: { link: "benefits" | "touches"; p: number; item: { kind: string; text: string; url?: string; site?: string }; disclosure?: "disclosed" | "undisclosed" };
+  profile_checked?: number; // how many items of the speaker's profile the answer was compared with
   chain?: string;
 }
 /** How an answer's sources were researched: its checkable points and every page the searches returned. */

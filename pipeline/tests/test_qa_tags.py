@@ -43,7 +43,7 @@ def run(monkeypatch, answers, ctx=CTX, pages=(page(),), points=True, fail=(), bo
     """Runs tag_answer with `answers` as every question's answer. Returns (tags, research, calls, ec)."""
     calls = []
 
-    async def classify(names, payload):
+    async def classify(names, payload, extra=None):
         calls.append((tuple(names), payload))
         if boom:
             raise boom
@@ -76,7 +76,7 @@ BASE = {"answer_type": ch("evasive", qa_tags.ATYPES), "claim_type": ch("objectiv
 
 def test_a_researched_answer_costs_two_calls_and_gets_the_chain(monkeypatch):
     tags, r, calls, _ = run(monkeypatch, BASE)
-    assert [c[0] for c in calls] == [("answer_type", "claim_type"), ("grounding", "match")]
+    assert [c[0] for c in calls] == [("answer_type", "claim_type", "stake_link", "stake_item", "self_serving_pivot", "disclosed"), ("grounding", "match")]
     assert tags["answer"]["type"] == "evasive" and tags["claim"]["type"] == "objective_fact" and tags["grounding"]["label"] == "grounded"
     assert tags["chain"] == "Evasive A → Objective fact → Grounded" and tags["grounding"]["evidence"] == "limited" and r.match == "high"
 
@@ -98,28 +98,58 @@ def test_nothing_checkable_makes_a_prediction_exempt_and_a_fact_plausible(monkey
     assert tags["grounding"]["label"] == "plausible"  # the speaker's own history: no public record
 
 
-def test_the_answer_call_never_carries_conflict_questions_for_a_speaker_with_no_stake(monkeypatch):
-    _, _, calls, _ = run(monkeypatch, BASE)
-    assert "speaker_interests" not in calls[0][1] and "pages" not in calls[0][1]
+def test_every_answer_is_set_against_the_speakers_profile_whatever_their_tags(monkeypatch):
+    tags, _, calls, _ = run(monkeypatch, BASE)  # CTX has a profile (a business) but no incentive tag at all
+    assert calls[0][0] == ("answer_type", "claim_type", "stake_link", "stake_item", "self_serving_pivot", "disclosed")
+    assert "Aeos" in str(calls[0][1]["speaker_profile"]) and "pages" not in calls[0][1]
     assert calls[0][1]["question_as_asked"] == CTX["question_spoken"] and calls[0][1]["spoken_words"].startswith("Wukong")
+    assert tags["profile_checked"] >= 1 and "stake" not in tags and "conflict" not in tags  # compared, nothing found
 
 
-STAKE = {**CTX, "speaker_incentives": {"commercial": {"reason": "Founder of Aeos"}}}
+def test_a_speaker_with_no_profile_has_nothing_to_compare(monkeypatch):
+    bare = {k: v for k, v in CTX.items() if k != "speaker"}
+    tags, _, calls, _ = run(monkeypatch, BASE, ctx=bare)
+    assert calls[0][0] == ("answer_type", "claim_type") and "profile_checked" not in tags
+
+
+STAKE = {**CTX, "speaker_incentives": {"commercial": {"reason": "Founder of Aeos", "url": "https://a.example/p", "site": "a.example"},
+                                       "access_preserving": {"reason": "internal only"}}}
+LINK = {"stake_link": ch("benefits", qa_tags.STAKE_LINKS), "stake_item": ch("1", ["1", "2", "3"])}
+
+
+def test_internal_tags_are_never_offered_as_a_stake():
+    items = qa_tags.stake_items(STAKE)
+    assert items[0]["kind"] == "commercial" and "internal" not in str(items)
 
 
 def test_rule_1_a_self_serving_claim_with_no_independent_page_is_ungrounded(monkeypatch):
-    ans = {**BASE, "answer_type": ch("narrative", qa_tags.ATYPES), "claim_type": ch("anchored_opinion", qa_tags.CTYPES),
-           "grounding": ch("plausible", qa_tags.GROUNDING), "self_serving": yes(), "disclosed": yes(0.8)}
+    ans = {**BASE, **LINK, "answer_type": ch("narrative", qa_tags.ATYPES), "claim_type": ch("anchored_opinion", qa_tags.CTYPES),
+           "grounding": ch("plausible", qa_tags.GROUNDING), "disclosed": yes(0.8)}
     tags, _, calls, _ = run(monkeypatch, ans, ctx=STAKE, pages=[page("aeos.example", "own_organisation")])
-    assert calls[0][0] == ("answer_type", "claim_type", "self_serving", "self_serving_pivot", "disclosed")
-    assert "Aeos" in str(calls[0][1]["speaker_interests"])
+    assert "Aeos" in str(calls[0][1]["speaker_profile"])
     assert tags["grounding"]["label"] == "ungrounded" and tags["grounding"]["was"] == "plausible"
     assert tags["conflict"] == {"kind": "self_report", "disclosure": "disclosed"}
+    assert tags["stake"]["link"] == "benefits" and tags["stake"]["item"] == {
+        "kind": "commercial", "text": "commercial: Founder of Aeos", "url": "https://a.example/p", "site": "a.example"}
+    assert tags["stake"]["disclosure"] == "disclosed"
     assert tags["chain"] == "Narrative A → Anchored opinion → Ungrounded (self-report, disclosed)"
 
 
+def test_a_touched_stake_is_shown_but_is_not_a_conflict(monkeypatch):
+    tags, _, _, _ = run(monkeypatch, {**BASE, **LINK, "stake_link": ch("touches", qa_tags.STAKE_LINKS), "disclosed": yes(0.2)}, ctx=STAKE)
+    assert tags["stake"]["link"] == "touches" and tags["stake"]["disclosure"] == "undisclosed"
+    assert "conflict" not in tags and tags["grounding"]["label"] == "grounded"
+
+
+def test_an_unsure_link_or_item_finds_no_stake(monkeypatch):
+    tags, _, _, _ = run(monkeypatch, {**BASE, **LINK, "stake_link": ch("benefits", qa_tags.STAKE_LINKS, 0.4)}, ctx=STAKE)
+    assert "stake" not in tags and "conflict" not in tags
+    tags, _, _, _ = run(monkeypatch, {**BASE, **LINK, "stake_item": ch("1", ["1", "2", "3"], 0.2)}, ctx=STAKE)
+    assert "stake" not in tags
+
+
 def test_rule_1_an_independent_page_keeps_a_grounded_self_serving_claim(monkeypatch):
-    tags, _, _, _ = run(monkeypatch, {**BASE, "self_serving": yes(), "disclosed": yes(0.2)}, ctx=STAKE,
+    tags, _, _, _ = run(monkeypatch, {**BASE, **LINK, "disclosed": yes(0.2)}, ctx=STAKE,
                         pages=[page("aeos.example", "own_organisation"), page("reuters.example")])
     assert tags["grounding"]["label"] == "grounded" and tags["conflict"]["disclosure"] == "undisclosed"
 
@@ -161,7 +191,7 @@ def test_the_evidence_rules_still_hold(monkeypatch):
 def test_a_failed_call_is_left_out_and_routes_to_research(monkeypatch):
     tags, r, _, ec = run(monkeypatch, BASE, fail=("answer_type",))
     assert r is not None and "answer" not in tags and "claim" not in tags and tags["grounding"]["label"] == "grounded"
-    assert tags["failed"] == ["answer_type", "claim_type"] and any(e.rule == "tag_failed" for e in ec.events)
+    assert tags["failed"] == sorted(["answer_type", "claim_type", "stake_link", "stake_item", "self_serving_pivot", "disclosed"]) and any(e.rule == "tag_failed" for e in ec.events)
 
 
 def test_a_budget_error_is_never_swallowed(monkeypatch):
@@ -179,7 +209,7 @@ def test_a_research_failure_reaches_the_caller_as_itself(monkeypatch):
         raise research.ResearchUnavailable("every search failed")
 
     monkeypatch.setattr(research, "research_answer", down)
-    monkeypatch.setattr(qa_tags, "_classify", lambda names, payload: _answer_with(names))
+    monkeypatch.setattr(qa_tags, "_classify", lambda names, payload, extra=None: _answer_with(names))
     ec = EpisodeContext(episode_id="e", video_id="v", settings=Settings(), policy={}, store=NS(), budget=Budget(cap_usd=3.0), plugins_factory=lambda: [])
 
     async def go():

@@ -5,9 +5,11 @@ The question type is not here: every question of a video is classified in one ba
 since that classifier must never see the answer. Here, one run per answer:
 
   START ─> answer_node      ONE classifier call: Choice answer_type (direct / narrative / structured / pivot / evasive),
-                            Choice claim_type (objective_fact / anchored_opinion / pure_opinion / prediction), and only when they can
-                            matter: Binary self_serving, self_serving_pivot, disclosed (speaker tagged commercial or financial) and
-                            staged_pushback (host tagged invested_peer, sponsor_aligned or access_preserving).
+                            Choice claim_type (objective_fact / anchored_opinion / pure_opinion / prediction), and, for EVERY answer
+                            whose speaker has a profile (no tag filter): the answer set against the speaker's whole profile, as numbered
+                            items (incentive tags with their reasons, roles, businesses, holdings, sponsors, offices, politics):
+                            Choice stake_link (benefits / touches / none), Choice stake_item (which numbered item), Binary
+                            self_serving_pivot and disclosed; plus staged_pushback when the host is tagged invested_peer or sponsor_aligned.
                             It routes on claim_type:
         pure_opinion ─> exempt_node     no planner, no search (an unsure pure opinion is researched after all)
         anything else ─> research_node  plan + searches (agents/research.py); nothing checkable -> no pages
@@ -17,8 +19,9 @@ So an answer costs 1 classifier call, or 2 when it is researched.
 
 Code then applies the rules (decide):
   - a Choice below SURE falls back to the cautious label; "contradicted" needs CONTRADICT_SURE; grounded / contradicted need a page.
-  - Rule 1, self-report: a self-serving claim that no independent page backs (agents/independence.py) is "ungrounded", conflict
-    "self_report". Rule 2, context: missing_context is a flag; the grounding stays. Rule 3, disclosure: "disclosed" / "undisclosed".
+  - Rule 1, self-report: an answer that benefits something in the speaker's profile (stake_link "benefits") and that no independent
+    page backs (agents/independence.py) is "ungrounded", conflict "self_report". The profile item it rests on is saved as `stake`
+    (also for "touches", which is not a conflict), with how many items were compared (`profile_checked`). Rule 2, context: missing_context is a flag; the grounding stays. Rule 3, disclosure: "disclosed" / "undisclosed".
   - a conditional answer only counts where it applies: self_serving_pivot only for a pivot, disclosure only for a self-serving
     answer; staged_pushback is kept as a flag and shown only when the question was challenging (the web joins the two).
   - nothing checkable: a prediction is exempt, anything else plausible (no public record).
@@ -55,7 +58,12 @@ CTYPES = ("objective_fact", "anchored_opinion", "pure_opinion", "prediction")
 GROUNDING = ("grounded", "plausible", "contradicted", "exempt")  # + "ungrounded", set only by the self-report rule
 MATCH = ("high", "medium", "low")
 
-STAKE_TAGS = frozenset({"commercial", "financial"})       # self_serving, self_serving_pivot
+STAKE_LINKS = ("benefits", "touches", "none")
+STAKE_SURE = 0.5          # the link (benefits / touches) needs this much confidence
+ITEM_SURE = 0.25          # the item is the closest of a dozen or so, so its probability is spread thin: a lower floor
+HIDDEN_TAGS = frozenset({"access_preserving"})  # incentive tags that are never shown, so never quoted as a stake
+STAKE_KINDS = frozenset({"business", "financial_interest", "sponsor", "ownership", "political", "role", "affiliations"})
+MAX_STAKE_ITEMS = 25
 CONTEXT_TAGS = frozenset({"ideological", "financial"})    # missing_context
 SOFT_HOST_TAGS = frozenset({"invested_peer", "sponsor_aligned", "access_preserving"})  # staged_pushback
 
@@ -95,23 +103,27 @@ QUESTIONS: dict[str, Any] = {
             "pure_opinion": "Personal taste, feeling, belief or advice with no factual premise anyone could check.",
             "prediction": "A forward-looking guess about the future.",
         }),
-    "self_serving": Binary(
-        instructions=("Does the answer's main claim directly benefit the speaker's own commercial or financial interest listed in "
-                      "speaker_interests: results or metrics of their own product, company, fund or holding, a rival's weakness, or "
-                      "demand for what they sell?"),
-        criteria="The claim is about, or plainly promotes, something in speaker_interests. Mere expertise in the field is not enough."),
+    "stake_link": Choice(
+        instructions=("Set the answer's main point against speaker_profile.items: the speaker's own roles, businesses, investments, "
+                      "sponsors, offices and political ties. Judge what the point does for them, not whether they are an expert."),
+        criteria={
+            "benefits": ("The point favours, protects or promotes something listed: it backs a company, holding, sector, product, sponsor, "
+                         "office, party or policy the speaker is tied to, or weakens a rival of it."),
+            "touches": "The point is about a company, sector, policy or topic that an item lists, but does not clearly help or hurt it.",
+            "none": "Nothing listed bears on the point. Expertise in the field alone is not a tie.",
+        }),
     "staged_pushback": Binary(
         instructions=("If the host's question is a challenge (a criticism, counter-view or pushback): does it read as a tee-up rather than a test: the criticism is named in "
                       "general terms (\"critics say...\") and the guest rebuts it with a ready, promotional answer, with no specific "
                       "figure or evidence demanded? Use the host_interests to see how the host is tied to the guest."),
         criteria="The pushback is generic and invites a rehearsed rebuttal the host does not press."),
     "self_serving_pivot": Binary(
-        instructions="If the speaker reframed or sidestepped the question before answering: does the reframe steer toward their own product, company or holding in speaker_interests?",
-        criteria="The new framing leads to something the speaker sells, runs or holds."),
+        instructions="If the speaker reframed or sidestepped the question before answering: does the reframe steer toward something in speaker_profile.items?",
+        criteria="The new framing leads to something the speaker sells, runs, holds, backs or serves."),
     "disclosed": Binary(
-        instructions=("If the answer serves an interest of the speaker's (speaker_interests): was that interest made known to the audience: "
+        instructions=("If the answer ties to something in speaker_profile.items: was that tie made known to the audience: "
                       "stated in the answer or the spoken words, said when the speaker was introduced, or in description_notes?"),
-        criteria="The interest itself (the company, holding, product or sponsor) is stated or plainly known from what viewers are told."),
+        criteria="The tie itself (the company, holding, product, office or sponsor) is stated or plainly known from what viewers are told."),
     "grounding": Choice(
         instructions=("Is the answer backed by evidence? Judge the answer's main points against the pages listed, all treated alike: "
                       "don't favour or discount a page for the kind of site it is. Old pages say little about a present-day point. For an "
@@ -135,7 +147,7 @@ QUESTIONS: dict[str, Any] = {
         criteria="A page states such a figure, period or caveat, and it changes the answer's meaning; a mere extra detail is not enough."),
 }
 
-LEVELS = {"question_type": "LOW", "answer_type": "LOW", "claim_type": "LOW", "self_serving": "LOW", "staged_pushback": "LOW",
+LEVELS = {"question_type": "LOW", "answer_type": "LOW", "claim_type": "LOW", "stake_link": "LOW", "stake_item": "LOW", "staged_pushback": "LOW",
           "self_serving_pivot": "LOW", "disclosed": "LOW", "grounding": "MEDIUM", "match": "LOW", "missing_context": "MEDIUM"}
 
 WORDS = {
@@ -174,6 +186,36 @@ def _interests(person: dict[str, Any], tags: dict[str, Any]) -> dict[str, Any]:
             "incentive_tags": sorted(tags) or ["none found"], "items": items[:20] or "no profile found"}
 
 
+def stake_items(ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """The speaker's whole profile as numbered items for the stake comparison: each shown incentive tag with its reason and page,
+    then roles, affiliations, businesses, holdings, sponsors, ownership and politics. No filter: whatever the profile holds."""
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(kind: str, text: str, url: str = "", site: str = "") -> None:
+        text = " ".join(str(text or "").split())
+        key = text.lower()
+        if text and key not in seen and len(items) < MAX_STAKE_ITEMS:
+            seen.add(key)
+            items.append({"n": str(len(items) + 1), "kind": kind, "text": _clean(text, 300), "url": url or "", "site": site or ""})
+
+    for tag, inc in (ctx.get("speaker_incentives") or {}).items():
+        if tag in HIDDEN_TAGS or not isinstance(inc, dict):
+            continue
+        add(tag, f"{tag.replace('_', ' ')}: {inc.get('reason') or ''}", inc.get("url", ""), inc.get("site", ""))
+    for it in numbered_profile(ctx.get("speaker") or {}, ("role", "affiliations")):
+        if it["kind"] in STAKE_KINDS:
+            add(it["kind"], it["text"], it.get("url", ""), it.get("site", ""))
+    return items
+
+
+def stake_item_question(items: list[dict[str, Any]]) -> Choice:
+    """Which numbered profile item the answer rests on: one Choice with an option per item (built per answer)."""
+    criteria = {i["n"]: i["text"][:200] for i in items}  # no "none": stake_link has already said there is a tie
+    return Choice(instructions=("Which one numbered item of speaker_profile.items does the answer's main point most directly favour or "
+                                "concern? Pick the closest, even when none is exact."), criteria=criteria)
+
+
 def _pages(research: Any) -> Any:
     pages = [{"site": pg["site"], "title": _clean(pg.get("title"), 160), "date": pg.get("date") or "unknown",
               "text": _clean(pg.get("text"), PAGE_TEXT_CHARS)} for pg in research.all_pages[:MAX_PAGES_SHOWN]]
@@ -199,14 +241,15 @@ class Job:
     force: bool
     answers: dict[str, Any] = field(default_factory=dict)
     failed: list[str] = field(default_factory=list)
+    items: list = field(default_factory=list)  # the speaker's profile items compared with the answer (stake_items)
     route: str = ""             # "exempt" (not researched), "no_points" (researched, nothing checkable) or "researched"
     research: Any = None
 
-    async def ask(self, names: list[str], payload: dict[str, Any]) -> None:
+    async def ask(self, names: list[str], payload: dict[str, Any], extra: Optional[dict[str, Any]] = None) -> None:
         """One classifier call answering `names` about `payload`. A failure leaves them out; a budget error is raised."""
         ec = get_context()
         try:
-            res = await _classify(names, payload)
+            res = await _classify(names, payload, extra)
         except Exception as e:
             if is_budget_error(e):
                 raise
@@ -217,31 +260,34 @@ class Job:
         self.answers.update({n: res.answers[n] for n in names if n in res.answers})
 
 
-async def _classify(names: list[str], payload: Any) -> ClassifierResponse:
-    """One classifier call over several questions (they share the input). A seam for tests."""
+async def _classify(names: list[str], payload: Any, extra: Optional[dict[str, Any]] = None) -> ClassifierResponse:
+    """One classifier call over several questions (they share the input); `extra` holds questions built for this answer. A seam for tests."""
     from .llm_agents import tag_classifier
 
     level = "MEDIUM" if any(LEVELS[n] == "MEDIUM" for n in names) else "LOW"
-    return await tag_classifier(get_context().settings, level).classify(input=payload, questions={n: QUESTIONS[n] for n in names})
+    return await tag_classifier(get_context().settings, level).classify(input=payload, questions={n: (extra or {}).get(n) or QUESTIONS[n] for n in names})
 
 
 def build_workflow(job: Job) -> Workflow:
     ctx = job.ctx
     q, a = _question(ctx), _answer(ctx)
     sp_tags, h_tags = speaker_tags(ctx), host_tags(ctx)
-    speaker = _interests(ctx.get("speaker") or {}, sp_tags)
+    job.items = stake_items(ctx)
 
     async def answer_node() -> Event:
         names = ["answer_type", "claim_type"]
         payload: dict[str, Any] = {**q, **a}
-        if sp_tags & STAKE_TAGS:
-            names += ["self_serving", "self_serving_pivot", "disclosed"]
-            payload["speaker_interests"] = speaker
+        extra: dict[str, Any] = {}
+        if job.items:  # every answer is set against the speaker's profile; no tag decides whether to ask
+            names += ["stake_link", "stake_item", "self_serving_pivot", "disclosed"]
+            extra["stake_item"] = stake_item_question(job.items)
+            payload["speaker_profile"] = {"name": (ctx.get("speaker") or {}).get("name") or "the speaker",
+                                          "items": [{"n": i["n"], "kind": i["kind"], "text": i["text"]} for i in job.items]}
             payload["description_notes"] = ctx.get("description_notes") or "none"
         if h_tags & SOFT_HOST_TAGS:
             names.append("staged_pushback")
             payload["host_interests"] = _interests(ctx.get("host") or {}, h_tags)
-        await job.ask(names, payload)
+        await job.ask(names, payload, extra)
         claim = job.answers.get("claim_type")
         return Event(output="answered", route=getattr(claim, "choice", None) or "objective_fact")  # a failed call: research (cautious)
 
@@ -317,10 +363,23 @@ def _p(answer: Any) -> float:
     return round(float(getattr(answer, "probability", 0.0)), 2)
 
 
+def _stake(job: Job) -> Optional[dict[str, Any]]:
+    """The profile item the answer benefits or touches, when the classifiers are sure of both the link and the item."""
+    link, item = job.answers.get("stake_link"), job.answers.get("stake_item")
+    if link is None or item is None or getattr(link, "choice", None) not in ("benefits", "touches"):
+        return None
+    p_link = float(link.probabilities.get(link.choice, 0.0))
+    picked = next((i for i in job.items if i["n"] == getattr(item, "choice", None)), None)
+    p_item = float(item.probabilities.get(item.choice, 0.0)) if picked else 0.0
+    if not picked or p_link < STAKE_SURE or p_item < ITEM_SURE:
+        return None
+    return {"link": link.choice, "p": round(p_link, 2), "item": {k: picked[k] for k in ("kind", "text", "url", "site") if picked.get(k)}}
+
+
 def decide(job: Job) -> dict[str, Any]:
     """The classifiers' answers turned into claims.qa_tags, with the evidence and skepticism rules applied."""
     ans, ctx, r = job.answers, job.ctx, job.research
-    tags: dict[str, Any] = {"version": 3}
+    tags: dict[str, Any] = {"version": 4}
     at = _choice(ans.get("answer_type"), ATYPES, "unclear")
     if at:
         tags["answer"] = at
@@ -347,12 +406,20 @@ def decide(job: Job) -> dict[str, Any]:
 
     flags: list[str] = []
     conflict: dict[str, Any] = {}
-    self_serving = _yes(ans.get("self_serving"))
+    stake = _stake(job)
+    self_serving = bool(stake and stake["link"] == "benefits")
     pivot = _yes(ans.get("self_serving_pivot")) and (at or {}).get("type") == "pivot"
+    disclosure = ("disclosed" if _yes(ans["disclosed"]) else "undisclosed") if "disclosed" in ans else None
     if self_serving or pivot:
         conflict["kind"] = "self_report" if self_serving else "self_serving_pivot"
-        if "disclosed" in ans:
-            conflict["disclosure"] = "disclosed" if _yes(ans["disclosed"]) else "undisclosed"
+        if disclosure:
+            conflict["disclosure"] = disclosure
+    if stake:
+        if disclosure:
+            stake["disclosure"] = disclosure
+        tags["stake"] = stake
+    if job.items:
+        tags["profile_checked"] = len(job.items)
     if grounding and self_serving:
         independent = any(pg.get("independence") in (None, "independent") for pg in pages)
         if grounding["label"] == "plausible" or (grounding["label"] == "grounded" and not independent):

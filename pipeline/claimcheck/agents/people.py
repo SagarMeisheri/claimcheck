@@ -1,13 +1,16 @@
-"""Who appears in a video, found before extraction, then profiled and tagged (pipeline stage PeopleProfiler).
+"""The show, and who appears in a video, found before extraction, then profiled and tagged: ONE pipeline stage (PeopleProfiler).
 
+  0. the show's profile (agents/creators.resolve_creator): curated, cached or from the web. It names the hosts, so it comes first.
   1. the show's hosts (the creator profile) and the people the description lists (description.parse_people): code only
   2. one model call (prompts.PEOPLE, schemas.PeopleOut) over the title and the whole description, link lines included: the
      description is where creators introduce their guests and link what they sell. Only when that names no guest: one web search
      on the title and channel, and the call again with its excerpts. A name the model returns is kept only if it appears in that
      text: nothing is guessed. What the description promotes for a person (their book, company, course) is kept with them.
-  3. each person's profile from the speakers cache, else the web, steered by how the description introduces them
-     (agents/speakers.prepare_people), and their incentive tags from the profile plus, for this video, what its description
-     promotes for them (agents/profile_tags.tag_rows)
+  3. each person (hosts and guests alike) goes through the same profile in parallel, all at once: from the speakers cache, else the
+     web (the same searches and the same profile writer, a host's adding sponsors), steered by how the description introduces them
+     (agents/speakers.prepare_people), then their incentive tags from the profile plus, for this video, what its description
+     promotes for them (agents/profile_tags.tag_rows). Every profile has the same fields (About, Business, Politics, Reputation,
+     Stakes on screen).
 
 The people found join ec.listed_people, so the extractor names speakers from them (stages.speaker_label), and their rows are saved to
 episode_speakers straight away: the People tab fills before the first answer. Never fails the video.
@@ -145,13 +148,14 @@ def people_line(rows: list[dict[str, Any]]) -> str:
     for r in rows:
         tags = ", ".join(t.replace("_", " ") for t in (r.get("incentives") or {}))
         parts.append(f"{r['label']} ({r.get('role') or 'guest'})" + (f": {tags}" if tags else "") + ("" if r.get("speaker_id") else ", no profile"))
-    return " · ".join(parts)[:160]
+    return " · ".join(parts)[:600]
 
 
 class PeopleProfiler(BaseAgent):
     """Pipeline stage before the extractor: who appears, their profiles and their incentive tags."""
 
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
+        from .creators import resolve_creator
         from .speakers import db_row, prepare_people
 
         ec = get_context()
@@ -159,7 +163,10 @@ class PeopleProfiler(BaseAgent):
         meta = st.get("metadata") or {}
         rows: list[dict[str, Any]] = []
         delta: dict[str, Any] = {}
+        show = ""
         if not st.get("gate", {}).get("skip"):
+            creator, _ = await resolve_creator(meta)  # the show first: it names the hosts
+            show = (creator or {}).get("podcast") or ""
             try:
                 people = await find_people(meta)
                 delta["people_context"] = extractor_people(ec.listed_people, people)
@@ -173,5 +180,7 @@ class PeopleProfiler(BaseAgent):
                 if is_budget_error(e):
                     raise
                 log.exception("people profiles failed for %s", ec.episode_id)
+        delta["creator_context"] = extraction_context(ec.creator)
+        line = people_line(rows) if rows else "Nobody named before the video is read"
         yield Event(author=self.name, invocation_id=ctx.invocation_id, actions=EventActions(state_delta=delta),
-                    content=types.Content(role="model", parts=[types.Part(text=people_line(rows) if rows else "Nobody named before the video is read")]))
+                    content=types.Content(role="model", parts=[types.Part(text=f"{show}: {line}" if show else line)]))
