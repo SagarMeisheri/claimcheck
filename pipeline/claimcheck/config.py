@@ -92,7 +92,7 @@ class Settings:
     # skip (background, self-description, vague), related (one search), data or contested (one more search for
     # different figures or other perspectives, aimed with the speaker's and creator's profiles).
     # Researching an answer (agents/research.py): a planner turns the answer into checkable points with new queries (not the
-    # answer's own words), one web request with at most research_max_searches queries finds the pages, and every page it returns is kept. Only the search excerpts are
+    # answer's own words), one web request carrying at most research_max_searches queries finds the pages (10 in all), and every page it returns is kept. Only the search excerpts are
     # used: no page is fetched. If it fails, the lookup falls back to the plain search and summary.
     research_max_points: int = int(_env("CLAIMCHECK_RESEARCH_MAX_POINTS", "2"))
     research_max_searches: int = int(_env("CLAIMCHECK_RESEARCH_MAX_SEARCHES", "3"))  # queries per answer, sent in one web request
@@ -135,7 +135,7 @@ class Settings:
     @property
     def lookup_cost_estimate_usd(self) -> float:
         """The most one lookup can cost (the planner, its searches, the answer tags), for planning how many fit in a video's budget."""
-        return self.search_cost_usd * max(1, self.research_max_searches) + self.research_plan_cost_estimate_usd + (self.tag_cost_estimate_usd if self.tag_answers else 0.0)
+        return self.search_cost_usd + self.research_plan_cost_estimate_usd + (self.tag_cost_estimate_usd if self.tag_answers else 0.0)
 
 
 def get_settings() -> Settings:

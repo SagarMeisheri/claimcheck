@@ -116,8 +116,9 @@ def _said_by(ctx: dict[str, Any]) -> str:
 
 async def search_sources(claim_text: str, settings: Any, policy: dict[str, Any], *, objective: Optional[str] = None,
                          extra_queries: tuple[str, ...] | list[str] = (), location: Optional[str] = None,
-                         exclude_urls: frozenset[str] | set[str] = frozenset()) -> list[Source]:
-    """One search. Raises on API errors or timeout (the caller marks the claim 'failed' so it can be retried)."""
+                         exclude_urls: frozenset[str] | set[str] = frozenset(), spare: int = 3) -> list[Source]:
+    """One search request (the claim's words plus any extra queries). `spare` extra results are asked for to cover duplicates and
+    exclusions; a caller that wants exactly its limit, for the price of one request, passes 0. Raises on API errors or timeout (the caller marks the claim 'failed' so it can be retried)."""
     query = claim_text.strip()[:300]
     client = _client(settings)
     queries = [query] + [q.strip()[:300] for q in extra_queries if q and q.strip() and q.strip() != query]
@@ -127,7 +128,7 @@ async def search_sources(claim_text: str, settings: Any, policy: dict[str, Any],
             search_queries=queries,
             objective=objective or f"Find reports, data, official documents or news coverage about this statement: {query}",
             mode=settings.sources_search_mode,
-            advanced_settings={"max_results": settings.sources_per_claim + 3 + len(exclude_urls),
+            advanced_settings={"max_results": settings.sources_per_claim + spare + len(exclude_urls),
                                "location": location or getattr(settings, "default_search_location", "in"),
                                "source_policy": {"exclude_domains": blocklist(policy)},
                                "excerpt_settings": {"max_chars_per_result": 1500}},

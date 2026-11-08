@@ -943,6 +943,7 @@ button.ip-tag:focus-visible { outline: 2px solid var(--focus); outline-offset: 2
 .sr-n { font-size: .7rem; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
 .sr-term { font-family: var(--font-display); font-weight: 700; font-size: 1.02rem; overflow-wrap: anywhere; }
 .sr-count { font-size: .8rem; color: var(--ink-soft); }
+.sr-found { margin: .35rem 0 -.1rem; padding-top: .6rem; border-top: 1px dashed var(--rule); font-size: .7rem; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
 .sr-items { list-style: none; margin: 0; padding: 0; display: grid; gap: .7rem; }
 .sr-items .source-site { display: flex; flex-wrap: wrap; gap: .25rem .5rem; align-items: baseline; }
 
@@ -1015,7 +1016,7 @@ button.ip-tag:focus-visible { outline: 2px solid var(--focus); outline-offset: 2
 .sr-search { gap: 0.3rem; padding-top: 0.5rem; }
 .sr-items { gap: 0.3rem; padding-left: 1.2rem; list-style: decimal; }
 .sr-items li { line-height: 1.35; }
-.sr-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; }
+.sr-link { display: block; background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; }
 .sr-link:hover { text-decoration-color: currentColor; }
 .sr-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .sr-site { display: block; font-size: 0.78rem; }

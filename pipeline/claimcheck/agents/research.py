@@ -7,19 +7,18 @@ up "steel frame"), repeats of the episode itself, and the speaker's own organisa
           sentence) and challenge queries (other figures, periods, definitions, positions). When the issue itself is disputed it
           also names the positions people hold. An answer with nothing checkable gets no points: it is skipped (research_answer
           returns None), unless a viewer pressed the button, when its own wording is searched.
-  search  at most settings.research_max_searches queries (default 3), each its own web search, all at the same time: the first query
-          of each point, then the first challenge query, then the positions. The excerpts the searches return are the only page text
-          used: no page is fetched.
+  search  at most settings.research_max_searches queries (default 3): the first query of each point, then the first challenge
+          query, then the positions. They go to Parallel in ONE request (one base fee, MAX_RESULTS pages in all, which the base fee
+          covers), so the pages are not split by query. The excerpts the search returns are the only page text used: no page is fetched.
   keep    every page returned is kept, in the order it came back, all treated alike. Pages that are the episode's own or the speaker's
           own organisation's carry a label (independence.py) for the reader, which changes nothing else.
 
 The grounding classifier (agents/qa_tags.py) then reads every page's excerpt together with the Q&A and the profiles. Nothing here says
-the speaker is right or wrong. If every search fails it raises ResearchUnavailable and the answer is marked failed (it can be retried).
+the speaker is right or wrong. If the search fails it raises ResearchUnavailable and the answer is marked failed (it can be retried).
 """
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import logging
 import uuid
@@ -39,7 +38,7 @@ from .independence import split_sources
 log = logging.getLogger("claimcheck")
 APP = "claimcheck_research"
 MAX_QUERY_CHARS = 160
-MAX_RESULTS = 20  # results kept per search
+MAX_RESULTS = 10  # pages in the one request; Parallel's base fee covers 10, each extra result costs more
 EXCERPT_CHARS = 1200  # of each result's excerpt, which is all the page text the tags get
 
 
@@ -60,7 +59,7 @@ class Research:
     dropped: dict[str, int] = field(default_factory=dict)
     pages: list[dict[str, str]] = field(default_factory=list)  # every page the searches returned
     all_pages: list[dict[str, Any]] = field(default_factory=list, repr=False)  # every page with its search excerpt, for the classifier (not stored)
-    searches: list[dict[str, Any]] = field(default_factory=list)  # per query: {"query", "urls" (in the order that search returned them), "failed"}
+    searches: list[dict[str, Any]] = field(default_factory=list)  # one entry for the single request: {"query" (all queries joined), "queries" (each one), "urls" (in the order returned), "failed"}
 
     def stored(self) -> dict[str, Any]:
         """What is saved in claims.research and shown in the detail panel."""
@@ -104,18 +103,6 @@ def clean_plan(plan: ResearchPlan, answer: str, max_points: int) -> ResearchPlan
             if label and q:
                 positions.append(Position(label=label, query=q[0]))
     return ResearchPlan(points=points, disputed=plan.disputed and len(positions) >= 2, positions=positions if len(positions) >= 2 else [])
-
-
-def interleave(groups: list[list[Source]]) -> list[Source]:
-    """Every page of every search, one URL once, taking each search's results in turn so no query's results come last."""
-    out: list[Source] = []
-    seen: set[str] = set()
-    for rank in range(max((len(g) for g in groups), default=0)):
-        for g in groups:
-            if rank < len(g) and g[rank].url not in seen:
-                seen.add(g[rank].url)
-                out.append(g[rank])
-    return out
 
 
 def own_words_plan(answer: str) -> ResearchPlan:
@@ -186,7 +173,7 @@ async def _search(queries: list[str], objective: str, location: Optional[str]) -
     ec = get_context()
     _spend(ec.settings.search_cost_usd)
     s = dataclasses.replace(ec.settings, sources_per_claim=MAX_RESULTS, excerpt_chars=EXCERPT_CHARS)  # keep what Parallel returns
-    return await search_sources(queries[0], s, ec.policy, objective=objective, extra_queries=queries[1:], location=location)
+    return await search_sources(queries[0], s, ec.policy, objective=objective, extra_queries=queries[1:], location=location, spare=0)
 
 
 def _objective(points: list[str], ctx: dict[str, Any]) -> str:
@@ -200,7 +187,7 @@ def _objective(points: list[str], ctx: dict[str, Any]) -> str:
 
 async def research_answer(ctx: dict[str, Any], location: Optional[str], force: bool = False) -> Optional[Research]:
     """Researches one answer (ctx is the lookup context: statement, question, speaker, creator, video). Returns None when the planner
-    finds nothing checkable (unless `force`). Raises ResearchUnavailable when every search failed; BudgetExceeded is not swallowed."""
+    finds nothing checkable (unless `force`). Raises ResearchUnavailable when the search failed; BudgetExceeded is not swallowed."""
     ec = get_context()
     s, policy = ec.settings, ec.policy
     answer = ctx["statement"]
@@ -216,19 +203,15 @@ async def research_answer(ctx: dict[str, Any], location: Optional[str], force: b
     objective = _objective([p.text for p in points], ctx)
     if plan.positions:
         objective += " Positions people hold: " + "; ".join(p.label for p in plan.positions) + "."
-    results = await asyncio.gather(*(_search([q], objective[:2000], location) for q in queries), return_exceptions=True)  # one search per query
-    for r in results:
-        if isinstance(r, BudgetExceeded):
-            raise r
-    for r in results:
-        if isinstance(r, Exception):
-            log.warning("research search failed: %s: %s", type(r).__name__, r)
-    lists = [r for r in results if not isinstance(r, Exception)]
-    if not lists:
-        raise ResearchUnavailable("every search failed")
-    sources = interleave([split_sources(lst, ctx, policy)[0] for lst in lists])  # nothing is removed; each source gets a label
-    searches = [{"query": q, "urls": [] if isinstance(r, Exception) else [x.url for x in r], "failed": isinstance(r, Exception)}
-                for q, r in zip(queries, results)]  # what each search returned, in its own order
+    try:
+        found = await _search(queries, objective[:2000], location)  # one request for all the queries
+    except BudgetExceeded:
+        raise
+    except Exception as e:
+        log.warning("research search failed: %s: %s", type(e).__name__, e)
+        raise ResearchUnavailable("the search failed") from e
+    sources = split_sources(found, ctx, policy)[0]  # nothing is removed; each source gets a label
+    searches = [{"query": " · ".join(queries), "queries": queries, "urls": [x.url for x in sources], "failed": False}]  # the pages come back as one list
 
     related = [x.model_copy(update={"kind": "related", "rank": i}) for i, x in enumerate(sources)]
     pages = [{"url": x.url, "site": domain_of(x.url), "title": x.title or domain_of(x.url), "independence": x.independence} for x in sources]
