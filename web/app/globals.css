@@ -68,6 +68,8 @@
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
+/* The video page packs a lot on one screen: all its text (and the rem-based spacing with it) is a tenth smaller. */
+html:has(.score) { font-size: 90%; }
 body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-body); font-size: 1.0625rem; line-height: 1.55; }
 a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
 a:hover { text-decoration-thickness: 2px; }
@@ -209,12 +211,14 @@ section + section { margin-top: 2.5rem; }
   .app-body:has(> main > .score) { height: 100vh; min-height: 0; overflow: hidden; }
   .app-body:has(> main > .score) > main { padding: 0; min-height: 0; }
   .app-body:has(> main > .score) > footer { display: none; } /* the video page has its own "How this video was analysed" */
-  .score { height: 100vh; margin: 0 auto; padding: 1rem 1.25rem; gap: 2rem; grid-template-columns: minmax(0, 1fr) 27rem; grid-template-rows: minmax(0, 1fr); }
+  .score { height: 100vh; margin: 0 auto; padding: 1rem 1.25rem; gap: 2rem; grid-template-columns: min(calc(36vh * 16 / 9), 55%) minmax(27rem, 1fr); grid-template-rows: minmax(0, 1fr); }
+  /* The left column is exactly as wide as the 16:9 picture, so the text under it lines up with it and the statements get the rest. */
   .score-main, .score-side { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
   .score-main { display: block; padding-right: 0.4rem; margin-right: -0.4rem; }
   .score-side { margin: 0; padding-right: 0.4rem; margin-right: -0.4rem; padding-bottom: 2rem; }
   .score-main > :not(.player-dock) { margin-inline: 0; }
-  .player-frame { max-height: 50vh; }
+  /* The dark band is exactly as wide as the picture (16:9, about 36% of the window tall), so there are no bars at the sides. */
+  .player-frame { max-height: none; width: 100%; }
   .player-band { border-radius: 10px; overflow: hidden; }
   .track-holder { padding-inline: 0; }
 }
@@ -228,8 +232,9 @@ section + section { margin-top: 2.5rem; }
   .app-body:has(> main > .score) > footer { display: none; }
   .score { height: 100%; margin: 0 auto; grid-template-rows: auto minmax(0, 1fr) auto; }
   .player-dock { grid-row: 1; position: static; }
-  .player-frame { max-height: none; width: min(100%, calc(24vh * 16 / 9)); }  /* the whole picture, never cropped */
-  .track-holder { padding-block: 0 0.1rem; }
+  .player-frame { max-height: none; width: 100%; }  /* the whole picture, never cropped */
+  .player-dock { width: min(100%, calc(24vh * 16 / 9)); margin-inline: auto; }  /* as wide as the picture (no bars at the sides); the statement track under it matches */
+  .track-holder { padding: 0 0 0.1rem; }
   .score-side { grid-row: 2; margin-top: 0.5rem; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding-bottom: 1rem; }
   .score-info { grid-row: 3; margin-inline: 1rem; min-height: 0; max-height: 16vh; overflow-y: auto; overscroll-behavior: contain;
     scrollbar-width: thin; border-top: 1px solid var(--rule); padding-bottom: 0.75rem; }
@@ -487,13 +492,15 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .src-counter-none { margin: 0.35rem 0 0; font-size: 0.85rem; }
 
 /* ---------- Analysis steps (while a video is analysed) ---------- */
-.steps { list-style: none; margin: 0.7rem 0 0.2rem; padding: 0; display: grid; gap: 0.35rem; font-size: 0.92rem; }
-.step { display: flex; gap: 0.55rem; align-items: flex-start; color: var(--ink-soft); }
-.step-icon { flex: none; display: inline-grid; place-items: center; width: 1.15rem; height: 1.15rem; margin-top: 0.15rem; border-radius: 50%;
+.steps { list-style: none; margin: 0.6rem 0 0.2rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.3rem 0.4rem; font-size: 0.85rem; }
+.step { display: flex; gap: 0.4rem; align-items: center; color: var(--ink-soft); padding: 0.15rem 0.6rem 0.15rem 0.35rem;
+  border: 1px solid var(--rule); border-radius: 999px; line-height: 1.3; }
+.step-icon { flex: none; display: inline-grid; place-items: center; width: 1.05rem; height: 1.05rem; border-radius: 50%;
   border: 1.5px solid var(--rule); font-size: 0.7rem; line-height: 1; }
 .step-body { display: grid; min-width: 0; }
-.step-detail { font-size: 0.84rem; }
+.step-detail { display: none; } /* shown as a tooltip instead; the line above the bar already names the running step */
 .step.is-done { color: var(--ink); }
+.step.is-running { border-color: var(--ink-soft); }
 .step.is-done .step-icon { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .step.is-running { color: var(--ink); font-weight: 600; }
 .step.is-running .step-icon { border: 0; }
@@ -501,6 +508,15 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .step.is-skipped .step-icon { border-style: dashed; }
 .step.is-skipped .step-label { text-decoration: line-through; text-decoration-color: var(--rule); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* The finished steps, listed in the Steps tab under the video */
+.done-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; font-size: 0.93rem; }
+.done-step { display: flex; gap: 0.55rem; align-items: flex-start; }
+.done-step-icon { flex: none; display: inline-grid; place-items: center; width: 1.1rem; height: 1.1rem; margin-top: 0.12rem; border-radius: 50%;
+  background: var(--ink); color: var(--paper); font-size: 0.68rem; line-height: 1; }
+.done-step.is-skipped .done-step-icon { background: none; color: var(--ink-soft); border: 1.5px dashed var(--rule); }
+.done-step-body { display: grid; min-width: 0; }
+.done-step-detail { font-size: 0.84rem; }
 
 /* ---------- Video / Creator / Speakers tabs ---------- */
 .ptabs { margin-top: 1rem; }
@@ -522,7 +538,7 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .speaker-head { margin: 0 !important; }
 
 /* Home cards: step list and Statements / Creator / Speakers tabs */
-.cprogress.compact .steps { font-size: 0.85rem; gap: 0.25rem; margin-top: 0.55rem; }
+.cprogress.compact .steps { font-size: 0.78rem; gap: 0.25rem 0.3rem; margin-top: 0.5rem; }
 .cprogress.compact .step-icon { width: 1rem; height: 1rem; font-size: 0.62rem; }
 .vcard-about { margin-top: 0.5rem; min-width: 0; }
 .vcard-tabs { margin: 0 0 0.45rem; gap: 1rem; }
@@ -870,6 +886,32 @@ button.ind:hover { background: color-mix(in srgb, var(--tone) 20%, var(--paper-r
 .qa-src .ind-row { margin-bottom: .35rem; }
 .ind-detail { margin-top: 1rem; display: grid; gap: .8rem; }
 
+/* Interview profile tags: each question, answer and evidence type has its own colour (the bar segment and the tag match), and each tag is a filter. */
+.ip-tag { --tone: var(--m-low); }
+button.ip-tag[aria-pressed="true"] { background: var(--tone); border-color: var(--tone); }
+button.ip-tag[aria-pressed="true"] .ind-glyph, button.ip-tag[aria-pressed="true"] .ind-word, button.ip-tag[aria-pressed="true"] b { color: var(--paper); }
+button.ip-tag:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ip-bar span { background: var(--tone, var(--m-low)); }
+:root { --ip-l: 36%; }
+@media (prefers-color-scheme: dark) { :root { --ip-l: 70%; } }
+[class][class*="ipt-q-factual"] { --tone: hsl(212 62% var(--ip-l)); }
+[class][class*="ipt-q-explanatory"] { --tone: hsl(188 62% var(--ip-l)); }
+[class][class*="ipt-q-experiential"] { --tone: hsl(150 48% var(--ip-l)); }
+[class][class*="ipt-q-evaluative"] { --tone: hsl(36 78% var(--ip-l)); }
+[class][class*="ipt-q-speculative"] { --tone: hsl(272 52% var(--ip-l)); }
+[class][class*="ipt-q-challenging"] { --tone: hsl(352 66% var(--ip-l)); }
+[class][class*="ipt-a-direct"] { --tone: hsl(200 70% var(--ip-l)); }
+[class][class*="ipt-a-narrative"] { --tone: hsl(330 55% var(--ip-l)); }
+[class][class*="ipt-a-structured"] { --tone: hsl(165 55% var(--ip-l)); }
+[class][class*="ipt-a-pivot"] { --tone: hsl(24 82% var(--ip-l)); }
+[class][class*="ipt-a-evasive"] { --tone: hsl(0 66% var(--ip-l)); }
+[class][class*="ipt-g-grounded"] { --tone: hsl(140 52% var(--ip-l)); }
+[class][class*="ipt-g-plausible"] { --tone: hsl(48 80% var(--ip-l)); }
+[class][class*="ipt-g-ungrounded"] { --tone: hsl(30 70% var(--ip-l)); }
+[class][class*="ipt-g-contradicted"] { --tone: hsl(355 70% var(--ip-l)); }
+[class][class*="ipt-g-exempt"] { --tone: hsl(255 38% var(--ip-l)); }
+[class][class*="ipt-"][class*="-unclear"] { --tone: var(--m-low); }
+
 /* Interview profile: how the questions were asked and what the sources show about the answers, as counts. */
 .ip { margin: 0 0 1rem; padding: .7rem .9rem; display: grid; gap: .7rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 10px; }
 .ip-title { margin: 0; font-family: var(--font-display); font-size: 1rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
@@ -911,3 +953,51 @@ button.ind:hover { background: color-mix(in srgb, var(--tone) 20%, var(--paper-r
 .profile-list { margin: .2rem 0 0; padding-left: 1.1rem; display: grid; gap: .2rem; font-size: 0.9rem; overflow-wrap: anywhere; }
 .profile-narrative { line-height: 1.5; }
 .incentives { list-style: none; margin: .3rem 0 0; padding: 0; display: grid; gap: .35rem; font-size: 0.9rem; overflow-wrap: anywhere; }
+
+/* ---------- Video page: everything between the picture and the profile tabs is as short as it can be ---------- */
+.track-wrap { padding-top: 0.25rem; }
+.track { height: 1.5rem; }
+.tick { height: 1.15rem; }
+.tick-skipped { height: 0.45rem; }
+.track-scale { font-size: 0.68rem; padding-top: 0.1rem; line-height: 1.1; }
+.track-holder { padding-bottom: 0; }
+.score-head { margin-top: 0.4rem; }
+.score-head h1 { font-size: clamp(1rem, 1.5vw, 1.15rem); line-height: 1.2; }
+.watch-channel { margin-top: 0.2rem; gap: 0.4rem; font-size: 0.88rem; flex-wrap: nowrap; }
+.share-ep { padding: 0.08rem 0.6rem; font-size: 0.8rem; }
+.vcard-under { margin: 0.2rem 0 0; }
+.ptabs { margin-top: 0.3rem; }
+.ptabs .tabs { margin-bottom: 0.4rem; gap: 1rem; }
+.ptabs .tab { padding: 0.3rem 0; font-size: 0.9rem; }
+@media (min-width: 1180px) { .score { padding-block: 0.6rem; } }
+
+/* Creator and guest profiles: one short tab per section (About, Business, Politics, Reputation, Stakes), so nothing needs scrolling to be found. */
+.subtabs { display: flex; gap: 0.35rem; margin: 0.45rem 0 0.5rem; overflow-x: auto; scrollbar-width: none; }
+.subtab { flex: none; background: none; border: 1px solid var(--rule); border-radius: 999px; padding: 0.1rem 0.7rem; font: inherit; font-size: 0.82rem; cursor: pointer; color: var(--ink-soft); }
+.subtab:hover { border-color: var(--ink-soft); }
+.subtab[aria-selected="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); font-weight: 600; }
+.subtab:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.subpanel > :first-child { margin-top: 0; }
+.subpanel .profile-sec:first-child { margin-top: 0; }
+
+/* One text size for everything inside the tabs under the video (summary, chapters, creator, guests, steps): body text and lists
+   are the same size, labels and notes are smaller, names are larger. */
+.ppanel, .vcard-panel { font-size: 0.9rem; line-height: 1.5; }
+.ppanel :is(p:not(.ai-note), li, .meta, .profile-list, .incentives, .profile-narrative):not(.profile-note, .chapters-note),
+.vcard-panel :is(p:not(.ai-note), li, .meta, .profile-list, .incentives, .profile-narrative):not(.profile-note, .chapters-note) { font-size: 1em; line-height: inherit; }
+.ppanel .profile-note, .vcard-panel .profile-note, .ppanel .chapters-note { font-size: 0.78rem; }
+.ppanel .profile-name, .vcard-panel .profile-name { font-size: 1.1rem; }
+.ppanel .profile-k, .vcard-panel .profile-k { font-size: 0.72rem; }
+
+/* Interview profile as tabs: Questions / Answers / Evidence / Patterns, one at a time. */
+.ip { gap: 0.4rem; padding: 0.55rem 0.8rem; }
+.ip-tabs { margin: 0; }
+.ip-panel { display: grid; gap: 0.35rem; }
+.ip-panel .ip-patterns { max-height: 7.5rem; overflow-y: auto; }
+
+/* Q&A cards: each answer says what kind of statement it is, first thing in its row, with a bar of the same colour down its left side. */
+.qa-ans { border-left: 3px solid var(--stype, var(--rule)); padding-left: 0.65rem; }
+.qa-card > .qa-ans:first-child { padding-top: 0; }
+.qa-type { display: inline-flex; align-items: baseline; gap: 0.4rem; }
+.qa-type-note { font-size: 0.8rem; color: var(--ink-soft); }
+.stmt-filter-label { align-self: center; font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); white-space: nowrap; margin-right: 0.1rem; }

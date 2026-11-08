@@ -93,9 +93,11 @@ async def report_progress(ec: "EpisodeContext", label: str, pct: int) -> None:
     """Writes the current step, the % done and the step list to the episode row, for the progress view. Never raises."""
     try:
         progress: dict[str, Any] = {"label": label, "pct": max(0, min(100, int(pct)))}
+        fields: dict[str, Any] = {"progress": progress}
         if ec.steps:
             progress["steps"] = [dict(s) for s in ec.steps]
-        await ec.store.update_episode(ec.episode_id, {"progress": progress})
+            fields["steps"] = progress["steps"]  # progress is cleared when the run ends; this copy stays for the Steps tab
+        await ec.store.update_episode(ec.episode_id, fields)
     except Exception:
         pass
 
