@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { clock } from "@/lib/format";
 import {
-  ANSWER_UI, CLAIM_UI, DISCLOSURE_UI, DYNAMIC_UI, FLAG_UI, GROUNDING_UI, INCENTIVE_UI, PATTERN_UI, QUESTION_UI, SELF_REPORT_UI,
+  ANSWER_UI, CLAIM_UI, DISCLOSURE_UI, DYNAMIC_UI, FLAG_UI, GROUNDING_UI, INCENTIVE_UI, NO_CONFLICT_UI, NO_STAKE_UI, PATTERN_UI, QUESTION_UI, SELF_REPORT_UI,
   chainOf, flagsOf, interviewProfile, type IndicatorUi, type TagFilter,
 } from "@/lib/indicators";
 import type { AnswerType, Claim, Grounding, Incentive, IncentiveTag, Interaction, QuestionAnalysis, QuestionType } from "@/lib/types";
@@ -16,10 +16,10 @@ import type { AnswerType, Claim, Grounding, Incentive, IncentiveTag, Interaction
 
 const NOTE = "Tagged by AI classifiers from the question, the answer, the speakers' profiles and web pages. It describes what was found and can be wrong.";
 
-function Chip({ ui, category, onOpen, extra, approx, tag }: { ui: IndicatorUi; category: string; onOpen?(): void; extra?: string; approx?: boolean; tag?: string }) {
+function Chip({ ui, category, onOpen, extra, approx, tag, bare }: { ui: IndicatorUi; category: string; onOpen?(): void; extra?: string; approx?: boolean; tag?: string; bare?: boolean }) {
   const body = (
     <>
-      <span className="ind-cat">{category}</span>
+      {!bare && <span className="ind-cat">{category}</span>}
       <span className="ind-glyph" aria-hidden="true">{ui.glyph}</span>
       <span className="ind-word">{ui.word}</span>
       {approx && <span className="ind-approx" aria-hidden="true">≈</span>}
@@ -49,14 +49,13 @@ export function AnswerIndicators({ c, onOpen }: { c: Claim; onOpen(): void }) {
   const g = t.grounding;
   const flags = flagsOf(c);
   return (
-    <p className="ind-row" aria-label="How this answer was tagged">
+    <p className="ind-row ind-compact" aria-label="How this answer was tagged">
       {t.answer && <Chip ui={ANSWER_UI[t.answer.type]} tag={`a-${t.answer.type}`} category="Answer" onOpen={onOpen} />}
       {t.claim && <Chip ui={CLAIM_UI[t.claim.type]} category="Claim" onOpen={onOpen} />}
       {g && <Chip ui={GROUNDING_UI[g.label]} tag={`g-${g.label}`} category="Evidence" onOpen={onOpen} extra={g.was ? `Without the self-report rule it would read ${GROUNDING_UI[g.was].word}.` : undefined} />}
-      {t.conflict?.kind === "self_report" && <Chip ui={SELF_REPORT_UI} category="Conflict" onOpen={onOpen} />}
-      {t.conflict?.disclosure && <Chip ui={DISCLOSURE_UI[t.conflict.disclosure]} category="Stake" onOpen={onOpen} />}
-      {flags.map((f) => <Chip key={f} ui={FLAG_UI[f]} category="Flag" onOpen={onOpen} />)}
-      <span className="op-ai" title={NOTE}>AI-tagged</span>
+      <Chip ui={t.conflict ? (t.conflict.kind === "self_report" ? SELF_REPORT_UI : FLAG_UI.self_serving_pivot) : NO_CONFLICT_UI} category="Conflict" onOpen={onOpen} />
+      <Chip ui={t.conflict?.disclosure ? DISCLOSURE_UI[t.conflict.disclosure] : NO_STAKE_UI} category="Stake" onOpen={onOpen} />
+      {flags.filter((f) => f !== "self_serving_pivot").map((f) => <Chip key={f} ui={FLAG_UI[f]} category="Flag" onOpen={onOpen} />)}
     </p>
   );
 }
