@@ -108,34 +108,52 @@ def run(monkeypatch, search_results, plan=PLAN, settings=None, spent=0.0, force=
     return asyncio.run(go()), calls, ec
 
 
-def test_each_query_is_its_own_search_and_every_page_is_kept_with_its_excerpt_and_nothing_is_fetched(monkeypatch):
+def test_all_queries_go_in_one_search_and_every_page_is_kept_with_its_excerpt_and_nothing_is_fetched(monkeypatch):
     results = [[src("https://www.ulisten.ai/episode/steel", 0, title="Steel cage episode", excerpt="Listen to the steel cage episode."),
-                src("https://hist.example/ics", 1, title="The ICS", excerpt="The ICS was created to administer British India.")],
-               [src("https://think.example/legacy", 0, title="Legacy", excerpt="Critics argue the IAS kept the colonial character."),
-                src("https://hist.example/ics", 1, title="The ICS again")],
-               [src("https://gov.nic.in/rules", 0, title="Rules", excerpt="The All India Services rules.")]]
+                src("https://think.example/legacy", 1, title="Legacy", excerpt="Critics argue the IAS kept the colonial character."),
+                src("https://hist.example/ics", 2, title="The ICS", excerpt="The ICS was created to administer British India."),
+                src("https://gov.nic.in/rules", 3, title="Rules", excerpt="The All India Services rules.")]]
     r, calls, _ = run(monkeypatch, results)
     assert isinstance(r, Research)
-    assert calls["search"] == [["Indian Civil Service purpose British Raj"], ["IAS continuity Indian Civil Service 1947"], ["historians Indian Civil Service role"]]
-    assert r.queries == [q[0] for q in calls["search"]]
-    assert [s.url for s in r.related] == ["https://www.ulisten.ai/episode/steel", "https://think.example/legacy", "https://gov.nic.in/rules", "https://hist.example/ics"]
-    assert [s.rank for s in r.related] == [0, 1, 2, 3] and r.related[3].excerpt == "The ICS was created to administer British India."
-    assert [p["site"] for p in r.pages] == ["ulisten.ai", "think.example", "gov.nic.in", "hist.example"]
+    assert calls["search"] == [["Indian Civil Service purpose British Raj", "IAS continuity Indian Civil Service 1947", "historians Indian Civil Service role"]]
+    assert r.queries == calls["search"][0]
+    assert [s.url for s in r.related] == ["https://www.ulisten.ai/episode/steel", "https://think.example/legacy", "https://hist.example/ics", "https://gov.nic.in/rules"]
+    assert [s.rank for s in r.related] == [0, 1, 2, 3] and r.related[2].excerpt == "The ICS was created to administer British India."
+    assert [p["site"] for p in r.pages] == ["ulisten.ai", "think.example", "hist.example", "gov.nic.in"]
     assert r.all_pages[1]["text"] == "Critics argue the IAS kept the colonial character."     # what the classifier reads
     assert r.pages[0]["independence"] == "same_episode"                                       # a label for the reader, not a reason to drop it
     assert [p["status"] for p in r.points] == ["sources_found", "sources_found"] and r.counter == [] and r.match == "medium"
     assert r.positions == ["Civil services as a colonial legacy", "Civil services as nation builders"]
     assert "Positions people hold" in calls["objective"] and all(a != ANSWER for q in calls["search"] for a in q)
-    assert r.searches == [                                                                    # what each search returned, in its own order, duplicates and all
-        {"query": "Indian Civil Service purpose British Raj", "urls": ["https://www.ulisten.ai/episode/steel", "https://hist.example/ics"], "failed": False},
-        {"query": "IAS continuity Indian Civil Service 1947", "urls": ["https://think.example/legacy", "https://hist.example/ics"], "failed": False},
-        {"query": "historians Indian Civil Service role", "urls": ["https://gov.nic.in/rules"], "failed": False}]
+    assert r.searches == [{"query": " · ".join(r.queries), "queries": r.queries, "urls": [s.url for s in r.related], "failed": False}]   # one request, one list of pages
     assert r.stored()["searches"] == r.searches
 
 
 def test_the_query_cap_is_a_setting(monkeypatch):
     _, calls, _ = run(monkeypatch, [[src("https://a.example/1")]], settings=Settings(research_max_searches=1))
-    assert len(calls["search"]) == 1
+    assert len(calls["search"]) == 1 and len(calls["search"][0]) == 1
+
+
+def test_the_request_asks_for_ten_results_with_no_spare_and_is_charged_once(monkeypatch):
+    ec = make_ec(None, 0.0)
+    seen = {}
+
+    async def fake_search_sources(claim_text, settings, policy, **kw):
+        seen.update(claim_text=claim_text, limit=settings.sources_per_claim, **kw)
+        return [src("https://a.example/1")]
+
+    monkeypatch.setattr(research, "search_sources", fake_search_sources)
+
+    async def go():
+        token = set_context(ec)
+        try:
+            return await research._search(["q one", "q two", "q three"], "objective", "in")
+        finally:
+            token.var.reset(token)
+
+    asyncio.run(go())
+    assert seen["limit"] == 10 and seen["spare"] == 0 and seen["claim_text"] == "q one" and seen["extra_queries"] == ["q two", "q three"]
+    assert ec.budget.spent_usd == Settings().search_cost_usd
 
 
 def test_an_answer_with_nothing_checkable_is_skipped_unless_a_viewer_pressed_the_button(monkeypatch):
@@ -147,16 +165,13 @@ def test_an_answer_with_nothing_checkable_is_skipped_unless_a_viewer_pressed_the
     assert calls["search"][0][0] == " ".join(ANSWER.split()[:14]) and r.points[0]["text"].startswith("Vallabhbhai Patel")
 
 
-def test_one_failed_search_does_not_sink_the_others_but_all_failing_raises(monkeypatch):
-    r, calls, _ = run(monkeypatch, [RuntimeError("search down"), [src("https://a.example/1")], []])
-    assert len(calls["search"]) == 3 and [p["site"] for p in r.pages] == ["a.example"]
-    assert [(x["failed"], x["urls"]) for x in r.searches] == [(True, []), (False, ["https://a.example/1"]), (False, [])]   # a failed search says so
-    with pytest.raises(ResearchUnavailable, match="every search failed"):
-        run(monkeypatch, [RuntimeError("down")] * 3)
+def test_a_failed_search_raises_so_the_answer_can_be_retried(monkeypatch):
+    with pytest.raises(ResearchUnavailable, match="search failed"):
+        run(monkeypatch, [RuntimeError("down")])
 
 
 def test_searches_that_return_no_pages_give_research_with_no_pages_so_the_tags_can_still_say_unverified(monkeypatch):
-    r, _, _ = run(monkeypatch, [[], [], []])
+    r, _, _ = run(monkeypatch, [[]])
     assert r.pages == [] and r.related == [] and r.match == "low" and [p["status"] for p in r.points] == ["no_source", "no_source"]
 
 

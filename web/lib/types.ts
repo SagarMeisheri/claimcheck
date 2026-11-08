@@ -49,7 +49,7 @@ export interface QaTags {
 /** How an answer's sources were researched: its checkable points and every page the searches returned. */
 export interface Research {
   version: number; points: ResearchPoint[]; positions: string[]; queries: string[]; dropped?: Record<string, number>;
-  searches?: { query: string; urls: string[]; failed?: boolean }[]; // what each search returned, in its own order
+  searches?: { query: string; queries?: string[]; urls: string[]; failed?: boolean }[]; // what each search returned, in its own order
   pages?: { url: string; site: string; title: string; independence: string }[]; // every page the searches returned
 }
 /** One incentive tag of a person for a video, with the fact it rests on and where that fact was found. */

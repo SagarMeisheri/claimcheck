@@ -4,11 +4,11 @@ Lookup (lookup_answer), per answer: the answer-tag Workflow (agents/qa_tags.py)
   tag      one ADK classifier call: answer type, claim type and the conflict checks the speakers' incentive tags call for.
            It routes the answer: a pure opinion is exempt (no planner, no search)
   plan     research.py: a planner writes the checkable points and up to 3 queries; nothing checkable -> no search
-  search   one Parallel search per query, all at the same time; every page returned is kept (research.py)
+  search   one Parallel request carrying all the queries; every page returned is kept (research.py)
   ground   one classifier call: grounding, match (and missing context), then the skepticism rules in code
   save     the pages and claims.qa_tags; an answer with no search keeps its tags with sources_route 'skip'
 
-So an answer costs 1 classifier call, or 1 planner call, 3 searches and 2 classifier calls when researched. How the question was
+So an answer costs 1 classifier call, or 1 planner call, 1 search request and 2 classifier calls when researched. How the question was
 asked is tagged once per video for all questions (agents/interview.py).
 
 One answer ("Check sources")                                  POST /claims/{id}/sources
