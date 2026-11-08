@@ -1,6 +1,6 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { ChannelPage, Claim, CreatorProfile, Episode, EpisodeDetail, EpisodeSpeaker, Interaction, OpenReport, Pestle, PreviewClaim, Progress, QaEntry, QaTags, Research, Section, SidebarVideo, Source, SourcesMatch, SourcesStatus } from "./types";
+import type { ChannelPage, Claim, CreatorProfile, Episode, EpisodeDetail, EpisodeSpeaker, Interaction, OpenReport, Pestle, PreviewClaim, Progress, QaEntry, QaTags, Research, Section, SidebarVideo, Source, SourcesMatch, SourcesStatus, Step } from "./types";
 import { mergeCounts, typeOf } from "./statements";
 
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -25,11 +25,11 @@ type EpisodeRow = {
   id: string; youtube_video_id: string; title: string | null; duration_s: number | null; published_at: string | null;
   status: string; skip_reason?: string | null; created_at: string; channel_id: string | null;
   statement_counts?: Record<string, number> | null; summary?: string | null; sources_batch_status?: string | null; auto_sources?: boolean | null;
-  creator_id?: string | null; sections?: Section[] | null; progress?: Progress | null; qa?: QaEntry[] | null; interaction?: Interaction | null;
+  creator_id?: string | null; sections?: Section[] | null; progress?: Progress | null; steps?: Step[] | null; qa?: QaEntry[] | null; interaction?: Interaction | null;
   channels: { name: string } | null;
 };
 
-const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, statement_counts, summary, sources_batch_status, auto_sources, created_at, channel_id, creator_id, sections, progress, interaction, channels(name)";
+const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, statement_counts, summary, sources_batch_status, auto_sources, created_at, channel_id, creator_id, sections, progress, steps, interaction, channels(name)";
 const SOURCE_COLS = "claim_sources(url, title, tier, excerpt, publish_date, rank, kind, independence)";
 const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, question, asked_by, question_kind, question_analysis, qa_tags, section_idx, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, research, sources_checked_at, ${SOURCE_COLS}`;
 const CREATOR_COLS = "id, podcast, youtube_channel_name, youtube_handles, country, summary, public_profile";
@@ -47,7 +47,7 @@ function toEpisode(r: EpisodeRow): Episode {
     duration_s: r.duration_s ?? 0, published_at: r.published_at, status: r.status, skip_reason: r.skip_reason,
     statement_counts: mergeCounts(r.statement_counts ?? {}), summary: r.summary ?? null,
     sources_batch: r.sources_batch_status ?? null, auto_sources: r.auto_sources ?? null, created_at: r.created_at,
-    creator_id: r.creator_id ?? null, sections: r.sections ?? [], progress: r.progress ?? null, qa: r.qa ?? null, interaction: r.interaction ?? null,
+    creator_id: r.creator_id ?? null, sections: r.sections ?? [], progress: r.progress ?? null, steps: r.steps ?? null, qa: r.qa ?? null, interaction: r.interaction ?? null,
   };
 }
 

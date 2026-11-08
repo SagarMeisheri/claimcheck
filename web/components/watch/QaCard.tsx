@@ -9,7 +9,6 @@ import { clock } from "@/lib/format";
 import type { QaGroup } from "@/lib/qa";
 import { STATEMENT_TYPES, hasSources, speakerName, typeOf } from "@/lib/statements";
 import type { Claim } from "@/lib/types";
-import { TypeTag } from "./ClaimCard";
 
 /**
  * One question in the timeline, as a card: the question, who asked it, then every answer given to it with who answered
@@ -57,6 +56,7 @@ function Answer({ c, auto, running, onPlay, onSelect, onLookedUp }: {
   const [busy, setBusy] = useState(false);
   const onBusy = useCallback((b: boolean) => setBusy(b), []);
   const who = speakerName(c.speaker);
+  const type = STATEMENT_TYPES[typeOf(c.statement_type)];
   const sourceable = c.sources_status !== "not_eligible" && hasSources(c.statement_type);
   const done = c.sources_status === "done";
   const indicated = !!c.qa_tags;
@@ -70,10 +70,10 @@ function Answer({ c, auto, running, onPlay, onSelect, onLookedUp }: {
       ? <p className="ccard-verifying" role="status" aria-live="polite"><span className="spinner" aria-hidden="true" /> Checking sources…</p>
       : <p className="meta qa-note">{skipped ? "Not looked up: nothing in it a source could check." : "Sources weren't looked up for this answer."}</p>;
   return (
-    <div className={`qa-ans${busy ? " is-verifying" : ""}`}>
+    <div className={`qa-ans${busy ? " is-verifying" : ""}`} style={{ ["--stype" as string]: type.cssVar }}>
       <p className="qa-ans-head">
+        <span className="qa-type" title={`${type.meaning} Tagged by AI.`}><span className="stype">{type.label}</span> <span className="qa-type-note">{type.short}</span></span>
         <span className="qa-who" title="Speaker as identified by AI from the video">{who ?? "Speaker"} <span className="ai-note">(identified by AI)</span></span>
-        <TypeTag type={c.statement_type} />
         <button type="button" className="qa-ts" onClick={() => onPlay(c)} aria-label={`Play from ${clock(c.start_s)}`}>▶ {clock(c.start_s)}</button>
       </p>
       <p className="qa-ans-text">{c.claim_text}</p>

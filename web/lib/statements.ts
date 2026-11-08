@@ -1,14 +1,14 @@
 import type { SourcesStatus, StatementType } from "./types";
 
 /** Statement types, in the order filter chips and breakdowns show them. */
-export const STATEMENT_TYPES: Record<StatementType, { label: string; one: string; plural: string; meaning: string; cssVar: string }> = {
-  factual_claim: { one: "claim", label: "Claim", plural: "claims", meaning: "A statement about the past or present that sources could address. Tagged by AI; not judged true or false.", cssVar: "var(--t-factual)" },
-  opinion: { one: "opinion", label: "Opinion", plural: "opinions", meaning: "A view or value judgement.", cssVar: "var(--t-opinion)" },
-  forecast: { one: "forecast", label: "Forecast", plural: "forecasts", meaning: "A statement about the future.", cssVar: "var(--t-forecast)" },
-  advice: { one: "advice", label: "Advice", plural: "advice", meaning: "A recommendation to the listener about what to do.", cssVar: "var(--t-advice)" },
-  story: { one: "story", label: "Story", plural: "stories", meaning: "A personal experience or anecdote. It can still carry a claim worth checking.", cssVar: "var(--t-story)" },
-  question: { one: "question", label: "Question", plural: "questions", meaning: "A question that moves the conversation. No sources to look up.", cssVar: "var(--t-question)" },
-  other: { one: "other", label: "Other", plural: "other", meaning: "A comparison, a reference to what others say, or another remark.", cssVar: "var(--t-other)" },
+export const STATEMENT_TYPES: Record<StatementType, { label: string; one: string; plural: string; meaning: string; short: string; cssVar: string }> = {
+  factual_claim: { one: "claim", label: "Claim", plural: "claims", meaning: "A statement about the past or present that sources could address. Tagged by AI; not judged true or false.", short: "Something sources could confirm or dispute", cssVar: "var(--t-factual)" },
+  opinion: { one: "opinion", label: "Opinion", plural: "opinions", meaning: "A view or value judgement.", short: "A view or judgement", cssVar: "var(--t-opinion)" },
+  forecast: { one: "forecast", label: "Forecast", plural: "forecasts", meaning: "A statement about the future.", short: "About the future", cssVar: "var(--t-forecast)" },
+  advice: { one: "advice", label: "Advice", plural: "advice", meaning: "A recommendation to the listener about what to do.", short: "A recommendation", cssVar: "var(--t-advice)" },
+  story: { one: "story", label: "Story", plural: "stories", meaning: "A personal experience or anecdote. It can still carry a claim worth checking.", short: "A personal experience", cssVar: "var(--t-story)" },
+  question: { one: "question", label: "Question", plural: "questions", meaning: "A question that moves the conversation. No sources to look up.", short: "A question in the conversation", cssVar: "var(--t-question)" },
+  other: { one: "other", label: "Other", plural: "other", meaning: "A comparison, a reference to what others say, or another remark.", short: "Another kind of remark", cssVar: "var(--t-other)" },
 };
 
 export const TYPE_ORDER: StatementType[] = ["factual_claim", "opinion", "forecast", "advice", "story", "question", "other"];

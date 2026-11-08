@@ -10,10 +10,10 @@ import { YouTubePlayer, type PlayerHandle } from "@/components/watch/YouTubePlay
 import type { Episode, PreviewClaim } from "@/lib/types";
 import { breakdownParts, canCheckSources, totalStatements } from "@/lib/statements";
 import { clock, timeAgo } from "@/lib/format";
-import { CreatorPanel, PeoplePanel } from "@/components/watch/ProfileTabs";
+import { CreatorTab, PeoplePanel, splitPeople } from "@/components/watch/ProfileTabs";
 import { StatementCarousel } from "./StatementCarousel";
 
-type CardTab = "summary" | "creator" | "speakers";
+type CardTab = "summary" | "creator" | "guests";
 
 // Only one card plays at a time: starting a video closes whichever card was playing before.
 let closeOther: (() => void) | null = null;
@@ -32,11 +32,11 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [tab, setTab] = useState<CardTab>("summary");
-  const speakers = ep.speakers ?? [];
+  const { hosts, guests } = splitPeople(ep.speakers ?? []);
   const tabs: { key: CardTab; label: string }[] = [
     { key: "summary", label: checking ? "Progress" : "AI summary" },
-    ...(ep.creator ? [{ key: "creator" as CardTab, label: "Creator" }] : []),
-    ...(speakers.length ? [{ key: "speakers" as CardTab, label: `People ${speakers.length}` }] : []),
+    ...(ep.creator || hosts.length ? [{ key: "creator" as CardTab, label: "Creator" }] : []),
+    ...(guests.length ? [{ key: "guests" as CardTab, label: guests.length > 1 ? `Guests ${guests.length}` : "Guest" }] : []),
   ];
 
   const play = (seconds: number, claimId: string | null) => {
@@ -96,8 +96,8 @@ export function VideoCard({ ep, eager = false }: { ep: Episode; eager?: boolean 
             {tab === "summary" && (checking
               ? <CheckProgress videoId={ep.youtube_video_id} compact showSteps initialSteps={ep.progress?.steps ?? []} />
               : ep.summary && <p className="vcard-blurb"><span className="ai-note">AI summary: </span>{ep.summary}</p>)}
-            {tab === "creator" && ep.creator && <div className="vcard-panel profile" role="tabpanel"><CreatorPanel creator={ep.creator} /></div>}
-            {tab === "speakers" && <div className="vcard-panel" role="tabpanel"><PeoplePanel people={speakers} creator={ep.creator ?? null} /></div>}
+            {tab === "creator" && <div className="vcard-panel profile" role="tabpanel"><CreatorTab creator={ep.creator ?? null} hosts={hosts} /></div>}
+            {tab === "guests" && <div className="vcard-panel" role="tabpanel"><PeoplePanel people={guests} creator={ep.creator ?? null} /></div>}
           </div>
         </div>
       </div>

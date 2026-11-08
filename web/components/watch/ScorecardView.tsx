@@ -7,7 +7,6 @@ import { Avatar, Thumb } from "@/components/Thumb";
 import type { Claim, EpisodeDetail, Section, SourcesMatch, StatementType } from "@/lib/types";
 import { STATEMENT_TYPES, SEARCHING, TYPE_ORDER, breakdownParts, canCheckSources, hasSources, typeOf } from "@/lib/statements";
 import { clock } from "@/lib/format";
-import { MatchFilter, matchCounts } from "@/components/MatchFilter";
 import { CheckProgress } from "@/components/CheckProgress";
 import { CheckAllSources } from "@/components/CheckAllSources";
 import { CheckedAt } from "@/components/CheckedAt";
@@ -15,6 +14,7 @@ import { type CardPhase } from "./ClaimCard";
 import { StatementDetail } from "./StatementDetail";
 import { groupBySection } from "@/components/feed/StatementCarousel";
 import { InterviewProfile } from "@/components/Indicators";
+import { applyTagFilter, type TagFilter } from "@/lib/indicators";
 import { QaCard } from "./QaCard";
 import { groupByQuestion } from "@/lib/qa";
 import { Drawer, PaneNav } from "@/components/Drawer";
@@ -85,8 +85,10 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const qa = ep.claims.some((c) => !!c.question);
   const nouns = qa ? { one: "answer", many: "answers" } : { one: "statement", many: "statements" };
 
-  const [view, setView] = useState<View>(initialView ?? "all");
-  const [match, setMatch] = useState<SourcesMatch | null>(initialMatch ?? null);
+  const [view, setView] = useState<View>(initialView ?? "all")
+  const [match, setMatch] = useState<SourcesMatch | null>(null);
+  const chipTypes = TYPE_ORDER.filter((t) => t === "factual_claim" || typeCounts[t]);
+  const [tag, setTag] = useState<TagFilter | null>(null); // a question, answer or evidence tag picked in the interview profile
   const [playerOn, setPlayerOn] = useState(false);
   const [startPlaying, setStartPlaying] = useState(false);
   const [cue, setCue] = useState(initialT ?? 0);
@@ -101,7 +103,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const [toast, setToast] = useState<string | null>(null);
 
   const byView = view === "all" ? everything : view === "with_sources" ? withSources : everything.filter((c) => typeOf(c.statement_type) === view);
-  const viewList = match ? byView.filter((c) => c.sources_match === match) : byView;
+  const viewList = applyTagFilter(match ? byView.filter((c) => c.sources_match === match) : byView, tag);
   const playable = viewList.filter((c) => c.not_checked_reason !== "outside_policy");
   const current = useMemo(() => {
     let cur: Claim | null = null;
@@ -305,13 +307,12 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   // play the video from its start, scroll the list to its heading and select its first statement.
   const goToSection = (sec: Section) => {
     const first = visible.find((c) => (c.section_idx ?? -1) === sec.idx) ?? visible.find((c) => c.start_s >= sec.start_s);
-    if (!groups.some((g) => g.section?.idx === sec.idx)) { setView("all"); setMatch(null); }
+    if (!groups.some((g) => g.section?.idx === sec.idx)) { setView("all"); setMatch(null); setTag(null); }
     if (first && wide) setSelectedId(first.id);
     playFrom(sec.start_s);
     window.setTimeout(() => scrollToEl(`sec-${sec.idx}`), 60);
   };
 
-  const chipTypes = TYPE_ORDER.filter((t) => t === "factual_claim" || typeCounts[t]);
   // Sources already checked for this video ("last checked" shown): no button to check them all again.
   const lookupEligible = !ep.sources_checked_at && ep.claims.some((c) => canCheckSources(c));
 
@@ -341,7 +342,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           {ep.claims.length > 0 && (
             <div className={`track-holder${playerOn ? " is-on" : ""}`}>
               <ClaimTrack claims={ep.claims} duration={ep.duration_s} time={time} currentId={activeId}
-                          onSeekClaim={(c) => { if (!viewList.includes(c)) setView("all"); window.setTimeout(() => scrollToCard(c.id), 60); playFrom(c.start_s); }} />
+                          onSeekClaim={(c) => { if (!viewList.includes(c)) { setView("all"); setTag(null); } window.setTimeout(() => scrollToCard(c.id), 60); playFrom(c.start_s); }} />
             </div>
           )}
         </div>
@@ -355,7 +356,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         <header className="score-head">
           <h1>{ep.title}</h1>
           <div className="watch-channel">
-            <Avatar name={ep.channel_name} />
+            <Avatar name={ep.channel_name} size={20} />
             {ep.channel_id ? <Link href={`/c/${ep.channel_id}`}>{ep.channel_name}</Link> : <span>{ep.channel_name}</span>}
             <button className="btn secondary small share-ep" onClick={() => share(window.location.href.split("#")[0], ep.title)}>Share</button>
           </div>
@@ -364,6 +365,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         {checking && <CheckProgress videoId={ep.youtube_video_id} initialSteps={ep.progress?.steps ?? []} />}
 
         <ProfileTabs summary={ep.summary} sections={ep.sections ?? []} creator={ep.creator} speakers={ep.speakers}
+                     steps={(ep.steps ?? ep.progress?.steps ?? []).filter((x) => x.status === "done" || x.status === "skipped")}
                      onSeek={(s) => playFrom(s)} onSection={goToSection} />
         </div>
       </div>
@@ -389,8 +391,9 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         )}
         {ep.claims.length > 0 && (
           <>
-            <div className="filters stmt-filters" role="group" aria-label="Show statements by type">
-              <button className="chip" aria-pressed={view === "all"} onClick={() => setView("all")}>All {everything.length}</button>
+            <div className="filters stmt-filters" role="group" aria-label="Filter by statement type">
+              <span className="stmt-filter-label">Statement type</span>
+              <button className="chip" aria-pressed={view === "all" && !tag} onClick={() => { setView("all"); setTag(null); }}>All {everything.length}</button>
               {chipTypes.map((t) => (
                 <button key={t} className="chip chip-type" aria-pressed={view === t} onClick={() => setView(t)}
                         style={{ ["--stype" as string]: STATEMENT_TYPES[t].cssVar }} title={STATEMENT_TYPES[t].meaning}>
@@ -399,7 +402,6 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
               ))}
               <button className="chip" aria-pressed={view === "with_sources"} onClick={() => setView("with_sources")}>With sources {withSources.length}</button>
             </div>
-            <MatchFilter counts={matchCounts(byView)} value={match} onChange={setMatch} />
             {view !== "all" && view !== "with_sources" && (
               <p className="meta stmt-legend">{STATEMENT_TYPES[view].meaning}{hasSources(view) ? " Press Check sources to see what web sources say about it." : ""}</p>
             )}
@@ -414,11 +416,11 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           </>
         )}
 
-        {qa && <InterviewProfile claims={everything} interaction={ep.interaction} onOpen={select} />}  {/* fills in as answers are tagged */}
+        {qa && <InterviewProfile claims={everything} interaction={ep.interaction} onOpen={select} filter={tag} onFilter={setTag} />}  {/* fills in as answers are tagged */}
 
         <div className="score-timeline">
           {playable.length === 0
-            ? <p className="meta pad">{view === "with_sources" ? "No sources looked up yet. Press Check sources on any claim."
+            ? <p className="meta pad">{tag ? "Nothing matches this tag with the filters above. Click the tag again to clear it." : view === "with_sources" ? "No sources looked up yet. Press Check sources on any claim."
                 : view !== "all" ? `No ${STATEMENT_TYPES[view].plural} in this video.`
                 : checking ? `${qa || ep.claims.length === 0 ? "Questions and answers" : "Statements"} appear here as they are found.` : "No questions or statements for this video."}</p>
             : groups.map((g, gi) => (

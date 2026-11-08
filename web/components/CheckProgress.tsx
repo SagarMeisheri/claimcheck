@@ -80,7 +80,7 @@ export function CheckProgress({ videoId, compact = false, showSteps, initialStep
       {(showSteps ?? !compact) && steps.length > 0 && (
         <ol className="steps" aria-label="Analysis steps">
           {steps.map((st) => (
-            <li key={st.key} className={`step is-${st.status}`}>
+            <li key={st.key} className={`step is-${st.status}`} title={st.detail || undefined}>
               <span className="step-icon" aria-hidden="true">{st.status === "running" ? <span className="spinner" /> : ICON[st.status]}</span>
               <span className="step-body">
                 <span className="step-label">{st.label}<span className="sr-only"> ({SR[st.status]})</span></span>

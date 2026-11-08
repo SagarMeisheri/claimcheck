@@ -143,6 +143,7 @@ export interface Episode {
   creator_id?: string | null;
   sections?: Section[];
   progress?: Progress | null;
+  steps?: Step[] | null; // the analysis steps, kept after the run
   creator?: CreatorProfile | null; // the show's profile, if the channel is a known creator
   speakers?: EpisodeSpeaker[];
   qa?: QaEntry[] | null; // the Q&A page's questions; only loaded for a single video

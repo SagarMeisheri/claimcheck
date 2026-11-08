@@ -147,3 +147,14 @@ export function interviewProfile(claims: Claim[]): InterviewProfile | null {
   if (!asked && !answered) return null;
   return { asked, questions, approx, answered, answers, grounded, grounding, conflicts, undisclosed, patterns };
 }
+
+/** One tag picked at the top of the questions as a filter: how the question was asked, how it was answered, or the evidence. */
+export type TagFilter = { dim: "q"; key: QuestionType } | { dim: "a"; key: AnswerType } | { dim: "g"; key: Grounding };
+
+/** The answers a tag filter keeps. A question tag keeps every answer to a question tagged that way. */
+export function applyTagFilter(claims: Claim[], f: TagFilter | null): Claim[] {
+  if (!f) return claims;
+  if (f.dim === "a") return claims.filter((c) => c.qa_tags?.answer?.type === f.key);
+  if (f.dim === "g") return claims.filter((c) => c.qa_tags?.grounding?.label === f.key);
+  return groupByQuestion(claims).filter((g) => !g.implied && g.answers[0].question_analysis?.type === f.key).flatMap((g) => g.answers);
+}
