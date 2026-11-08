@@ -67,12 +67,12 @@ def test_hosts_get_a_profile_from_the_creator_without_a_search():
 def test_the_checklist_marks_earlier_steps_done_when_a_step_starts():
     ec = NS(steps=initial_steps())
     set_step(ec, "ingest_gate", "running")
-    set_step(ec, "creator_profiler", "skipped", "No profile for this channel")
+    set_step(ec, "people_profiler", "skipped", "Nobody named before the video is read")
     set_step(ec, "claim_filter", "running")
     status = {s["key"]: s["status"] for s in ec.steps}
-    assert list(status) == ["ingest_gate", "creator_profiler", "people_profiler", "extractor", "claim_filter", "speaker_profiler",
-                            "interview_tagger", "publisher"]  # who is talking first; the video is marked done last
-    assert status == {"ingest_gate": "done", "creator_profiler": "skipped", "people_profiler": "done", "extractor": "done",
+    assert list(status) == ["ingest_gate", "people_profiler", "extractor", "claim_filter", "speaker_profiler",
+                            "interview_tagger", "publisher"]  # the show and who is talking first (one step); the video is marked done last
+    assert status == {"ingest_gate": "done", "people_profiler": "skipped", "extractor": "done",
                       "claim_filter": "running", "speaker_profiler": "pending", "interview_tagger": "pending", "publisher": "pending"}
     set_step(ec, "nope", "done")  # unknown steps are ignored
 

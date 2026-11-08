@@ -37,7 +37,7 @@ from ..tools.evidence import search_sources
 
 log = logging.getLogger("claimcheck")
 APP = "claimcheck_speakers"
-PROFILE_CONCURRENCY = 3
+PROFILE_CONCURRENCY = 8  # everyone in the video at once (people.MAX_PEOPLE)
 
 
 def role_of(label: str) -> Optional[str]:

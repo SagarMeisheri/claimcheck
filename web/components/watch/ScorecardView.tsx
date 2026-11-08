@@ -364,7 +364,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
 
         {checking && <CheckProgress videoId={ep.youtube_video_id} initialSteps={ep.progress?.steps ?? []} />}
 
-        <ProfileTabs summary={ep.summary} sections={ep.sections ?? []} creator={ep.creator} speakers={ep.speakers}
+        <ProfileTabs summary={ep.summary} sections={ep.sections ?? []} creator={ep.creator} speakers={ep.speakers} notes={ep.interaction?.description_notes ?? []}
                      steps={(ep.steps ?? ep.progress?.steps ?? []).filter((x) => x.status === "done" || x.status === "skipped")}
                      onSeek={(s) => playFrom(s)} onSection={goToSection} />
         </div>

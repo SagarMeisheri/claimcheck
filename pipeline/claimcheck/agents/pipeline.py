@@ -4,9 +4,9 @@ Who is talking is worked out first, so every answer is read against its speaker'
 
 EpisodePipeline (SequentialAgent)
   IngestGate        code   metadata + input guardrails (public, finished): a rejected video costs nothing more
-  CreatorProfiler   code   the show's profile: curated, cached, or from the web (agents/creators.py), with its incentive tags
-  PeopleProfiler    code   who appears (hosts, the description's people, a model over the title and one search), each one's
-                           profile from the cache or the web, and their incentive tags (agents/people.py)
+  PeopleProfiler    code   ONE step for the show and the people: the show's profile (curated, cached, or from the web), who appears
+                           (hosts, the description's people, a model over the title and one search), then every person at once
+                           through the same profile from the cache or the web, and their incentive tags (agents/people.py)
   ExtractorAgent    LLM    agentic video -> questions and their answers (who asked, who answered, tagged), sections, summary
   ClaimFilter       code   cap, content policy in code, which statements can have sources looked up, sections cleaned
   SpeakerProfiler   code   anyone the extractor named who wasn't profiled yet (agents/speakers.py)
@@ -38,7 +38,6 @@ from ..guardrails.input_checks import parse_video_id
 from ..policy import load_policy
 from ..profiles import usable_creator
 from ..store import make_store
-from .creators import CreatorProfiler
 from .interview import InterviewTagger
 from .llm_agents import extractor_agent
 from .people import PeopleProfiler
@@ -54,7 +53,6 @@ def build_stages(settings: Settings) -> list:
     """Fresh (unparented) stage agents, so they can be placed in the pipeline or in the adk web wrapper."""
     return [
         IngestGate(name="ingest_gate"),
-        CreatorProfiler(name="creator_profiler"),
         PeopleProfiler(name="people_profiler"),
         extractor_agent(settings),
         ClaimFilter(name="claim_filter"),
@@ -71,8 +69,7 @@ def build_pipeline(settings: Settings) -> SequentialAgent:
 # (agent name, label shown while it runs, % complete once it has finished)
 STAGE_PROGRESS = [
     ("ingest_gate", "Checking the video details", 3),
-    ("creator_profiler", "Profiling the show", 8),
-    ("people_profiler", "Profiling the host and guests", 16),
+    ("people_profiler", "Profiling the show, hosts and guests", 16),
     ("extractor", "Reading the video, listing questions and answers", 82),
     ("claim_filter", "Applying the content policy", 85),
     ("speaker_profiler", "Profiling anyone new who spoke", 90),
@@ -80,7 +77,7 @@ STAGE_PROGRESS = [
     ("publisher", "Saving results", 100),
 ]
 _STAGE_INDEX = {name: i for i, (name, _, _) in enumerate(STAGE_PROGRESS)}
-_DETAIL_STAGES = ("creator_profiler", "people_profiler", "claim_filter", "speaker_profiler", "interview_tagger")
+_DETAIL_STAGES = ("people_profiler", "claim_filter", "speaker_profiler", "interview_tagger")
 
 
 def initial_steps() -> list[dict[str, Any]]:
@@ -93,7 +90,7 @@ def _step_detail(ev: Any) -> Optional[str]:
         return None
     parts = getattr(getattr(ev, "content", None), "parts", None) or []
     text = "".join(getattr(p, "text", "") or "" for p in parts).strip()
-    return text[:160] if text and not text.startswith("{") else None
+    return text[:600] if text and not text.startswith("{") else None
 
 
 def make_plugins_factory(settings: Settings):

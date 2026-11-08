@@ -3,9 +3,10 @@
 import { useState } from "react";
 import type { Cited, CreatorProfile, EpisodeSpeaker, ProfileV2, Section, Step } from "@/lib/types";
 import { IncentiveChips } from "@/components/Indicators";
+import { INCENTIVE_UI } from "@/lib/indicators";
 import { clock, domain } from "@/lib/format";
 
-type Tab = "summary" | "chapters" | "creator" | "guests" | "steps";
+type Tab = "summary" | "chapters" | "profiles" | "steps";
 
 const PROFILE_NOTE = "Compiled with AI from public web search results; each fact links to the page it came from, and every view is attributed to who holds it. It describes who they are and what they have a stake in, not whether anything said is right.";
 
@@ -24,18 +25,17 @@ export function CreatorTab({ creator, hosts }: { creator: CreatorProfile | null;
  * Profiles show neutral facts only; the notes on known positions and criticisms that steer source searches are
  * never sent to the browser.
  */
-export function ProfileTabs({ summary, sections, creator, speakers, steps = [], onSeek, onSection }: {
+export function ProfileTabs({ summary, sections, creator, speakers, notes = [], steps = [], onSeek, onSection }: {
   summary: string | null | undefined; sections: Section[]; creator: CreatorProfile | null; speakers: EpisodeSpeaker[];
+  notes?: string[]; // how the description introduces people, and its sponsor lines
   steps?: Step[]; // the steps already finished (done or skipped)
   onSeek(s: number): void;
   onSection?(s: Section): void; // play this chapter and jump the statement list to it
 }) {
-  const { hosts, guests } = splitPeople(speakers);
   const tabs: { key: Tab; label: string }[] = [
     ...(summary ? [{ key: "summary" as Tab, label: "Summary" }] : []),
     ...(sections.length ? [{ key: "chapters" as Tab, label: `Chapters ${sections.length}` }] : []),
-    ...(creator || hosts.length ? [{ key: "creator" as Tab, label: "Creator" }] : []),
-    ...(guests.length ? [{ key: "guests" as Tab, label: guests.length > 1 ? `Guests ${guests.length}` : "Guest" }] : []),
+    ...(speakers.length || creator ? [{ key: "profiles" as Tab, label: `Profiles ${speakers.length + (creator ? 1 : 0)}` }] : []),
     ...(steps.length ? [{ key: "steps" as Tab, label: `Steps ${steps.length}` }] : []),
   ];
   const [picked, setTab] = useState<Tab | null>(null);
@@ -90,15 +90,9 @@ export function ProfileTabs({ summary, sections, creator, speakers, steps = [], 
         </div>
       )}
 
-      {tab === "creator" && (
-        <div role="tabpanel" id="ppanel-creator" aria-labelledby="ptab-creator" className="ppanel profile">
-          <CreatorTab creator={creator} hosts={hosts} />
-        </div>
-      )}
-
-      {tab === "guests" && (
-        <div role="tabpanel" id="ppanel-guests" aria-labelledby="ptab-guests" className="ppanel">
-          <PeoplePanel people={guests} creator={creator} />
+      {tab === "profiles" && (
+        <div role="tabpanel" id="ppanel-profiles" aria-labelledby="ptab-profiles" className="ppanel">
+          <ProfilesPanel speakers={speakers} creator={creator} notes={notes} />
         </div>
       )}
 
@@ -121,6 +115,87 @@ export function ProfileTabs({ summary, sections, creator, speakers, steps = [], 
   );
 }
 
+
+/**
+ * The output of the "Profiling the show, hosts and guests" step, one tab per person (and one for the show), each with the same five
+ * sections: About, Business, Politics, Reputation, Stakes. Every answer is compared with the profile of the person who gave it.
+ */
+export function ProfilesPanel({ speakers, creator, notes }: { speakers: EpisodeSpeaker[]; creator: CreatorProfile | null; notes: string[] }) {
+  const people = [...speakers].sort((a, b) => (a.role === "host" ? 0 : 1) - (b.role === "host" ? 0 : 1) || b.statements - a.statements);
+  const entries = [
+    ...people.map((x) => ({ key: x.label, name: x.speaker?.name ?? x.label, kind: "person" as const, person: x })),
+    ...(creator ? [{ key: "__show", name: creator.podcast, kind: "show" as const, person: null }] : []),
+  ];
+  const [sel, setSel] = useState(entries[0]?.key ?? "");
+  const cur = entries.find((e) => e.key === sel) ?? entries[0];
+  if (!cur) return null;
+  return (
+    <>
+      <p className="meta">Every answer is compared with the profile of the person who gave it. Pick a person to see theirs.</p>
+      {entries.length > 1 && (
+        <div className="people-tabs" role="tablist" aria-label="Profiles in this video">
+          {entries.map((e) => (
+            <button key={e.key} type="button" role="tab" aria-selected={e.key === cur.key} className="person-tab" onClick={() => setSel(e.key)}>
+              <span className="person-tab-name">{e.name}</span>
+              {e.kind === "show" && <span className="meta">The show</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      <section className="pf-card" role="tabpanel" aria-label={cur.name}>
+        {cur.kind === "show" && creator ? <ShowProfile creator={creator} /> : cur.person ? <PersonProfile key={cur.key} person={cur.person} /> : null}
+      </section>
+      {notes.length > 0 && (
+        <div className="profile-sec">
+          <p className="profile-k">What the description says</p>
+          <ul className="profile-list">{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+        </div>
+      )}
+      <p className="meta profile-note">{PROFILE_NOTE}</p>
+    </>
+  );
+}
+
+function ShowProfile({ creator }: { creator: CreatorProfile }) {
+  const pp = creator.public_profile;
+  const lead = (
+    <>
+      {pp.hosts && <p><span className="profile-k">Hosts</span> {pp.hosts}</p>}
+      {pp.known_for && <p><span className="profile-k">Known for</span> {pp.known_for}</p>}
+    </>
+  );
+  return (
+    <>
+      <h3 className="profile-name">{creator.podcast} <span className="meta">· The show{creator.country ? ` · ${creator.country}` : ""}</span></h3>
+      <SectionTabs idp={`pf-show-${creator.id}`} sections={profileSections(pp, lead, { title: "What the show has a stake in", incentives: pp.incentives }, true)} />
+    </>
+  );
+}
+
+function PersonProfile({ person: p }: { person: EpisodeSpeaker }) {
+  const sp = p.speaker;
+  const pp = (sp?.public_profile ?? {}) as Fields & { role?: string; affiliations?: string[] };
+  const name = sp?.name ?? p.label;
+  const lead = sp ? (
+    <>
+      {sp.summary && <p>{sp.summary}</p>}
+      {pp.role && <p><span className="profile-k">Role</span> {pp.role}</p>}
+      {!!pp.affiliations?.length && <p><span className="profile-k">Affiliations</span> {pp.affiliations.join(", ")}</p>}
+    </>
+  ) : <p className="meta">No public profile was found for this name, so their answers have nothing to be compared with.</p>;
+  const from = sp?.sources?.slice(0, 3) ?? [];
+  return (
+    <>
+      <h3 className="profile-name">{name} <span className="meta">· {p.role === "host" ? "Host" : p.role === "guest" ? "Guest" : "Speaker"}{p.statements ? ` · ${p.statements} ${p.statements === 1 ? "answer" : "answers"}` : ""}</span></h3>
+      <SectionTabs idp={`pf-${p.label}`} sections={profileSections(pp, lead, { title: "In this video, a stake in", incentives: p.incentives ?? undefined }, true)} />
+      {from.length > 0 && (
+        <p className="meta">From: {from.map((x, i) => (
+          <span key={x.url}>{i > 0 && ", "}<a href={x.url} target="_blank" rel="noopener noreferrer">{domain(x.url)}</a></span>
+        ))}</p>
+      )}
+    </>
+  );
+}
 
 const BASIS: Record<string, string> = { declared: "holds or held party or government office", described: "as described by the sources", curated: "editorial note" };
 
@@ -149,7 +224,8 @@ type Sec = { key: string; label: string; body: React.ReactNode };
  * sponsors, ownership), Politics, Reputation (praise, criticism, controversies, bias claims) and, when there are some, Stakes.
  * Tabs with nothing in them are left out, and a profile with one section shows no tab bar.
  */
-function profileSections(p: Fields, lead: React.ReactNode, stakes?: { title: string; incentives: Fields["incentives"] }): Sec[] {
+function profileSections(p: Fields, lead: React.ReactNode, stakes?: { title: string; incentives: Fields["incentives"] }, all = false): Sec[] {
+  const none = (text: string) => <p className="meta">{text}</p>;
   const pol = p.political;
   const leaning = pol?.leaning || p.leaning;
   const hasPolitics = !!(leaning || pol?.posts?.length);
@@ -184,12 +260,24 @@ function profileSections(p: Fields, lead: React.ReactNode, stakes?: { title: str
     </>
   ) : null;
   const hasStakes = !!stakes?.incentives && Object.keys(stakes.incentives).length > 0;
+  const stakesBody = hasStakes
+    ? <div className="profile-sec"><p className="profile-k">{stakes!.title}</p><IncentiveChips incentives={stakes!.incentives} detail /></div>
+    : null;
+  if (all) {  // the same five sections for everyone, so profiles can be compared side by side
+    return [
+      { key: "about", label: "About", body: about },
+      { key: "business", label: "Business", body: business ?? none("No businesses, investments, sponsors or ownership found.") },
+      { key: "politics", label: "Politics", body: politics ?? none("No political leaning or post found.") },
+      { key: "reputation", label: "Reputation", body: reputation ?? none("No praise, criticism or controversy found.") },
+      { key: "stakes", label: "Stakes", body: stakesBody ?? none("No stake was found.") },
+    ];
+  }
   return [
     { key: "about", label: "About", body: about },
     ...(business ? [{ key: "business", label: "Business", body: business }] : []),
     ...(politics ? [{ key: "politics", label: "Politics", body: politics }] : []),
     ...(reputation ? [{ key: "reputation", label: "Reputation", body: reputation }] : []),
-    ...(hasStakes ? [{ key: "stakes", label: "Stakes", body: <div className="profile-sec"><p className="profile-k">{stakes!.title}</p><IncentiveChips incentives={stakes!.incentives} detail /></div> }] : []),
+    ...(stakesBody ? [{ key: "stakes", label: "Stakes", body: stakesBody }] : []),
   ];
 }
 
