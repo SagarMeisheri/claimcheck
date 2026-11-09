@@ -38,10 +38,11 @@ export const CLAIM_UI: Record<ClaimKind, IndicatorUi> = {
 
 export const GROUNDING_UI: Record<Grounding, IndicatorUi> = {
   grounded: { word: "Grounded", glyph: "✓", tone: "blue", hint: "The pages found state the same facts or premises." },
+  partly: { word: "Partly grounded", glyph: "◐", tone: "blue", hint: "Some of what was said is backed by the pages; the rest is not confirmed or differs in scope or period. The claims below say which." },
   plausible: { word: "Plausible", glyph: "~", tone: "grey", hint: "Fits what is known, but no page settles it either way. That says nothing against the answer." },
   contradicted: { word: "Contradicted", glyph: "✕", tone: "red", hint: "Pages give a different figure or account for a main point or premise." },
   exempt: { word: "Exempt", glyph: "◇", tone: "purple", hint: "An opinion, feeling or what-if: nothing a source could check." },
-  ungrounded: { word: "Ungrounded", glyph: "⚠", tone: "amber", hint: "It serves the speaker's own interest and only their word backs it: no independent page does." },
+  ungrounded: { word: "Ungrounded", glyph: "⚠", tone: "amber", hint: "It serves the speaker's own interest, and no page from outside their own organisation supports any part of it." },
 };
 
 export const FLAG_UI: Record<QaFlag, IndicatorUi> = {
@@ -108,7 +109,7 @@ export function chainOf(c: Claim): string {
 }
 
 /** Verdicts, worst first: the order of the scoreboard, the "worst first" sort and the key findings. */
-export const VERDICT_ORDER: Grounding[] = ["contradicted", "ungrounded", "plausible", "grounded", "exempt"];
+export const VERDICT_ORDER: Grounding[] = ["contradicted", "ungrounded", "partly", "plausible", "grounded", "exempt"];
 
 /** The answer's evidence verdict, or null when it hasn't been tagged. */
 export function verdictOf(c: Claim): Grounding | null {
@@ -122,13 +123,13 @@ export function hasSignals(c: Claim): boolean {
   return !!t.conflict || !!t.stake || flagsOf(c).length > 0 || t.answer?.type === "pivot" || t.answer?.type === "evasive";
 }
 
-/** How much attention an answer needs, 0 first: contradicted, ungrounded, anything with signals, plausible, grounded, exempt, untagged. */
+/** How much attention an answer needs, 0 first: contradicted, ungrounded, anything with signals, partly or plausible, grounded, exempt, untagged. */
 export function severity(c: Claim): number {
   const g = verdictOf(c);
   if (g === "contradicted") return 0;
   if (g === "ungrounded") return 1;
   if (hasSignals(c)) return 2;
-  if (g === "plausible") return 3;
+  if (g === "partly" || g === "plausible") return 3;
   if (g === "grounded") return 4;
   if (g === "exempt") return 5;
   return 6;
@@ -177,7 +178,7 @@ export function interviewProfile(claims: Claim[]): InterviewProfile | null {
   const visible = visibleClaims(claims).filter((c) => c.question).sort((a, b) => a.start_s - b.start_s);
   const questions = zero(["factual", "explanatory", "experiential", "evaluative", "speculative", "challenging", "unclear"] as const);
   const answers = zero(["direct", "narrative", "structured", "pivot", "evasive", "unclear"] as const);
-  const grounding = zero(["grounded", "plausible", "contradicted", "exempt", "ungrounded"] as const);
+  const grounding = zero(["grounded", "partly", "plausible", "contradicted", "exempt", "ungrounded"] as const);
   let asked = 0, approx = 0, answered = 0, grounded = 0, conflicts = 0, undisclosed = 0;
   const groups = groupByQuestion(visible);
   const patterns: Pattern[] = [];
@@ -194,7 +195,7 @@ export function interviewProfile(claims: Claim[]): InterviewProfile | null {
       const flags = flagsOf(c);
       if (flags.includes("staged_pushback")) patterns.push({ kind: "staged_pushback", claim: c });
       if (flags.includes("self_serving_pivot")) patterns.push({ kind: "self_serving_pivot", claim: c });
-      if (t.claim?.type === "anchored_opinion" && ["plausible", "ungrounded"].includes(t.grounding?.label ?? "") && nextQ && nextQ !== "challenging") {
+      if (t.claim?.type === "anchored_opinion" && ["plausible", "partly", "ungrounded"].includes(t.grounding?.label ?? "") && nextQ && nextQ !== "challenging") {
         patterns.push({ kind: "unchallenged_anchored", claim: c });
       }
     }

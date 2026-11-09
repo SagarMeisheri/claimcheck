@@ -5,15 +5,16 @@ Lookup (lookup_answer), per answer: the answer-tag Workflow (agents/qa_tags.py)
            It routes the answer: a pure opinion is exempt (no planner, no search)
   plan     research.py: a planner writes the checkable points and up to 3 queries; nothing checkable -> no search
   search   one Parallel request carrying all the queries; every page returned is kept (research.py)
-  ground   one classifier call: grounding, match (and missing context), then the skepticism rules in code
+  assess   one call (agents/assess.py): a TLDR per page, what the pages say together, each claim of the answer compared with them, with a
+           reason; code decides the label, then the skepticism rules
   save     the pages and claims.qa_tags; an answer with no search keeps its tags with sources_route 'skip'
 
-So an answer costs 1 classifier call, or 1 planner call, 1 search request and 2 classifier calls when researched. How the question was
+So an answer costs 1 classifier call, or 1 classifier call, 1 planner call, 1 search request and 1 assessment when researched. How the question was
 asked is tagged once per video for all questions (agents/interview.py).
 
 With settings.batch_lookups (the default) a video's answers are not looked up one by one but together (agents/batch.py): the first
 classifier call takes several answers to a call, ONE planner call plans every answer that needs research, answers about the same subject
-share one search request, and each answer is still grounded by its own call. The button on one answer is unchanged.
+share one search request, and each answer is still assessed by its own call. The button on one answer is unchanged.
 
 One answer ("Check sources")                                  POST /claims/{id}/sources
 Every answer of a video ("Check sources for all statements")  POST /episodes/{id}/sources-all

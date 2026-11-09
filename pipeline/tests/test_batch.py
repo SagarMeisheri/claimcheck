@@ -7,13 +7,13 @@ from types import SimpleNamespace as NS
 import pytest
 from google.adk.labs.classifiers import Binary, BinaryAnswer, Choice, ChoiceAnswer, ClassifierResponse
 
-from claimcheck.agents import batch, qa_tags, research
+from claimcheck.agents import assess, batch, qa_tags, research
 from claimcheck.agents.research import ResearchUnavailable, clean_video_plan, request_results, research_video
 from claimcheck.agents.sources import Lookup
 from claimcheck.config import Settings
 from claimcheck.context import Budget, BudgetExceeded, EpisodeContext, set_context
 from claimcheck.policy import load_policy
-from claimcheck.schemas import AnswerPoints, SearchPlan, Source, VideoPlan, VideoPoint
+from claimcheck.schemas import AnswerPoints, AssessOut, ClaimFinding, PageNote, SearchPlan, Source, VideoPlan, VideoPoint
 from claimcheck.tools import evidence
 
 SETTINGS = Settings(max_cost_usd_per_episode=3.0, sources_concurrency=3, search_cost_usd=0.005, search_cache_ttl_s=3600)
@@ -27,7 +27,15 @@ def fresh_cache():
 
 
 def src(url):
-    return Source(url=url, title="Page", excerpt="what the page says", rank=0, independence="independent")
+    return Source(url=url, title="Page", excerpt="what the page says about it", rank=0, independence="independent")
+
+
+def assessment_for(state, label="grounded"):
+    """What the assessment call returns for an answer: one claim, supported or contradicted (with a quote that is on the page)."""
+    verdict = "contradicted" if label == "contradicted" else "supported"
+    return AssessOut(pages=[PageNote(page=1, tldr="The page says something.", relevant=True)], overview="The pages say something.",
+                     claims=[ClaimFinding(claim=state["answer"][:60], verdict=verdict, page=1, page_says="It says this.", quote="what the page says",
+                                          reason="The answer says one thing; the page says another." if verdict == "contradicted" else "The page agrees.")])
 
 
 def make_ec(settings=SETTINGS, spent=0.0, cap=3.0):
@@ -339,16 +347,15 @@ def lookup_all(monkeypatch, claims, plan, overrides=None, ec=None, ground=None, 
             return search(claim_text)
         return [src(f"https://{claim_text.split()[0].lower()}.example/a")]
 
-    async def fake_ground(names, payload, extra=None):
-        grounding.append(tuple(names))
-        label = (ground or {}).get(payload["answer"], "grounded")
-        return ClassifierResponse(answers={"grounding": ch(label, qa_tags.GROUNDING), "match": ch("high", qa_tags.MATCH)})
+    async def fake_ground(state):
+        grounding.append(state["answer"])
+        return assessment_for(state, (ground or {}).get(state["answer"], "grounded"))
 
     async def fake_alone(ctx, location, force=False):
         return None
 
     monkeypatch.setattr(qa_tags, "_classify_many", fn)
-    monkeypatch.setattr(qa_tags, "_classify", fake_ground)
+    monkeypatch.setattr(assess, "_generate", fake_ground)
     monkeypatch.setattr(research, "_plan_video", fake_plan)
     monkeypatch.setattr(research, "search_sources", fake_search)
     monkeypatch.setattr(research, "research_answer", fake_alone)
@@ -364,7 +371,7 @@ CLAIMS = [{"id": f"id{i}", "claim_text": t} for i, t in enumerate([
     "I think podcasts are the best medium.", ANSWERS[1], ANSWERS[2], ANSWERS[3], "India is a big country."])]
 
 
-def test_five_answers_cost_one_classifier_call_one_plan_two_searches_and_three_grounding_calls(monkeypatch):
+def test_five_answers_cost_one_classifier_call_one_plan_two_searches_and_three_assessments(monkeypatch):
     plan = VideoPlan(answers=[AnswerPoints(answer=1, points=pts("GST slabs.")), AnswerPoints(answer=2, points=pts("GST collections.")),
                               AnswerPoints(answer=3, points=pts("Chip subsidy.")), AnswerPoints(answer=4, points=[])], searches=[GST, CHIP])
     done, n = lookup_all(monkeypatch, CLAIMS, plan, overrides={"a1_claim_type": "pure_opinion"})
@@ -374,20 +381,13 @@ def test_five_answers_cost_one_classifier_call_one_plan_two_searches_and_three_g
     assert all(done[i].tags["grounding"]["label"] == "grounded" and done[i].research.related for i in (1, 2, 3))
     assert done[1].research.related[0].url == done[2].research.related[0].url      # one request, shared
     assert done[1].tags["chain"].endswith("Grounded") and done[1].tags["match"]["label"] == "high" and done[1].research.match == "high"
+    assert done[1].research.pages[0]["tldr"] == "The page says something." and done[1].tags["grounding"]["claims"][0]["reason"]   # the page's line and the claim's reason are saved
 
 
-def test_a_contradicted_answer_still_gets_its_explanation(monkeypatch):
-    from claimcheck.agents import contradiction
-    asked = []
-
-    async def explain(question, answer, points, pages):
-        asked.append(answer)
-        return {"said": "x", "sources_say": "y", "difference": "z", "site": "s", "url": "u", "title": "t"}
-
-    monkeypatch.setattr(contradiction, "explain", explain)
+def test_a_contradicted_answer_gets_its_explanation_from_the_same_call(monkeypatch):
     plan = VideoPlan(answers=[AnswerPoints(answer=n, points=pts(f"P{n}.")) for n in (1, 2, 3, 4)], searches=[GST, CHIP])
     done, _ = lookup_all(monkeypatch, CLAIMS, plan, overrides={"a1_claim_type": "pure_opinion"}, ground={ANSWERS[3]: "contradicted"})
-    assert asked == [ANSWERS[3]] and done[3].tags["grounding"]["label"] == "contradicted" and done[3].tags["grounding"]["contradiction"]["said"] == "x"
+    assert done[3].tags["grounding"]["label"] == "contradicted" and done[3].tags["grounding"]["contradiction"]["difference"].startswith("The answer says")
     assert "contradiction" not in done[1].tags["grounding"]
 
 
@@ -516,24 +516,17 @@ def test_a_failing_progress_report_never_stops_the_research(monkeypatch):
 
 
 def watch(monkeypatch, plan, **kw):
-    """lookup_all with every report kept in order: ('progress', index, tags?, research stage?), ('done', index, route), ('plan',), ('explain',)."""
-    from claimcheck.agents import contradiction
+    """lookup_all with every report kept in order: ('progress', index, tags?, research stage?), ('done', index, route), ('plan',)."""
     events = []
 
-    async def explain(question, answer, points, pages):
-        events.append(("explain",))
-        return {"said": "x", "sources_say": "y", "difference": "z", "site": "s", "url": "u", "title": "t"}
-
-    monkeypatch.setattr(contradiction, "explain", explain)
     async def fake_plan(text, context, on_answer=None):
         events.append(("plan",))
         return plan
 
     fn, _ = stub_answers(kw.get("overrides"))
 
-    async def fake_ground(names, payload, extra=None):
-        label = "contradicted" if payload["answer"] == ANSWERS[3] else "grounded"
-        return ClassifierResponse(answers={"grounding": ch(label, qa_tags.GROUNDING), "match": ch("high", qa_tags.MATCH)})
+    async def fake_ground(state):
+        return assessment_for(state, "contradicted" if state["answer"] == ANSWERS[3] else "grounded")
 
     async def fake_search(claim_text, s, policy, **k):
         return [src(f"https://{claim_text.split()[0].lower()}.example/a")]
@@ -542,7 +535,7 @@ def watch(monkeypatch, plan, **kw):
         return None
 
     monkeypatch.setattr(qa_tags, "_classify_many", fn)
-    monkeypatch.setattr(qa_tags, "_classify", fake_ground)
+    monkeypatch.setattr(assess, "_generate", fake_ground)
     monkeypatch.setattr(research, "_plan_video", fake_plan)
     monkeypatch.setattr(research, "search_sources", fake_search)
     monkeypatch.setattr(research, "research_answer", fake_alone)
@@ -568,8 +561,7 @@ def test_an_opinion_is_settled_before_the_plan_and_the_rest_show_their_tags_firs
     assert ev.index(("progress", 1, "grounded", None)) < ev.index(("done", 1, "related"))
 
 
-def test_the_verdict_is_shown_before_its_explanation_is_written(monkeypatch):
+def test_a_contradicted_verdict_is_shown_with_its_reason_as_soon_as_the_assessment_is_in(monkeypatch):
     plan = VideoPlan(answers=[AnswerPoints(answer=n, points=pts(f"P{n}.")) for n in (1, 2, 3, 4)], searches=[GST, CHIP])
     ev = watch(monkeypatch, plan, overrides={"a1_claim_type": "pure_opinion"})
-    label = ev.index(("progress", 3, "contradicted", None))                       # answer 4 of the claims: the contradicted one
-    assert label < ev.index(("explain",)) < ev.index(("done", 3, "related"))
+    assert ev.index(("progress", 3, "contradicted", None)) < ev.index(("done", 3, "related"))   # answer 4 of the claims: the contradicted one

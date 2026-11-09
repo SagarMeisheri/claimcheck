@@ -7,7 +7,7 @@ import { domain } from "@/lib/format";
 import {
   ANSWER_UI, CLAIM_UI, DISCLOSURE_UI, FLAG_UI, GROUNDING_UI, QUESTION_UI, SELF_REPORT_UI, TOUCHES_UI, chainOf, flagsOf,
 } from "@/lib/indicators";
-import type { Claim, Source } from "@/lib/types";
+import type { Claim, ClaimFinding, Source } from "@/lib/types";
 
 /**
  * The detail panel's top half, built to be read without scrolling: the verdict and the reason for it, the chips that
@@ -15,6 +15,10 @@ import type { Claim, Source } from "@/lib/types";
  * behind the verdict as one-line rows. The rest (stake, how it was asked, searches, transcript) sits in folded rows
  * below, each with its own one-line summary.
  */
+
+const CLAIM_MARK: Record<ClaimFinding["verdict"], { glyph: string; word: string }> = {
+  supported: { glyph: "✓", word: "Supported" }, partly: { glyph: "◐", word: "Partly" }, contradicted: { glyph: "✕", word: "Contradicted" }, not_found: { glyph: "?", word: "Not found" },
+};
 
 const plain = (t?: string | null) => (t ?? "").replace(/\s*\[\d+\]/g, "").replace(/\s+([.,;:])/g, "$1").trim();
 
@@ -47,7 +51,20 @@ export function VerdictBrief({ c }: { c: Claim }) {
               <p className="vb-why">{k.difference}</p>
               <p className="vb-vs"><span><b>Said</b> {k.said}</span><span><b>Pages say</b> {k.sources_say}</span></p>
             </>
-          ) : <p className="vb-why">{ui.hint}{g.was ? ` The pages alone would make it ${GROUNDING_UI[g.was].word.toLowerCase()}.` : ""}</p>}
+          ) : <p className="vb-why">{ui.hint}{g.was ? ` On the pages alone it would be ${GROUNDING_UI[g.was].word.toLowerCase()}.` : ""}</p>}
+          {(g.claims?.length ?? 0) > 0 && (
+            <ul className="vb-claims" aria-label="What was checked">
+              {g.claims!.map((f, i) => (
+                <li key={i} className={`vb-claim is-${f.verdict}`}>
+                  <span className="vb-mark" title={CLAIM_MARK[f.verdict].word} aria-label={CLAIM_MARK[f.verdict].word}>{CLAIM_MARK[f.verdict].glyph}</span>
+                  <span className="vb-claim-text">{f.claim}</span>
+                  <span className="vb-claim-why">{f.reason}</span>
+                  {f.url && <span className="vb-claim-site"><a className="meta" href={f.url} target="_blank" rel="noopener noreferrer nofollow">{f.site || domain(f.url)}</a></span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {g.missing_context && <p className="vb-why"><b>Missing context.</b> {g.missing_context}</p>}
         </>
       )}
       {chips.length > 0 && <p className="ind-row vb-chips">{chips}</p>}
@@ -66,6 +83,7 @@ export function SourceRows({ c }: { c: Claim }) {
   const g = c.qa_tags?.grounding;
   const basis = new Map((g?.basis ?? []).map((b) => [b.url, b]));
   const diff = g?.contradiction;
+  const tldr = new Map((c.research?.pages ?? []).filter((p) => p.tldr).map((p) => [p.url, p.tldr as string]));
   const seen = new Set<string>();
   const rows: Row[] = [
     ...c.sources.map((source) => ({ source, counter: false })),
@@ -74,12 +92,12 @@ export function SourceRows({ c }: { c: Claim }) {
   ].filter(({ source }) => !seen.has(source.url) && !!seen.add(source.url)).map(({ source, counter }) => {
     const b = basis.get(source.url);
     const differs = !!diff && diff.url === source.url;
-    return { source, counter, differs, quote: plain(differs && diff.quote ? diff.quote : b?.quote || b?.finding || source.excerpt) };
+    return { source, counter, differs, quote: plain(differs && diff.quote ? diff.quote : b?.quote || (tldr.has(source.url) ? "" : b?.finding || source.excerpt)) };
   });
   // Stable: pages the verdict rests on, and the one that differs, come first.
   const weight = (r: Row) => (r.differs ? 0 : basis.has(r.source.url) ? 1 : 2);
   rows.sort((a, b) => weight(a) - weight(b));
-  const summary = !g ? plain(c.sources_summary) : "";
+  const summary = g?.overview ? plain(g.overview) : !g ? plain(c.sources_summary) : "";
   const shown = all ? rows : rows.slice(0, SHOWN);
   return (
     <section className="dr" aria-label="Sources">
@@ -104,6 +122,7 @@ export function SourceRows({ c }: { c: Claim }) {
                   </span>
                   {title && <span className="dr-title">{title}</span>}
                 </a>
+                {tldr.get(s.url) && <p className="dr-tldr">{tldr.get(s.url)}</p>}
                 {quote && <p className="dr-quote">“{quote}”</p>}
               </li>
             );

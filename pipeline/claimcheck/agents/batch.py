@@ -8,12 +8,11 @@ The same lookup as agents/sources.lookup_answer gives for one answer (tag, plan,
                and the search requests, answers about the same subject sharing one request. A video longer than settings.plan_chunk
                answers is planned in chunks.
   3 search     each request once, a few at a time; a search made lately for the same queries is reused.
-  4 ground     as an answer's requests come back, its grounding call (one per answer, as before) and the rules in code.
+  4 assess     as an answer's requests come back, its assessment (one call per answer, agents/assess.py) and the rules in code.
 
 Each answer is reported the moment it is finished (`on_done`), so the page fills in as it goes. Before that, what each stage finds is
 reported as it arrives (`on_progress`): the tags as each classifier call returns, the planner's points as the model writes them, the
-queries, the pages as each search comes back, the verdict as soon as its label is in (before the explanation of a contradiction is
-written). The caller saves these for the page to show; they are best-effort and change nothing about the result. An answer the budget didn't reach is
+queries, the pages as each search comes back, the verdict as soon as the assessment is in. The caller saves these for the page to show; they are best-effort and change nothing about the result. An answer the budget didn't reach is
 not reported at all: the caller puts it back to what it was. A lookup of one answer (the "Check sources" button) is unchanged.
 
 Because the planner needs the whole video, these lookups start after the answers are all saved, not while the extractor is writing
@@ -125,7 +124,7 @@ async def lookup_many(claims: list[dict[str, Any]], vctx: Any, on_done: Done, *,
             job.route, job.research = "researched", result
             await show(i, research={**result.stored(), "stage": "grounding"})  # every page is in; the verdict is being weighed
             async with gate:
-                await ground(job, on_label=lambda: show(i, tags=decide(job)))  # the verdict shows before its explanation is written
+                await ground(job, on_label=lambda: show(i, tags=decide(job)))  # the verdict shows as soon as the assessment is in
             tags = decide(job)
             result.match = (tags.get("match") or {}).get("label") or result.match
             await report(i, Lookup("related", result.related, result, tags))
