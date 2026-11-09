@@ -156,6 +156,34 @@ class ResearchPlan(BaseModel):
     positions: list[Position] = Field(default_factory=list, description="When disputed: 2-3 positions held on the issue; empty otherwise")
 
 
+class VideoPoint(BaseModel):
+    text: str = Field(description="One checkable point from the answer, self-contained, figures, units and periods exactly as said")
+    kind: PointKind = Field(description="figure, rule, event, cause, comparison, interpretation, outlook or other")
+
+
+class AnswerPoints(BaseModel):
+    answer: int = Field(description="The answer's number, exactly as given")
+    points: list[VideoPoint] = Field(default_factory=list, description="The 1-2 most checkable points of this answer; empty when it is only background, small talk, a personal story or too vague to look up")
+
+
+class SearchPlan(BaseModel):
+    """One web search request that serves one or more answers."""
+
+    topic: str = Field(description="At most 15 words: what this request looks into")
+    answers: list[int] = Field(description="The numbers of the answers whose points this request looks into (1 to 4)")
+    queries: list[str] = Field(description="1-3 short keyword queries that find sources on the points: name the body, programme, document, dataset, year or figure. Not an answer's wording")
+    challenge_queries: list[str] = Field(default_factory=list, description="1-2 queries for sources giving other figures, periods or definitions, or other positions on the same points")
+    disputed: bool = Field(default=False, description="True only if the issue itself is contested in public debate")
+    positions: list[Position] = Field(default_factory=list, description="When disputed: 2-3 positions held on the issue; empty otherwise")
+
+
+class VideoPlan(BaseModel):
+    """The research for every answer of a video that needs it, planned together (agents/research.py)."""
+
+    answers: list[AnswerPoints] = Field(default_factory=list, description="Every answer given, once, with its points")
+    searches: list[SearchPlan] = Field(default_factory=list, description="The search requests; every answer that has points is served by at least one")
+
+
 class ContradictionOut(BaseModel):
     """How one page contradicts an answer (agents/contradiction.py). Code checks the page number and that the quote is on the page."""
 

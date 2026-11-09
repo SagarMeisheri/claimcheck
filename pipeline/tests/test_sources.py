@@ -159,6 +159,10 @@ class FakeStore:
         for i in claim_ids:
             self.analysis[i] = analysis
 
+    async def save_lookup_progress(self, cid, qa_tags=None, research=None):
+        self.progress = getattr(self, "progress", [])
+        self.progress.append((cid, qa_tags, research))
+
     async def add_episode_cost(self, eid, usd, tin, tout):
         self.cost.append(usd)
 
@@ -368,3 +372,89 @@ def test_answers_with_the_same_wording_share_one_lookup(monkeypatch):
     store = FakeStore(batch=batch)
     out = asyncio.run(run_video_sources("e1", settings=SETTINGS, store=store))
     assert out["searched"] == 2 and len(calls) == 2 and store.saved["a"] == store.saved["b"] == ["https://a.example/x"]
+
+
+# --- The whole video together (settings.batch_lookups) ------------------------------------------------------
+
+def test_batched_lookups_are_saved_as_each_is_reported_and_an_unreached_answer_goes_back(monkeypatch):
+    from claimcheck.agents import batch
+
+    seen = {}
+
+    async def lookup_many(claims, vctx, on_done, *, force, fresh, **_):
+        seen.update(claims=[c["claim_text"] for c in claims], force=force, fresh=fresh)
+        srcs = [Source(url="https://a.example/x", title="t", excerpt="e", rank=0)]
+        r = Research(points=[], positions=[], queries=["q"], related=srcs, counter=[], summary="", counter_summary="", match="medium")
+        await on_done(2, RuntimeError("search down"))                                                        # finished out of order
+        await on_done(1, Lookup("skip", [], None, {"claim": {"type": "pure_opinion", "p": 0.9}, "grounding": {"label": "exempt"}}))
+        await on_done(0, Lookup("related", srcs, r, {"grounding": {"label": "plausible", "p": 0.7}}))
+        # answer 3 is never reported: the budget did not reach it
+
+    monkeypatch.setattr(batch, "lookup_many", lookup_many)
+    store = FakeStore(batch=claims(4))
+    cfg = Settings(max_cost_usd_per_episode=3.0, sources_concurrency=3, search_cost_usd=0.005, batch_lookups=True, tag_answers=True)
+    out = asyncio.run(run_video_sources("e1", settings=cfg, store=store))
+    assert seen == {"claims": ["claim 3", "claim 2", "claim 1", "claim 0"], "force": False, "fresh": False}   # earliest answer first, one lookup each
+    assert out["searched"] == 1 and out["skipped"] == 1 and out["claims"] == 4
+    assert set(store.saved) == {"id3"} and store.routes["id2"] == "skip"
+    assert store.status["id1"] == ("failed", sources.RETRY_MESSAGE)
+    assert store.status["id0"] == ("not_requested", None)                                                    # not reached: back to what it was
+    assert store.updates[-1] == {"sources_batch_status": None, "progress": {}}
+
+
+def test_a_recheck_is_passed_on_so_searches_are_made_again(monkeypatch):
+    from claimcheck.agents import batch
+
+    seen = {}
+
+    async def lookup_many(claims, vctx, on_done, *, force, fresh, **_):
+        seen["fresh"] = fresh
+
+    monkeypatch.setattr(batch, "lookup_many", lookup_many)
+    cfg = Settings(max_cost_usd_per_episode=3.0, search_cost_usd=0.005, batch_lookups=True, tag_answers=True)
+    asyncio.run(run_video_sources("e1", settings=cfg, store=FakeStore(batch=claims(1)), recheck=True))
+    assert seen["fresh"] is True
+
+
+def test_with_the_answer_tags_off_the_lookups_stay_one_per_answer(monkeypatch):
+    calls = fake_lookup(monkeypatch)
+    cfg = Settings(max_cost_usd_per_episode=3.0, sources_concurrency=3, search_cost_usd=0.005, batch_lookups=True, tag_answers=False)
+    out = asyncio.run(run_video_sources("e1", settings=cfg, store=FakeStore(batch=claims(3))))
+    assert out["searched"] == 3 and len(calls) == 3
+
+
+def test_what_a_lookup_has_found_so_far_is_saved_for_every_answer_sharing_it(monkeypatch):
+    from claimcheck.agents import batch
+
+    async def lookup_many(claims, vctx, on_done, *, force, fresh, on_progress, on_phase):
+        await on_phase("Planning the checks for 2 answers")
+        await on_progress(0, {"answer": {"type": "direct"}}, None)
+        await on_progress(0, None, {"stage": "searching"})
+
+    monkeypatch.setattr(batch, "lookup_many", lookup_many)
+    twin = [{"id": "a", "idx": 0, "start_s": 20, "claim_text": "same words"}, {"id": "b", "idx": 1, "start_s": 10, "claim_text": "Same  words!"}]
+    store = FakeStore(batch=twin)
+    cfg = Settings(max_cost_usd_per_episode=3.0, search_cost_usd=0.005, batch_lookups=True, tag_answers=True)
+    asyncio.run(run_video_sources("e1", settings=cfg, store=store))
+    assert store.progress == [("b", {"answer": {"type": "direct"}}, None), ("a", {"answer": {"type": "direct"}}, None),
+                              ("b", None, {"stage": "searching"}), ("a", None, {"stage": "searching"})]
+    assert {"progress": {"label": "Planning the checks for 2 answers", "pct": 0}} in store.updates
+
+
+def test_a_lookup_in_flight_only_writes_to_a_claim_that_is_still_searching():
+    from claimcheck.store import SupabaseStore
+
+    calls = []
+
+    class Q:
+        def update(self, fields): calls.append(("update", fields)); return self
+        def eq(self, col, val): calls.append(("eq", col, val)); return self
+        def execute(self): calls.append(("execute",))
+
+    store = SupabaseStore.__new__(SupabaseStore)
+    store.db = NS(table=lambda name: (calls.append(("table", name)), Q())[1])
+    asyncio.run(store.save_lookup_progress("c1", qa_tags={"x": 1}))
+    assert ("update", {"qa_tags": {"x": 1}}) in calls and ("eq", "id", "c1") in calls and ("eq", "sources_status", "searching") in calls
+    calls.clear()
+    asyncio.run(store.save_lookup_progress("c1"))
+    assert calls == []                                                           # nothing to write, no request

@@ -101,6 +101,12 @@ class Settings:
     # Answer tags (agents/qa_tags.py): one ADK classifier call per answer (answer type, claim type and the conditional conflict checks),
     # a second when it is researched (grounding, match, missing context); question types and the dynamic are batched once per video
     # (agents/interview.py).
+    # Whole-video lookups (agents/batch.py): answers are classified several to a call, ONE planner call reads every answer that needs
+    # research and plans searches that serve several answers, and a query seen lately is not searched again. Off = one lookup per answer.
+    batch_lookups: bool = _env("CLAIMCHECK_BATCH_LOOKUPS", "1") == "1"
+    tag_batch: int = int(_env("CLAIMCHECK_TAG_BATCH", "5"))  # answers by one speaker per classifier call
+    plan_chunk: int = int(_env("CLAIMCHECK_PLAN_CHUNK", "40"))  # answers per planner call (a longer video is planned in chunks)
+    search_cache_ttl_s: int = int(_env("CLAIMCHECK_SEARCH_CACHE_TTL_S", "3600"))  # 0 = never reuse a search (in this process only)
     tag_answers: bool = _env("CLAIMCHECK_TAG_ANSWERS", "1") == "1"
     tag_model: str = field(default_factory=lambda: _env("CLAIMCHECK_TAG_MODEL", "gemini-3.8-flash"))
     tag_cost_estimate_usd: float = float(_env("CLAIMCHECK_TAG_COST_ESTIMATE_USD", "0.03"))  # one answer's two calls, the grounding one with ~30 pages
@@ -123,6 +129,11 @@ class Settings:
     # Rough cost of one sources summary, used only to plan how many lookups a video's budget can pay for
     # (the real cost is counted from tokens). ~$0.003 on Gemini 3.8 Flash with low thinking.
 
+
+    @property
+    def batched(self) -> bool:
+        """Whether a video's answers are looked up together. Needs the answer tags: the classifier is what is batched."""
+        return self.batch_lookups and self.tag_answers
 
     @property
     def auto_sources_enabled(self) -> bool:

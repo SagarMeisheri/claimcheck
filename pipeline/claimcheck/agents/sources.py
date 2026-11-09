@@ -11,6 +11,10 @@ Lookup (lookup_answer), per answer: the answer-tag Workflow (agents/qa_tags.py)
 So an answer costs 1 classifier call, or 1 planner call, 1 search request and 2 classifier calls when researched. How the question was
 asked is tagged once per video for all questions (agents/interview.py).
 
+With settings.batch_lookups (the default) a video's answers are not looked up one by one but together (agents/batch.py): the first
+classifier call takes several answers to a call, ONE planner call plans every answer that needs research, answers about the same subject
+share one search request, and each answer is still grounded by its own call. The button on one answer is unchanged.
+
 One answer ("Check sources")                                  POST /claims/{id}/sources
 Every answer of a video ("Check sources for all statements")  POST /episodes/{id}/sources-all
   a few at a time (settings.sources_concurrency), each saved the moment it is ready. Answers the planner skips go back to
@@ -302,34 +306,58 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any, 
             await store.update_episode(episode_id, {"progress": {"label": f"Checking sources: {done} of {total} done",
                                                                  "pct": int(100 * done / total)}})
 
-        async def one(group: list[dict[str, Any]]) -> None:
+        async def settle(group: list[dict[str, Any]], found: Any) -> None:
+            """Saves one lookup's result for every answer sharing it (found is a Lookup, or the exception that stopped it)."""
             nonlocal done, searched, skipped
+            try:
+                if isinstance(found, BaseException):
+                    raise found
+                for c in group:  # answers with the same wording share the result
+                    await _save(store, c["id"], found)
+                if found.route == "skip":
+                    skipped += 1
+                else:
+                    searched += 1
+            except Exception as e:
+                log.warning("source search for answer %s failed: %s: %s", group[0]["id"], type(e).__name__, e)
+                for c in group:
+                    await store.set_sources_status(c["id"], "failed", RETRY_MESSAGE)
+            finished.update(c["id"] for c in group)
+            async with progress_lock:
+                done += 1
+                await progress()
+
+        async def one(group: list[dict[str, Any]]) -> None:
             async with gate:
                 if ec.budget.spent_usd + settings.search_cost_usd > ec.budget.cap_usd:
                     return  # the lookups before it used up the rest of the budget: these answers go back to 'not requested'
                 try:
-                    found = await lookup_answer(group[0], vctx, force=False)
-                    if found.route == "skip":
-                        skipped += 1
-                    else:
-                        searched += 1
-                    for c in group:  # answers with the same wording share the result
-                        await _save(store, c["id"], found)
+                    found: Any = await lookup_answer(group[0], vctx, force=False)
                 except Exception as e:
-                    log.warning("source search for answer %s failed: %s: %s", group[0]["id"], type(e).__name__, e)
-                    for c in group:
-                        await store.set_sources_status(c["id"], "failed", RETRY_MESSAGE)
-                finished.update(c["id"] for c in group)
-                async with progress_lock:
-                    done += 1
-                    await progress()
+                    found = e
+                await settle(group, found)
 
         try:
             for c in todo:  # every selected answer shows "searching" straight away
                 await store.set_sources_status(c["id"], "searching")
             await store.update_episode(episode_id, {"sources_batch_status": "running"})
             await progress()
-            await asyncio.gather(*(one(g) for g in searches))
+            if settings.batched:  # the whole video together: classified several to a call, planned once, searches shared (agents/batch.py)
+                from .batch import lookup_many
+
+                async def settled(i: int, found: Any) -> None:
+                    await settle(searches[i], found)
+
+                async def shown(i: int, tags: Optional[dict[str, Any]], research: Optional[dict[str, Any]]) -> None:
+                    for c in searches[i]:  # answers with the same wording share what is found
+                        await store.save_lookup_progress(c["id"], qa_tags=tags, research=research)
+
+                async def phase(label: str) -> None:
+                    await store.update_episode(episode_id, {"progress": {"label": label, "pct": int(100 * done / total)}})
+
+                await lookup_many([g[0] for g in searches], vctx, settled, force=False, fresh=recheck, on_progress=shown, on_phase=phase)
+            else:
+                await asyncio.gather(*(one(g) for g in searches))
             if searched:
                 from .tldr import refresh_tldr
 

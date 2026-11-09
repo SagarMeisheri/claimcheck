@@ -155,7 +155,7 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
         await report_progress(ec, STAGE_PROGRESS[0][1], 2)
         await store.clear_statements_without_sources(episode_id)  # leftovers from an earlier attempt would clash with the new rows
         from .sources import AutoSources
-        auto = AutoSources(ec) if settings.auto_sources_as_found else None
+        auto = AutoSources(ec) if settings.auto_sources_as_found and not settings.batched else None  # batched lookups need every answer first
         streamer = StatementStreamer(ec, auto)
         last = -1
         # SSE streaming: the extractor's reply arrives in pieces and each finished statement is saved at once.

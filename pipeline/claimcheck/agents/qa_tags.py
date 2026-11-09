@@ -19,6 +19,9 @@ since that classifier must never see the answer. Here, one run per answer:
                                 writes what was said, what the page says instead, how they differ and a verified quote
 So an answer costs 1 classifier call, or 2 when it is researched, or 3 when it is contradicted.
 
+The same steps run for a whole video in agents/batch.py (answer_call, settle_route and ground are shared): the first call takes several
+answers by one speaker (classify_answers), the plan covers every researched answer at once (agents/research.research_video).
+
 Code then applies the rules (decide):
   - a Choice below SURE falls back to the cautious label; "contradicted" needs CONTRADICT_SURE; grounded / contradicted need a page.
   - Rule 1, self-report: an answer that benefits something in the speaker's profile (stake_link "benefits") and that no independent
@@ -271,25 +274,120 @@ async def _classify(names: list[str], payload: Any, extra: Optional[dict[str, An
     return await tag_classifier(get_context().settings, level).classify(input=payload, questions={n: (extra or {}).get(n) or QUESTIONS[n] for n in names})
 
 
-def build_workflow(job: Job) -> Workflow:
+def answer_call(job: Job) -> tuple[list[str], dict[str, Any], dict[str, Any]]:
+    """What the first classifier call asks about one answer: (question names, the input, the questions built for this answer)."""
     ctx = job.ctx
     q, a = _question(ctx), _answer(ctx)
-    sp_tags, h_tags = speaker_tags(ctx), host_tags(ctx)
     job.items = stake_items(ctx)
+    names = ["answer_type", "claim_type"]
+    payload: dict[str, Any] = {**q, **a}
+    extra: dict[str, Any] = {}
+    if job.items:  # every answer is set against the speaker's profile; no tag decides whether to ask
+        names += ["stake_link", "stake_item", "self_serving_pivot", "disclosed"]
+        extra["stake_item"] = stake_item_question(job.items)
+        payload["speaker_profile"] = {"name": (ctx.get("speaker") or {}).get("name") or "the speaker",
+                                      "items": [{"n": i["n"], "kind": i["kind"], "text": i["text"]} for i in job.items]}
+        payload["description_notes"] = ctx.get("description_notes") or "none"
+    if host_tags(ctx) & SOFT_HOST_TAGS:
+        names.append("staged_pushback")
+        payload["host_interests"] = _interests(ctx.get("host") or {}, host_tags(ctx))
+    return names, payload, extra
+
+
+def settle_route(job: Job) -> str:
+    """After the first call: "exempt" (a pure opinion the classifier is sure of: no planner, no search) or "research". A failed call, or
+    a pure opinion it is not sure of, is researched: skipping the search is the bigger mistake."""
+    claim = job.answers.get("claim_type")
+    if getattr(claim, "choice", None) == "pure_opinion" and float(claim.probabilities.get("pure_opinion", 0.0)) >= PURE_OPINION_SURE:
+        job.route = "exempt"
+        return "exempt"
+    return "research"
+
+
+async def ground(job: Job, on_label: Optional[Any] = None) -> None:
+    """The second call, for a researched answer: grounding and match (and missing context), then the contradiction explainer when the
+    pages contradict the answer. `on_label` is awaited once the label is in, before the explainer's call: the verdict can be shown
+    while the explanation of it is still being written."""
+    ctx, r = job.ctx, job.research
+    q, a = _question(ctx), _answer(ctx)
+    points = [{"point": i, "text": _clean(p["text"], 300)} for i, p in enumerate(r.points, 1)]
+    claim = _label(job.answers.get("claim_type")) or "unknown"
+    names = ["grounding", "match"]
+    if claim in ("objective_fact", "anchored_opinion") and speaker_tags(ctx) & CONTEXT_TAGS and r.all_pages:
+        names.append("missing_context")
+    await job.ask(names, {**q, "answer": a["answer"], "claim_type": claim, "points": points, "pages": _pages(r)})
+    if on_label is not None:
+        await on_label()
+    if _contradicted(job.answers.get("grounding")) and r.all_pages:
+        from .contradiction import explain
+
+        job.contradiction = await explain(ctx.get("question") or "", a["answer"], [p["text"] for p in points], r.all_pages)
+
+
+# --- Several answers in one classifier call ---------------------------------------------------------------
+
+def _for_answer(q: Any, aid: str) -> Any:
+    """The same question, about the answer with this id in a batch."""
+    text = f"For the answer with id {aid} in the input's answers list: {q.instructions}"
+    return Binary(instructions=text, criteria=q.criteria) if isinstance(q, Binary) else Choice(instructions=text, criteria=q.criteria)
+
+
+def batches(jobs: list[Job], size: int) -> list[list[Job]]:
+    """Answers that can share a call: the same speaker (so the same profile items), at most `size` to a call, in the order given."""
+    groups: dict[tuple, list[Job]] = {}
+    for j in jobs:
+        sp = j.ctx.get("speaker") or {}
+        groups.setdefault((sp.get("name") or sp.get("label") or "", tuple(i["text"] for i in stake_items(j.ctx))), []).append(j)
+    size = max(1, size)
+    return [g[i:i + size] for g in groups.values() for i in range(0, len(g), size)]
+
+
+async def _classify_many(payload: Any, questions: dict[str, Any], level: str = "LOW") -> ClassifierResponse:
+    """One classifier call over the questions of several answers. A seam for tests."""
+    from .llm_agents import tag_classifier
+
+    return await tag_classifier(get_context().settings, level).classify(input=payload, questions=questions)
+
+
+async def classify_answers(jobs: list[Job]) -> None:
+    """The first call for several answers by one speaker, in ONE classifier call: each answer's questions are named by its id. A failed
+    call is made again one answer at a time, so one bad answer doesn't cost the others their tags; a budget error is raised."""
+    ec = get_context()
+    questions: dict[str, Any] = {}
+    answers_in: list[dict[str, Any]] = []
+    shared: dict[str, Any] = {}
+    plan: list[tuple[Job, str, list[str]]] = []
+    for n, job in enumerate(jobs, 1):
+        names, payload, extra = answer_call(job)
+        aid = f"a{n}"
+        answers_in.append({"id": aid, **{k: payload[k] for k in ("question_as_asked", "asked_by", "note", "answer", "spoken_words") if k in payload}})
+        shared = {k: v for k, v in payload.items() if k not in ("question_as_asked", "asked_by", "note", "answer", "spoken_words")}
+        for name in names:
+            questions[f"{aid}_{name}"] = _for_answer((extra or {}).get(name) or QUESTIONS[name], aid)
+        plan.append((job, aid, names))
+    try:
+        res = await _classify_many({"answers": answers_in, **shared}, questions)
+    except Exception as e:
+        if is_budget_error(e):
+            raise
+        if len(jobs) > 1:
+            log.warning("batched answer tags failed (%d answers), retrying one at a time: %s: %s", len(jobs), type(e).__name__, e)
+            for job in jobs:
+                await classify_answers([job])
+            return
+        job, _, names = plan[0]
+        job.failed += names
+        ec.log("qa_tags", "tag_failed", "skipped", f"{','.join(names)}: {type(e).__name__}: {e}"[:200])
+        return
+    for job, aid, names in plan:
+        job.answers.update({n: res.answers[f"{aid}_{n}"] for n in names if f"{aid}_{n}" in res.answers})
+
+
+def build_workflow(job: Job) -> Workflow:
+    job.items = stake_items(job.ctx)
 
     async def answer_node() -> Event:
-        names = ["answer_type", "claim_type"]
-        payload: dict[str, Any] = {**q, **a}
-        extra: dict[str, Any] = {}
-        if job.items:  # every answer is set against the speaker's profile; no tag decides whether to ask
-            names += ["stake_link", "stake_item", "self_serving_pivot", "disclosed"]
-            extra["stake_item"] = stake_item_question(job.items)
-            payload["speaker_profile"] = {"name": (ctx.get("speaker") or {}).get("name") or "the speaker",
-                                          "items": [{"n": i["n"], "kind": i["kind"], "text": i["text"]} for i in job.items]}
-            payload["description_notes"] = ctx.get("description_notes") or "none"
-        if h_tags & SOFT_HOST_TAGS:
-            names.append("staged_pushback")
-            payload["host_interests"] = _interests(ctx.get("host") or {}, h_tags)
+        names, payload, extra = answer_call(job)
         await job.ask(names, payload, extra)
         claim = job.answers.get("claim_type")
         return Event(output="answered", route=getattr(claim, "choice", None) or "objective_fact")  # a failed call: research (cautious)
@@ -307,7 +405,7 @@ def build_workflow(job: Job) -> Workflow:
     async def research_node() -> Any:
         from .research import research_answer
 
-        r = await research_answer(ctx, job.location, force=job.force)
+        r = await research_answer(job.ctx, job.location, force=job.force)
         if r is None:
             job.route = "no_points"
             return Event(route="no_points")
@@ -315,17 +413,7 @@ def build_workflow(job: Job) -> Workflow:
         return Event(output="researched", route="researched")
 
     async def grounding_node() -> None:
-        r = job.research
-        points = [{"point": i, "text": _clean(p["text"], 300)} for i, p in enumerate(r.points, 1)]
-        claim = _label(job.answers.get("claim_type")) or "unknown"
-        names = ["grounding", "match"]
-        if claim in ("objective_fact", "anchored_opinion") and sp_tags & CONTEXT_TAGS and r.all_pages:
-            names.append("missing_context")
-        await job.ask(names, {**q, "answer": a["answer"], "claim_type": claim, "points": points, "pages": _pages(r)})
-        if _contradicted(job.answers.get("grounding")) and r.all_pages:
-            from .contradiction import explain
-
-            job.contradiction = await explain(ctx.get("question") or "", a["answer"], [p["text"] for p in points], r.all_pages)
+        await ground(job)
         return None
 
     return Workflow(name=f"qa_tags_{uuid.uuid4().hex[:6]}", edges=[

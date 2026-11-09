@@ -16,7 +16,7 @@ from .. import prompts
 from ..config import Settings
 from ..context import get_context
 from ..guardrails.injection import screen_text, wrap_untrusted
-from ..schemas import ContradictionOut, CreatorProfileOut, ExtractionResult, PeopleOut, QaOut, ResearchPlan, SpeakerProfileOut, TldrOut
+from ..schemas import ContradictionOut, CreatorProfileOut, ExtractionResult, PeopleOut, QaOut, ResearchPlan, SpeakerProfileOut, TldrOut, VideoPlan
 
 
 def _model(name: str, settings: Settings) -> Any:
@@ -105,6 +105,12 @@ def research_planner_agent(s: Settings, name: str = "research_planner") -> LlmAg
     """Turns an answer into checkable points, with new queries per point and the positions on a disputed issue."""
     return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.RESEARCH_PLAN, include_contents="none",
                     output_schema=ResearchPlan, output_key="plan", generate_content_config=_research_cfg(s))
+
+
+def video_planner_agent(s: Settings, name: str = "video_planner") -> LlmAgent:
+    """Plans the research of every answer of a video together: points per answer, and searches that serve several answers."""
+    return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.RESEARCH_PLAN_VIDEO, include_contents="none",
+                    output_schema=VideoPlan, output_key="plan", generate_content_config=_research_cfg(s))
 
 
 def contradiction_agent(s: Settings, name: str = "contradiction") -> LlmAgent:

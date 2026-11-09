@@ -20,7 +20,7 @@ export interface Source {
   independence?: "independent" | "own_organisation" | "same_episode" | null; // where a page comes from: a note for the reader, treated alike
 }
 
-export type PointStatus = "sources_found" | "no_source";
+export type PointStatus = "sources_found" | "no_source" | "pending"; // pending: the pages are not in yet
 export interface ResearchPoint { text: string; kind: string; status: PointStatus }
 /** A page the grounding rests on: its title and search excerpt. */
 export interface GroundingBasis { site: string; url: string; relation: "page"; finding: string; quote: string }
@@ -51,7 +51,9 @@ export interface QaTags {
 /** How an answer's sources were researched: its checkable points and every page the searches returned. */
 export interface Research {
   version: number; points: ResearchPoint[]; positions: string[]; queries: string[]; dropped?: Record<string, number>;
-  searches?: { query: string; queries?: string[]; urls: string[]; failed?: boolean }[]; // what each search returned, in its own order
+  /** Only while the lookup runs: what it is doing now. Gone when it finishes. */
+  stage?: "planning" | "searching" | "reading" | "grounding";
+  searches?: { query: string; queries?: string[]; urls: string[]; failed?: boolean; pending?: boolean }[]; // what each search returned, in its own order (pending: still out)
   pages?: { url: string; site: string; title: string; independence: string }[]; // every page the searches returned
 }
 /** One incentive tag of a person for a video, with the fact it rests on and where that fact was found. */

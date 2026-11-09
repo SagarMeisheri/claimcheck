@@ -906,6 +906,17 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .qa-note { margin: 0; font-size: 0.85rem; }
 .qa-check .ccard-verifying { margin: 0; font-size: 0.88rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.4rem; }
 
+/* A card while its sources are looked up: one line of fixed height, so nothing moves as the step and what it found change. */
+.qa-check:has(.live-line) { display: block; }
+.live-line { display: flex; align-items: center; gap: 0.45rem; width: 100%; min-width: 0; height: 1.5rem; overflow: hidden; white-space: nowrap; font-size: 0.88rem; }
+.live-line .spinner { flex: none; }
+.live-label { flex: none; font-weight: 600; }
+.live-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-soft); }
+@media (prefers-reduced-motion: no-preference) {
+  .live-detail { animation: live-in 0.25s ease-out; }
+  @keyframes live-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+}
+
 /* Research results: what independent pages say about each point of an answer. Neutral styling: no right/wrong colours. */
 .rs { margin-top: 1rem; display: grid; gap: .75rem; }
 .rs-title { margin: 0; font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
