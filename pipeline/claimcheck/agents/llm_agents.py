@@ -16,7 +16,7 @@ from .. import prompts
 from ..config import Settings
 from ..context import get_context
 from ..guardrails.injection import screen_text, wrap_untrusted
-from ..schemas import CreatorProfileOut, ExtractionResult, PeopleOut, QaOut, ResearchPlan, SpeakerProfileOut
+from ..schemas import ContradictionOut, CreatorProfileOut, ExtractionResult, PeopleOut, QaOut, ResearchPlan, SpeakerProfileOut, TldrOut
 
 
 def _model(name: str, settings: Settings) -> Any:
@@ -105,6 +105,18 @@ def research_planner_agent(s: Settings, name: str = "research_planner") -> LlmAg
     """Turns an answer into checkable points, with new queries per point and the positions on a disputed issue."""
     return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.RESEARCH_PLAN, include_contents="none",
                     output_schema=ResearchPlan, output_key="plan", generate_content_config=_research_cfg(s))
+
+
+def contradiction_agent(s: Settings, name: str = "contradiction") -> LlmAgent:
+    """Says what was said and how the page differs, for an answer tagged contradicted (agents/contradiction.py)."""
+    return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.CONTRADICTION, include_contents="none",
+                    output_schema=ContradictionOut, output_key="contradiction", generate_content_config=_research_cfg(s))
+
+
+def tldr_agent(s: Settings, name: str = "tldr") -> LlmAgent:
+    """Writes the podcast profile's TL;DRs from a digest of the video's tags (agents/tldr.py)."""
+    return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.TLDR, include_contents="none",
+                    output_schema=TldrOut, output_key="tldr", generate_content_config=_research_cfg(s))
 
 
 # --- Creator and speaker profiles ------------------------------------------------------------------

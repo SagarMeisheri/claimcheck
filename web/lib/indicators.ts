@@ -107,6 +107,48 @@ export function chainOf(c: Claim): string {
   return parts.join(" → ");
 }
 
+/** Verdicts, worst first: the order of the scoreboard, the "worst first" sort and the key findings. */
+export const VERDICT_ORDER: Grounding[] = ["contradicted", "ungrounded", "plausible", "grounded", "exempt"];
+
+/** The answer's evidence verdict, or null when it hasn't been tagged. */
+export function verdictOf(c: Claim): Grounding | null {
+  return c.qa_tags?.grounding?.label ?? null;
+}
+
+/** Whether the answer carries anything worth a second look besides its verdict: a conflict, a stake, a flag, or a pivot or evasive answer. */
+export function hasSignals(c: Claim): boolean {
+  const t = c.qa_tags;
+  if (!t) return false;
+  return !!t.conflict || !!t.stake || flagsOf(c).length > 0 || t.answer?.type === "pivot" || t.answer?.type === "evasive";
+}
+
+/** How much attention an answer needs, 0 first: contradicted, ungrounded, anything with signals, plausible, grounded, exempt, untagged. */
+export function severity(c: Claim): number {
+  const g = verdictOf(c);
+  if (g === "contradicted") return 0;
+  if (g === "ungrounded") return 1;
+  if (hasSignals(c)) return 2;
+  if (g === "plausible") return 3;
+  if (g === "grounded") return 4;
+  if (g === "exempt") return 5;
+  return 6;
+}
+
+/** What the sources say about an answer, for the card: the first page the verdict rests on, else the AI summary of the search. */
+export interface Proof { text: string; quote?: string; site?: string; url?: string; more: number }
+export function proofOf(c: Claim): Proof | null {
+  const basis = c.qa_tags?.grounding?.basis ?? [];
+  const b = basis.find((x) => x.finding || x.quote);
+  if (b) return { text: b.finding || b.quote, quote: b.finding && b.quote ? b.quote : undefined, site: b.site, url: b.url, more: Math.max(0, basis.length - 1) };
+  const text = verdictOf(c) === "contradicted" ? c.counter_summary || c.sources_summary : c.sources_summary || c.counter_summary;
+  return text ? { text, more: 0 } : null;
+}
+
+/** The answers that most need a look, worst first and then in video order. */
+export function keyFindings(claims: Claim[]): Claim[] {
+  return claims.filter((c) => severity(c) <= 2).sort((a, b) => severity(a) - severity(b) || a.start_s - b.start_s);
+}
+
 export type PatternKind = "staged_pushback" | "self_serving_pivot" | "unchallenged_anchored";
 export const PATTERN_UI: Record<PatternKind, { word: string; hint: string }> = {
   staged_pushback: { word: "Softball setup", hint: "A pushback question from a host tied to the guest, answered with a ready rebuttal the host doesn't press." },
@@ -162,11 +204,12 @@ export function interviewProfile(claims: Claim[]): InterviewProfile | null {
 }
 
 /** One tag picked at the top of the questions as a filter: how the question was asked, how it was answered, or the evidence. */
-export type TagFilter = { dim: "q"; key: QuestionType } | { dim: "a"; key: AnswerType } | { dim: "g"; key: Grounding };
+export type TagFilter = { dim: "q"; key: QuestionType } | { dim: "a"; key: AnswerType } | { dim: "g"; key: Grounding } | { dim: "f"; key: "conflict" | "stake" };
 
 /** The answers a tag filter keeps. A question tag keeps every answer to a question tagged that way. */
 export function applyTagFilter(claims: Claim[], f: TagFilter | null): Claim[] {
   if (!f) return claims;
+  if (f.dim === "f") return claims.filter((c) => (f.key === "conflict" ? !!c.qa_tags?.conflict : !!c.qa_tags?.stake));
   if (f.dim === "a") return claims.filter((c) => c.qa_tags?.answer?.type === f.key);
   if (f.dim === "g") return claims.filter((c) => c.qa_tags?.grounding?.label === f.key);
   return groupByQuestion(claims).filter((g) => !g.implied && g.answers[0].question_analysis?.type === f.key).flatMap((g) => g.answers);

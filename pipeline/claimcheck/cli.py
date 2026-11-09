@@ -3,6 +3,7 @@
   python -m claimcheck.cli https://www.youtube.com/watch?v=VIDEO_ID
   python -m claimcheck.cli --sources CLAIM_ID            # look up sources for one stored claim
   python -m claimcheck.cli --sources-all EPISODE_ID      # look up sources for every statement of a video
+  python -m claimcheck.cli --tldr EPISODE_ID [--no-save]  # write the podcast profile's TL;DRs (--no-save: print only)
   python -m claimcheck.cli --qa EPISODE_ID               # the questions for a finished video's Q&A tab
   python -m claimcheck.cli --relink-channels             # give videos saved without a channel their channel + creator
 
@@ -24,6 +25,8 @@ def main() -> None:
     ap.add_argument("--sources", metavar="CLAIM_ID", help="look up sources for one stored claim")
     ap.add_argument("--sources-all", metavar="EPISODE_ID", help="look up sources for every statement of a video")
     ap.add_argument("--qa", metavar="EPISODE_ID", help="write the Q&A questions for a finished video")
+    ap.add_argument("--tldr", metavar="EPISODE_ID", help="write the podcast profile's TL;DRs for a video (one model call)")
+    ap.add_argument("--no-save", action="store_true", help="with --tldr: print the result and save nothing")
     ap.add_argument("--relink-channels", action="store_true",
                     help="give videos saved without a channel their channel (and creator profile, if any)")
     ap.add_argument("--json", action="store_true", help="print the full result as JSON")
@@ -47,6 +50,26 @@ def main() -> None:
             return
         asyncio.run(store.start_claim_sources(args.sources))
         print(json.dumps(asyncio.run(run_claim_sources(args.sources, settings=settings, store=store)), indent=2))
+        return
+    if args.tldr:
+        from .agents.sources import _context
+        from .agents.tldr import make_tldr, save_tldr
+        from .context import set_context
+
+        async def tldr() -> dict:
+            ep = await store.get_episode(args.tldr)
+            if not ep:
+                return {"error": "No such video."}
+            token = set_context(_context(args.tldr, ep, settings, store))
+            try:
+                out = await make_tldr(store, args.tldr)
+                if out and not args.no_save:
+                    await save_tldr(store, args.tldr, out)
+                return out or {"error": "Nothing to summarise, or the call failed."}
+            finally:
+                token.var.reset(token)
+
+        print(json.dumps(asyncio.run(tldr()), indent=2, ensure_ascii=False))
         return
     if args.qa:
         from .agents.qa import generate_qa

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Cited, CreatorProfile, EpisodeSpeaker, ProfileV2, Section, Step } from "@/lib/types";
 import { IncentiveChips } from "@/components/Indicators";
 import { INCENTIVE_UI } from "@/lib/indicators";
@@ -25,12 +25,13 @@ export function CreatorTab({ creator, hosts }: { creator: CreatorProfile | null;
  * Profiles show neutral facts only; the notes on known positions and criticisms that steer source searches are
  * never sent to the browser.
  */
-export function ProfileTabs({ summary, sections, creator, speakers, notes = [], steps = [], onSeek, onSection }: {
+export function ProfileTabs({ summary, sections, creator, speakers, notes = [], steps = [], onSeek, onSection, showProfiles = 0 }: {
   summary: string | null | undefined; sections: Section[]; creator: CreatorProfile | null; speakers: EpisodeSpeaker[];
   notes?: string[]; // how the description introduces people, and its sponsor lines
   steps?: Step[]; // the steps already finished (done or skipped)
   onSeek(s: number): void;
   onSection?(s: Section): void; // play this chapter and jump the statement list to it
+  showProfiles?: number; // a counter: each time it goes up, the Profiles tab opens (the podcast profile's "Full profile")
 }) {
   const tabs: { key: Tab; label: string }[] = [
     ...(summary ? [{ key: "summary" as Tab, label: "Summary" }] : []),
@@ -40,6 +41,7 @@ export function ProfileTabs({ summary, sections, creator, speakers, notes = [], 
   ];
   const [picked, setTab] = useState<Tab | null>(null);
   const [more, setMore] = useState(false);
+  useEffect(() => { if (showProfiles) setTab("profiles"); }, [showProfiles]);
   if (!tabs.length) return null;
   // The first tab until one is picked (the summary or chapters can arrive later, while the video is analysed).
   const tab = picked && tabs.some((t) => t.key === picked) ? picked : tabs[0].key;

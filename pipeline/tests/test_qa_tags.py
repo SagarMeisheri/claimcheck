@@ -225,3 +225,76 @@ def test_a_research_failure_reaches_the_caller_as_itself(monkeypatch):
 
 async def _answer_with(names):
     return ClassifierResponse(answers={n: BASE[n] for n in names if n in BASE})
+
+
+# --- The contradiction explainer (agents/contradiction.py) -------------------------------------------------
+
+from claimcheck.agents import contradiction  # noqa: E402
+from claimcheck.schemas import ContradictionOut  # noqa: E402
+
+CONTRADICTED = {**BASE, "grounding": ch("contradicted", qa_tags.GROUNDING, 0.8)}
+PAGES = (
+    {**page("bloomberg.com"), "title": "AI capex", "text": "Big tech may spend about $200 billion on AI in 2025, a two-year gain that triples 2020-2022."},
+    {**page("other.example"), "text": "Unrelated."},
+)
+GOOD = ContradictionOut(page=1, said="AI needs $1.5 to 2 trillion in revenue", sources_say="Big tech capex is about $200 billion in 2025",
+                        difference="The page gives $200 billion, not trillions.", quote="may spend about $200 billion on AI in 2025")
+
+
+def run_explained(monkeypatch, out, **kw):
+    seen = []
+
+    async def gen(state):
+        seen.append(state)
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+    monkeypatch.setattr(contradiction, "_generate", gen)
+    tags, r, calls, ec = run(monkeypatch, CONTRADICTED, pages=PAGES, **kw)
+    return tags, seen, ec
+
+
+def test_a_contradicted_answer_gets_what_was_said_and_how_the_page_differs(monkeypatch):
+    tags, seen, _ = run_explained(monkeypatch, GOOD)
+    c = tags["grounding"]["contradiction"]
+    assert tags["grounding"]["label"] == "contradicted" and len(seen) == 1
+    assert c["said"].startswith("AI needs") and c["sources_say"].startswith("Big tech") and c["difference"].startswith("The page gives")
+    assert c["site"] == "bloomberg.com" and c["url"] == "https://bloomberg.com/a" and c["quote"] == "may spend about $200 billion on AI in 2025"
+    assert "PAGE 1" in seen[0]["pages"] and "PAGE 2" in seen[0]["pages"] and seen[0]["question"]
+
+
+def test_the_explainer_is_not_called_for_other_verdicts(monkeypatch):
+    called = []
+
+    async def gen(state):
+        called.append(1)
+
+    monkeypatch.setattr(contradiction, "_generate", gen)
+    assert "contradiction" not in run(monkeypatch, BASE, pages=PAGES)[0]["grounding"]
+    unsure = run(monkeypatch, {**BASE, "grounding": ch("contradicted", qa_tags.GROUNDING, 0.5)}, pages=PAGES)[0]  # too unsure: stays plausible
+    assert unsure["grounding"]["label"] == "plausible" and "contradiction" not in unsure["grounding"] and called == []
+
+
+def test_a_quote_that_is_not_on_the_page_is_dropped_but_the_rest_is_kept(monkeypatch):
+    tags, _, _ = run_explained(monkeypatch, GOOD.model_copy(update={"quote": "spending will reach $5 trillion by 2030"}))
+    c = tags["grounding"]["contradiction"]
+    assert "quote" not in c and c["difference"]
+
+
+def test_a_quote_may_use_ellipses_and_any_case(monkeypatch):
+    out = GOOD.model_copy(update={"quote": "MAY SPEND about $200 billion ... a two-year gain that triples"})
+    assert run_explained(monkeypatch, out)[0]["grounding"]["contradiction"]["quote"]
+
+
+def test_an_answer_pointing_at_no_real_page_saves_nothing(monkeypatch):
+    for bad in (GOOD.model_copy(update={"page": 0}), GOOD.model_copy(update={"page": 9}), GOOD.model_copy(update={"difference": ""}), None):
+        tags, _, _ = run_explained(monkeypatch, bad)
+        assert tags["grounding"]["label"] == "contradicted" and "contradiction" not in tags["grounding"]
+
+
+def test_a_failed_explainer_leaves_the_verdict_and_never_hides_a_budget_error(monkeypatch):
+    tags, _, ec = run_explained(monkeypatch, RuntimeError("model down"))
+    assert tags["grounding"]["label"] == "contradicted" and "contradiction" not in tags["grounding"] and any(e.rule == "contradiction_failed" for e in ec.events)
+    with pytest.raises(BudgetExceeded):
+        run_explained(monkeypatch, BudgetExceeded("cap"))

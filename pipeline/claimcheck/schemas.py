@@ -156,6 +156,33 @@ class ResearchPlan(BaseModel):
     positions: list[Position] = Field(default_factory=list, description="When disputed: 2-3 positions held on the issue; empty otherwise")
 
 
+class ContradictionOut(BaseModel):
+    """How one page contradicts an answer (agents/contradiction.py). Code checks the page number and that the quote is on the page."""
+
+    page: int = Field(default=0, description="The number of the ONE page that most clearly contradicts a main point of the answer; 0 if no page really does")
+    said: str = Field(default="", description="The specific claim of the answer that this page contradicts, as the speaker put it, with figures, units and periods exactly (at most 25 words); not the whole answer")
+    sources_say: str = Field(default="", description="What that page says about the same thing instead, using the page's own figures (at most 30 words)")
+    difference: str = Field(default="", description="One plain sentence saying how they differ: a different figure, period, definition, outcome or account (at most 25 words)")
+    quote: str = Field(default="", description="A fragment copied exactly from that page's excerpt that shows the difference (at most 200 characters); empty if none fits")
+
+
+class PersonTldr(BaseModel):
+    label: str = Field(description="The person's label exactly as given in the digest")
+    tldr: str = Field(description="One sentence (at most 28 words): who they are in this video and what they have a stake in")
+
+
+class TldrOut(BaseModel):
+    """The TL;DRs of one video's podcast profile (agents/tldr.py). Numbers come from the digest, which code counted."""
+
+    headline: str = Field(description="One sentence (at most 30 words): what the conversation was about and the main thing the checks found")
+    questions: str = Field(description="At most 22 words: how the host asked their questions")
+    answers: str = Field(description="At most 22 words: how the questions were answered")
+    statements: str = Field(description="At most 22 words: what kinds of statements were made")
+    evidence: str = Field(description="At most 28 words: what the web pages found; name the topics of any contradicted answers")
+    flags: str = Field(description="At most 24 words: conflicts, stakes and patterns found; 'None found.' if there are none")
+    people: list[PersonTldr] = Field(default_factory=list, description="One entry for each person and the show in the digest")
+
+
 # --- Profiles (agents/creators.py, agents/speakers.py) ---------------------------------------------
 # Every item a profile lists names the search page it came from (`page`, the page's number in the prompt). Code maps it to the
 # page's URL and drops an item whose page doesn't exist, so each fact a viewer sees links to where it was found.

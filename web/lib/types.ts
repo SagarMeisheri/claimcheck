@@ -24,6 +24,8 @@ export type PointStatus = "sources_found" | "no_source";
 export interface ResearchPoint { text: string; kind: string; status: PointStatus }
 /** A page the grounding rests on: its title and search excerpt. */
 export interface GroundingBasis { site: string; url: string; relation: "page"; finding: string; quote: string }
+/** For a contradicted answer (agents/contradiction.py): the claim the pages contradict, what the page says instead, how they differ, and a verbatim excerpt from that page. */
+export interface GroundingContradiction { said: string; sources_say: string; difference: string; quote?: string; site: string; url: string; title?: string }
 /** How each question was asked (agents/interview.py, one batched classifier call per video, never shown the answer). */
 export type QuestionType = "factual" | "explanatory" | "experiential" | "evaluative" | "speculative" | "challenging" | "unclear";
 export interface QuestionAnalysis { type: QuestionType; p?: number; spoken?: boolean } // spoken false: tagged from the AI's plain-words question
@@ -37,7 +39,7 @@ export interface QaTags {
   version: number;
   answer?: { type: AnswerType; p: number };
   claim?: { type: ClaimKind; p: number };
-  grounding?: { label: Grounding; p: number; was?: Grounding; evidence: "strong" | "limited" | "none"; basis: GroundingBasis[] };
+  grounding?: { label: Grounding; p: number; was?: Grounding; evidence: "strong" | "limited" | "none"; basis: GroundingBasis[]; contradiction?: GroundingContradiction };
   match?: { label: "high" | "medium" | "low"; p: number };
   flags?: QaFlag[];
   conflict?: { kind: "self_report" | "self_serving_pivot"; disclosure?: "disclosed" | "undisclosed" };
@@ -56,7 +58,12 @@ export interface Research {
 export type IncentiveTag = "commercial" | "financial" | "ideological" | "reputational" | "academic" | "sponsor_aligned" | "invested_peer" | "adversarial";
 export interface Incentive { reason: string; url?: string; site?: string }
 /** How host and guest dealt with each other (agents/interview.py), and what the description tells viewers. */
-export interface Interaction { dynamic?: "promotional" | "neutral" | "adversarial"; p?: number; description_notes?: string[] }
+/** The podcast profile's TL;DRs (pipeline agents/tldr.py): a sentence for the whole video, one per section and one per person (by label; "__show" is the show). `counts` is what they were written from. */
+export interface Tldr {
+  headline: string; questions: string; answers: string; statements: string; evidence: string; flags: string;
+  people: Record<string, string>; counts?: Record<string, number>; generated_at?: string;
+}
+export interface Interaction { dynamic?: "promotional" | "neutral" | "adversarial"; p?: number; description_notes?: string[]; tldr?: Tldr }
 /** A fact in a profile, linked to the search page it came from. */
 export interface Cited { url?: string; site?: string }
 export interface ProfileV2 {

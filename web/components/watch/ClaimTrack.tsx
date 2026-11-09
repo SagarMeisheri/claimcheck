@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { Claim } from "@/lib/types";
 import { STATEMENT_TYPES, typeOf } from "@/lib/statements";
 import { clock } from "@/lib/format";
+import { GROUNDING_UI, verdictOf } from "@/lib/indicators";
 
 function tickClass(c: Claim): string {
   if (c.not_checked_reason === "outside_policy") return "tick tick-skipped";
@@ -12,7 +13,9 @@ function tickClass(c: Claim): string {
 
 function statusLabel(c: Claim): string {
   const label = STATEMENT_TYPES[typeOf(c.statement_type)].label.toLowerCase();
-  return c.sources.length ? `${label}, with sources` : label;
+  const g = verdictOf(c);
+  const base = c.sources.length ? `${label}, with sources` : label;
+  return g ? `${base}, ${GROUNDING_UI[g].word.toLowerCase()}` : base;
 }
 
 export function tickLabel(c: Claim): string {
@@ -20,7 +23,8 @@ export function tickLabel(c: Claim): string {
 }
 
 /**
- * Our timeline under the player: one tick per statement at its timestamp (in its type's colour), a playhead that
+ * Our timeline under the player: one tick per statement at its timestamp (in its verdict's colour, or its type's when it has
+ * no verdict yet; contradicted ones stand taller), a playhead that
  * follows the video, tap a tick to seek, drag along the track to scrub from statement to statement.
  */
 export function ClaimTrack({ claims, duration, time, currentId, onSeekClaim }: {
@@ -56,17 +60,20 @@ export function ClaimTrack({ claims, duration, time, currentId, onSeekClaim }: {
         }}
         onPointerCancel={() => setPreview(null)}
       >
-        {claims.map((c) => (
+        {claims.map((c) => {
+          const g = verdictOf(c);
+          return (
           <button
             key={c.id}
-            className={`${tickClass(c)}${c.id === currentId ? " tick-current" : ""}`}
-            style={{ left: `${(c.start_s / total) * 100}%`, ["--tick" as string]: STATEMENT_TYPES[typeOf(c.statement_type)].cssVar }}
+            className={`${tickClass(c)}${g ? ` ipt-g-${g}` : ""}${c.id === currentId ? " tick-current" : ""}`}
+            style={{ left: `${(c.start_s / total) * 100}%`, ["--tick" as string]: g ? "var(--tone)" : STATEMENT_TYPES[typeOf(c.statement_type)].cssVar }}
             aria-label={tickLabel(c)}
             title={tickLabel(c)}
             disabled={c.not_checked_reason === "outside_policy"}
             onClick={() => onSeekClaim(c)}
           />
-        ))}
+          );
+        })}
         <span className="playhead" style={{ left: `${Math.min(100, (time / total) * 100)}%` }} aria-hidden="true" />
         {preview && (
           <span className="track-preview" style={{ left: preview.x }}>

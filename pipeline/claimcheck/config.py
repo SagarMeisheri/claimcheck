@@ -104,6 +104,9 @@ class Settings:
     tag_answers: bool = _env("CLAIMCHECK_TAG_ANSWERS", "1") == "1"
     tag_model: str = field(default_factory=lambda: _env("CLAIMCHECK_TAG_MODEL", "gemini-3.8-flash"))
     tag_cost_estimate_usd: float = float(_env("CLAIMCHECK_TAG_COST_ESTIMATE_USD", "0.03"))  # one answer's two calls, the grounding one with ~30 pages
+    # The podcast profile's TL;DRs (agents/tldr.py): one model call per video, again whenever its answers are checked.
+    tldr: bool = _env("CLAIMCHECK_TLDR", "1") == "1"
+    tldr_cost_estimate_usd: float = float(_env("CLAIMCHECK_TLDR_COST_ESTIMATE_USD", "0.02"))
     # Speaker profiles (agents/speakers.py): one web search + one model call per new named speaker, then reused.
     # A channel that isn't on the curated creator list is looked up on the web once (agents/creators.py) and remembered.
     profile_creators: bool = _env("CLAIMCHECK_PROFILE_CREATORS", "1") == "1"
