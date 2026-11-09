@@ -13,10 +13,10 @@ import { CheckedAt } from "@/components/CheckedAt";
 import { type CardPhase } from "./ClaimCard";
 import { StatementDetail } from "./StatementDetail";
 import { groupBySection } from "@/components/feed/StatementCarousel";
-import { InterviewProfile } from "@/components/Indicators";
-import { applyTagFilter, type TagFilter } from "@/lib/indicators";
+import { applyTagFilter, severity, type TagFilter } from "@/lib/indicators";
 import { QaCard } from "./QaCard";
-import { groupByQuestion } from "@/lib/qa";
+import { groupByQuestion, type QaGroup } from "@/lib/qa";
+import { KeyFindings, PodcastProfile, type Sort } from "./PodcastProfile";
 import { Drawer, PaneNav } from "@/components/Drawer";
 import { ClaimTrack } from "./ClaimTrack";
 import { ProfileTabs } from "./ProfileTabs";
@@ -101,6 +101,9 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const [autoAll, setAutoAll] = useState(false); // "Play in order"
   const [countdown, setCountdown] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [profilesAsk, setProfilesAsk] = useState(0); // "Full profile" clicked in the podcast profile: open the Profiles tab
+  const [sort, setSort] = useState<Sort>("time"); // the feed in video order, or worst verdict first
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); // chapters folded to their heading
 
   const byView = view === "all" ? everything : view === "with_sources" ? withSources : everything.filter((c) => typeOf(c.statement_type) === view);
   const viewList = applyTagFilter(match ? byView.filter((c) => c.sources_match === match) : byView, tag);
@@ -117,6 +120,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   // Runs after layout settles, because switching the player on changes the page height above the cards.
   const scrollToCard = (id: string) => scrollToEl(`card-${id}`);
   const scrollToEl = (elId: string) => {
+    setCollapsed((c) => (c.size ? new Set() : c)); // a card inside a folded chapter: unfold first
     const go = () => {
       const el = document.getElementById(elId);
       if (!el) return;
@@ -124,7 +128,9 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
       // Wide screens: each column scrolls on its own.
       const box = scrollParent(el);
       if (box) {
-        const top = box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - 12;
+        const bar = box.querySelector<HTMLElement>(".pp"); // the pinned scoreboard covers the top of the feed
+        const pinnedBar = bar && getComputedStyle(bar).position === "sticky" ? bar.offsetHeight : 0;
+        const top = box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - 12 - pinnedBar;
         box.scrollTo({ top: Math.max(0, top), behavior });
         return;
       }
@@ -316,6 +322,34 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   // Sources already checked for this video ("last checked" shown): no button to check them all again.
   const lookupEligible = !ep.sources_checked_at && ep.claims.some((c) => canCheckSources(c));
 
+  // A key finding clicked: show the card (a filter may hide it), mark it and scroll to it.
+  const jumpTo = (c: Claim) => {
+    if (!viewList.includes(c)) { setView("all"); setMatch(null); setTag(null); }
+    setSelectedId(c.id);
+    window.setTimeout(() => scrollToCard(c.id), 60);
+  };
+    const worstFirst = (gs: QaGroup[]) => gs.map((g, i) => ({ g, i, s: Math.min(...g.answers.map(severity)) })).sort((a, b) => a.s - b.s || a.i - b.i).map((x) => x.g);
+  const card = (grp: QaGroup) => (
+    <QaCard key={grp.answers[0].id} group={grp} auto={auto} running={lookingUp} activeId={activeId} selectedId={selected?.id ?? null}
+            onPlay={playCard} onSelect={select} onLookedUp={lookedUp} />
+  );
+  const foldToggle = (key: string) => setCollapsed((c) => { const n = new Set(c); if (!n.delete(key)) n.add(key); return n; });
+  // "Check sources for all" (or "Re-check all"): a small button at the foot of the podcast profile.
+  const checkAll = !checking && (
+    <CheckAllSources videoId={ep.youtube_video_id} running={ep.sources_batch === "running"} eligible={lookupEligible && !auto}
+                     canRecheck={ep.claims.some((c) => c.sources_status === "done" || c.sources_route === "skip")} onRecheck={() => setLooked({})} />
+  );
+  const head = (cls: string) => (
+    <header className={`score-head ${cls}`}>
+      <h1>{ep.title}</h1>
+      <div className="watch-channel">
+        <Avatar name={ep.channel_name} size={20} />
+        {ep.channel_id ? <Link href={`/c/${ep.channel_id}`}>{ep.channel_name}</Link> : <span>{ep.channel_name}</span>}
+        <button className="btn secondary small share-ep" onClick={() => share(window.location.href.split("#")[0], ep.title)}>Share</button>
+      </div>
+    </header>
+  );
+
   return (
     <div className={`score${docked ? " has-dock" : ""}`}>
       <div className="score-main">
@@ -353,94 +387,65 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           </p>
         )}
 
-        <header className="score-head">
-          <h1>{ep.title}</h1>
-          <div className="watch-channel">
-            <Avatar name={ep.channel_name} size={20} />
-            {ep.channel_id ? <Link href={`/c/${ep.channel_id}`}>{ep.channel_name}</Link> : <span>{ep.channel_name}</span>}
-            <button className="btn secondary small share-ep" onClick={() => share(window.location.href.split("#")[0], ep.title)}>Share</button>
-          </div>
-        </header>
+        {head("score-head-rail")}
 
         {checking && <CheckProgress videoId={ep.youtube_video_id} initialSteps={ep.progress?.steps ?? []} />}
 
         <ProfileTabs summary={ep.summary} sections={ep.sections ?? []} creator={ep.creator} speakers={ep.speakers} notes={ep.interaction?.description_notes ?? []}
                      steps={(ep.steps ?? ep.progress?.steps ?? []).filter((x) => x.status === "done" || x.status === "skipped")}
-                     onSeek={(s) => playFrom(s)} onSection={goToSection} />
+                     onSeek={(s) => playFrom(s)} onSection={goToSection} showProfiles={profilesAsk} />
         </div>
       </div>
 
       <div className="score-side">
+        {head("score-head-feed")}
         {ep.claims.length > 0 && (
-          <section className="score-summary" aria-label="Breakdown">
-            <p className="score-line">
-              <strong>{ep.claims.length} {ep.claims.length === 1 ? nouns.one : nouns.many}</strong>
-              <span className="meta">
-                {withSources.length} with sources{searchingCount > 0 && ` · searching ${searchingCount} now`}
-                {ep.sources_checked_at && <> · <CheckedAt iso={ep.sources_checked_at} prefix="last checked" /></>}
-              </span>
-            </p>
-            <p className="type-bar" aria-hidden="true">
-              {TYPE_ORDER.filter((t) => typeCounts[t]).map((t) => (
-                <span key={t} style={{ flexGrow: typeCounts[t], background: STATEMENT_TYPES[t].cssVar }} />
-              ))}
-            </p>
-            {!checking && <CheckAllSources videoId={ep.youtube_video_id} running={ep.sources_batch === "running"} eligible={lookupEligible && !auto}
-                                                canRecheck={ep.claims.some((c) => c.sources_status === "done" || c.sources_route === "skip")} onRecheck={() => setLooked({})} />}
-          </section>
-        )}
-        {ep.claims.length > 0 && (
-          <>
-            <div className="filters stmt-filters" role="group" aria-label="Filter by statement type">
-              <span className="stmt-filter-label">Statement type</span>
-              <button className="chip" aria-pressed={view === "all" && !tag} onClick={() => { setView("all"); setTag(null); }}>All {everything.length}</button>
-              {chipTypes.map((t) => (
-                <button key={t} className="chip chip-type" aria-pressed={view === t} onClick={() => setView(t)}
-                        style={{ ["--stype" as string]: STATEMENT_TYPES[t].cssVar }} title={STATEMENT_TYPES[t].meaning}>
-                  {STATEMENT_TYPES[t].label} {typeCounts[t] ?? 0}
-                </button>
-              ))}
-              <button className="chip" aria-pressed={view === "with_sources"} onClick={() => setView("with_sources")}>With sources {withSources.length}</button>
-            </div>
-            {view !== "all" && view !== "with_sources" && (
-              <p className="meta stmt-legend">{STATEMENT_TYPES[view].meaning}{hasSources(view) ? " Press Check sources to see what web sources say about it." : ""}</p>
-            )}
-            {playable.length > 1 && (
-              <p className="play-all">
-                <button className="btn secondary small" onClick={() => { const first = playable[0]; setAutoAll(true); playMoment(first); scrollToCard(first.id); }}>
-                  ▶ Play in order
-                </button>
-                {autoAll && <button className="btn secondary small" onClick={() => { setAutoAll(false); setCountdown(null); }}>Stop</button>}
-              </p>
-            )}
-          </>
+          <PodcastProfile claims={everything} interaction={ep.interaction} total={ep.claims.length} noun={ep.claims.length === 1 ? nouns.one : nouns.many}
+                          withSources={withSources.length} searching={searchingCount} checkedAt={ep.sources_checked_at ?? null}
+                          typeCounts={typeCounts} chipTypes={chipTypes} view={view} onView={setView} tag={tag} onTag={setTag}
+                          onAll={() => { setView("all"); setTag(null); }} sort={sort} onSort={setSort}
+                          playAll={playable.length > 1 ? (autoAll ? "running" : "idle") : "hidden"}
+                          onPlayAll={() => { const first = playable[0]; setAutoAll(true); playMoment(first); scrollToCard(first.id); }}
+                          onStop={() => { setAutoAll(false); setCountdown(null); }}
+                          checkAll={checkAll} onJump={jumpTo} speakers={ep.speakers} creator={ep.creator}
+                          onOpenProfiles={() => { setProfilesAsk((n) => n + 1); if (!wide) window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }} />
         )}
 
-        {qa && <InterviewProfile claims={everything} interaction={ep.interaction} onOpen={select} filter={tag} onFilter={setTag} />}  {/* fills in as answers are tagged */}
+        {sort === "time" && !tag && view === "all" && <KeyFindings claims={visible} onJump={jumpTo} />}
 
         <div className="score-timeline">
           {playable.length === 0
             ? <p className="meta pad">{tag ? "Nothing matches this tag with the filters above. Click the tag again to clear it." : view === "with_sources" ? "No sources looked up yet. Press Check sources on any claim."
                 : view !== "all" ? `No ${STATEMENT_TYPES[view].plural} in this video.`
                 : checking ? `${qa || ep.claims.length === 0 ? "Questions and answers" : "Statements"} appear here as they are found.` : "No questions or statements for this video."}</p>
-            : groups.map((g, gi) => (
-              <section key={`${g.key}-${gi}`} className="tl-group" id={g.section ? `sec-${g.section.idx}` : undefined}>
-                {g.section && (
-                  <header className="tl-head">
-                    <button type="button" className="tl-head-time" onClick={() => playFrom(g.section!.start_s)}
-                            aria-label={`Play this part from ${clock(g.section.start_s)}`}>{clock(g.section.start_s)}</button>
-                    <h3 className="tl-title">{g.section.title}</h3>
-                    {g.section.summary && <p className="tl-summary">{g.section.summary}</p>}
-                  </header>
-                )}
-                <ol className="qa-list">
-                  {groupByQuestion(g.items).map((grp) => (
-                    <QaCard key={grp.answers[0].id} group={grp} auto={auto} running={lookingUp} activeId={activeId} selectedId={selected?.id ?? null}
-                            onPlay={playCard} onSelect={select} onLookedUp={lookedUp} />
-                  ))}
-                </ol>
-              </section>
-            ))}
+            : sort === "worst" ? (
+              <ol className="qa-list">{worstFirst(groupByQuestion(playable)).map(card)}</ol>
+            ) : groups.map((g, gi) => {
+              const key = `${g.key}-${gi}`;
+              const folded = collapsed.has(key);
+              const flagged = g.items.filter((c) => severity(c) <= 1).length;
+              return (
+                <section key={key} className="tl-group" id={g.section ? `sec-${g.section.idx}` : undefined}>
+                  {g.section && (
+                    <header className="tl-head">
+                      <button type="button" className="tl-head-time" onClick={() => playFrom(g.section!.start_s)}
+                              aria-label={`Play this part from ${clock(g.section.start_s)}`}>{clock(g.section.start_s)}</button>
+                      <h3 className="tl-title">
+                        <button type="button" className="tl-fold" aria-expanded={!folded} onClick={() => foldToggle(key)} title={folded ? "Show this part's answers" : "Fold this part"}>
+                          <span aria-hidden="true">{folded ? "▸" : "▾"}</span> {g.section.title}
+                        </button>
+                        <span className="tl-roll">
+                          {g.items.length} {g.items.length === 1 ? "answer" : "answers"}
+                          {flagged > 0 && <span className="tl-flag" title="Contradicted, or backed only by the speaker's own word">✕ {flagged} to check</span>}
+                        </span>
+                      </h3>
+                      {g.section.summary && !folded && <p className="tl-summary">{g.section.summary}</p>}
+                    </header>
+                  )}
+                  {!folded && <ol className="qa-list">{groupByQuestion(g.items).map(card)}</ol>}
+                </section>
+              );
+            })}
         </div>
 
         <details className="fold">

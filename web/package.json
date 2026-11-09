@@ -3,9 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "next dev",
+    "dev": "NODE_OPTIONS=--max-old-space-size=1536 next dev",
     "build": "next build",
     "start": "next start",
+    "serve": "next build && NODE_OPTIONS=--max-old-space-size=512 next start",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

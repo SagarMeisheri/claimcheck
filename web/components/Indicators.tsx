@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { clock } from "@/lib/format";
 import {
-  ANSWER_UI, CLAIM_UI, DISCLOSURE_UI, DYNAMIC_UI, FLAG_UI, GROUNDING_UI, INCENTIVE_UI, NO_CONFLICT_UI, NO_PROFILE_UI, NO_STAKE_UI, PATTERN_UI, QUESTION_UI, SELF_REPORT_UI, STAKE_KIND_WORD, TOUCHES_UI,
-  chainOf, flagsOf, interviewProfile, type IndicatorUi, type TagFilter,
+  ANSWER_UI, CLAIM_UI, DISCLOSURE_UI, DYNAMIC_UI, FLAG_UI, GROUNDING_UI, INCENTIVE_UI, NO_STAKE_UI, PATTERN_UI, QUESTION_UI, SELF_REPORT_UI, STAKE_KIND_WORD, TOUCHES_UI,
+  chainOf, flagsOf, interviewProfile, verdictOf, type IndicatorUi, type TagFilter,
 } from "@/lib/indicators";
 import type { AnswerType, Claim, QaTags, Grounding, Incentive, IncentiveTag, Interaction, QuestionAnalysis, QuestionType } from "@/lib/types";
 
@@ -51,23 +51,35 @@ function stakeUi(stake: QaTags["stake"]): IndicatorUi {
            hint: `${stake.link === "touches" ? TOUCHES_UI.hint : "The answer favours this item of the speaker's profile."}` };
 }
 
-/** One answer's chips: how it was answered, what it claims, whether evidence backs it, and any conflict. */
-export function AnswerIndicators({ c, onOpen }: { c: Claim; onOpen(): void }) {
+/** The verdict of an answer, as the first thing on its card: glyph and word in the verdict's colour. Opens the details. */
+export function VerdictBadge({ c, onOpen }: { c: Claim; onOpen(): void }) {
+  const g = verdictOf(c);
+  if (!g) return null;
+  const ui = GROUNDING_UI[g];
+  const was = c.qa_tags?.grounding?.was;
+  return (
+    <button type="button" className={`ind vbadge is-${ui.tone} ipt-g-${g}`} onClick={onOpen}
+            title={`${ui.hint}${was ? ` Without the self-report rule it would read ${GROUNDING_UI[was].word}.` : ""} Tagged by AI. Open the details.`}
+            aria-label={`Evidence: ${ui.word}. Open the details`}>
+      <span className="ind-glyph" aria-hidden="true">{ui.glyph}</span>
+      <span className="ind-word">{ui.word}</span>
+    </button>
+  );
+}
+
+/** Only what was found about an answer besides its verdict: a conflict, a stake, a flag, a pivot or an evasive answer. Nothing found, nothing shown. */
+export function AnswerSignals({ c, onOpen }: { c: Claim; onOpen(): void }) {
   const t = c.qa_tags;
   if (!t) return null;
-  const g = t.grounding;
-  const flags = flagsOf(c);
-  return (
-    <p className="ind-row ind-compact" aria-label="How this answer was tagged">
-      {t.answer && <Chip ui={ANSWER_UI[t.answer.type]} tag={`a-${t.answer.type}`} category="Answer" onOpen={onOpen} />}
-      {t.claim && <Chip ui={CLAIM_UI[t.claim.type]} category="Claim" onOpen={onOpen} />}
-      {g && <Chip ui={GROUNDING_UI[g.label]} tag={`g-${g.label}`} category="Evidence" onOpen={onOpen} extra={g.was ? `Without the self-report rule it would read ${GROUNDING_UI[g.was].word}.` : undefined} />}
-      <Chip ui={t.conflict ? (t.conflict.kind === "self_report" ? SELF_REPORT_UI : FLAG_UI.self_serving_pivot) : t.profile_checked === undefined && !t.stake ? NO_PROFILE_UI : NO_CONFLICT_UI}
-            category="Conflict" onOpen={onOpen} extra={t.stake?.link === "benefits" ? `Tied to: ${t.stake.item.text}` : undefined} />
-      <Chip ui={stakeUi(t.stake)} category="Stake" onOpen={onOpen} extra={t.stake ? `${t.stake.item.text}${t.stake.disclosure ? ` (${t.stake.disclosure})` : ""}` : undefined} />
-      {flags.filter((f) => f !== "self_serving_pivot").map((f) => <Chip key={f} ui={FLAG_UI[f]} category="Flag" onOpen={onOpen} />)}
-    </p>
-  );
+  const chips: React.ReactNode[] = [];
+  if (t.conflict) {
+    chips.push(<Chip key="conflict" ui={t.conflict.kind === "self_report" ? SELF_REPORT_UI : FLAG_UI.self_serving_pivot} category="Conflict" onOpen={onOpen}
+                     extra={t.stake?.link === "benefits" ? `Tied to: ${t.stake.item.text}` : undefined} />);
+  }
+  if (t.stake) chips.push(<Chip key="stake" ui={stakeUi(t.stake)} category="Stake" onOpen={onOpen} extra={`${t.stake.item.text}${t.stake.disclosure ? ` (${t.stake.disclosure})` : ""}`} />);
+  if (t.answer && (t.answer.type === "pivot" || t.answer.type === "evasive")) chips.push(<Chip key="answer" ui={ANSWER_UI[t.answer.type]} tag={`a-${t.answer.type}`} category="Answer" onOpen={onOpen} />);
+  for (const f of flagsOf(c).filter((x) => x !== "self_serving_pivot")) chips.push(<Chip key={f} ui={FLAG_UI[f]} category="Flag" onOpen={onOpen} />);
+  return chips.length ? <span className="vc-signals" aria-label="Also found">{chips}</span> : null;
 }
 
 /** In the detail panel: the tagging string and what each tag rests on. */
@@ -155,88 +167,5 @@ export function IncentiveChips({ incentives, detail = false }: { incentives: Par
     </ul>
   ) : (
     <p className="ind-row">{tags.map(([k, v]) => <Chip key={k} ui={INCENTIVE_UI[k]} category="Stake" extra={v.reason} />)}</p>
-  );
-}
-
-const Q_ORDER: QuestionType[] = ["factual", "explanatory", "experiential", "evaluative", "speculative", "challenging", "unclear"];
-const A_ORDER: AnswerType[] = ["direct", "narrative", "structured", "pivot", "evasive", "unclear"];
-const G_ORDER: Grounding[] = ["grounded", "plausible", "ungrounded", "contradicted", "exempt"];
-
-function Segments<K extends string>({ order, counts, ui, label, dim, filter, onFilter }: {
-  order: K[]; counts: Record<K, number>; ui: Record<K, IndicatorUi>; label: string;
-  dim: TagFilter["dim"]; filter?: TagFilter | null; onFilter?(f: TagFilter | null): void;
-}) {
-  const total = order.reduce((n, k) => n + counts[k], 0);
-  if (!total) return null;
-  return (
-    <>
-      <p className="ip-bar" role="img" aria-label={`${label}: ${order.filter((k) => counts[k]).map((k) => `${counts[k]} ${ui[k].word.toLowerCase()}`).join(", ")}`}>
-        {order.filter((k) => counts[k]).map((k) => <span key={k} className={`ipt-${dim}-${k}`} style={{ flexGrow: counts[k] }} title={`${ui[k].word}: ${counts[k]}. ${ui[k].hint}`} />)}
-      </p>
-      <p className="ip-legend">
-        {order.filter((k) => counts[k]).map((k) => {
-          const body = <><span className="ind-glyph" aria-hidden="true">{ui[k].glyph}</span><span className="ind-word">{ui[k].word}</span> <b>{counts[k]}</b></>;
-          const on = filter?.dim === dim && filter.key === k;
-          return onFilter ? (
-            <button key={k} type="button" className={`ind ip-tag ipt-${dim}-${k}`} aria-pressed={on} title={`${ui[k].hint} Click to show only these.`}
-                    onClick={() => onFilter(on ? null : ({ dim, key: k } as TagFilter))}>{body}</button>
-          ) : (
-            <span key={k} className={`ind ip-tag ipt-${dim}-${k}`} title={ui[k].hint}>{body}</span>
-          );
-        })}
-      </p>
-    </>
-  );
-}
-
-/** At the top of a video's questions: how the interview was run, how it was answered, what the evidence shows, and the patterns found. */
-export function InterviewProfile({ claims, interaction, onOpen, filter, onFilter }: {
-  claims: Claim[]; interaction?: Interaction | null; onOpen?(c: Claim): void;
-  filter?: TagFilter | null; onFilter?(f: TagFilter | null): void; // each question, answer and evidence tag filters the list below
-}) {
-  const p = interviewProfile(claims);
-  const [picked, setPicked] = useState<string | null>(null);
-  if (!p) return null;
-  const dyn = interaction?.dynamic ? DYNAMIC_UI[interaction.dynamic] : null;
-  const tabs: { key: string; label: string; body: React.ReactNode }[] = [
-    ...(p.asked > 0 ? [{ key: "q", label: `Questions ${p.asked}`, body: (
-      <>
-        <Segments order={Q_ORDER} counts={p.questions} ui={QUESTION_UI} label="Questions" dim="q" filter={filter} onFilter={onFilter} />
-        {p.approx > 0 && <p className="meta ip-approx">{p.approx === p.asked ? "All" : p.approx} tagged from the AI&apos;s plain-words version of the question (≈), so framing may be missed.</p>}
-      </>) }] : []),
-    ...(p.answered > 0 ? [{ key: "a", label: `Answers ${p.answered}`, body: (
-      <Segments order={A_ORDER} counts={p.answers} ui={ANSWER_UI} label="Answers" dim="a" filter={filter} onFilter={onFilter} />) }] : []),
-    ...(p.grounded > 0 ? [{ key: "g", label: `Evidence ${p.grounded}`, body: (
-      <>
-        <Segments order={G_ORDER} counts={p.grounding} ui={GROUNDING_UI} label="Evidence" dim="g" filter={filter} onFilter={onFilter} />
-        {p.conflicts > 0 && (
-          <p className="ip-stats"><span className="ip-stat is-amber" title="Answers whose claim serves the speaker's own commercial or financial interest."><span aria-hidden="true">◆</span> Self-serving in <b>{p.conflicts}</b> {p.conflicts === 1 ? "answer" : "answers"}{p.undisclosed ? `, ${p.undisclosed} undisclosed` : ""}</span></p>
-        )}
-      </>) }] : []),
-    ...(p.patterns.length > 0 ? [{ key: "p", label: `Patterns ${p.patterns.length}`, body: (
-      <ul className="ip-patterns">
-        {p.patterns.map((x, i) => (
-          <li key={i} title={PATTERN_UI[x.kind].hint}>
-            <b>{PATTERN_UI[x.kind].word}</b>{" "}
-            {onOpen ? <button type="button" className="linkish" onClick={() => onOpen(x.claim)}>at {clock(x.claim.start_s)}</button> : <span className="meta">at {clock(x.claim.start_s)}</span>}
-          </li>
-        ))}
-      </ul>) }] : []),
-  ];
-  const cur = tabs.find((t) => t.key === picked) ?? tabs[0];
-  return (
-    <section className="ip" aria-label="Interview profile">
-      <h3 className="ip-title">Interview profile <span className="op-ai" title={NOTE}>AI-tagged</span>{dyn && <Chip ui={dyn} category="Dynamic" />}</h3>
-      {tabs.length > 0 && (
-        <>
-          <div className="subtabs ip-tabs" role="tablist" aria-label="Interview profile sections">
-            {tabs.map((t) => (
-              <button key={t.key} type="button" role="tab" aria-selected={t === cur} className="subtab" onClick={() => setPicked(t.key)}>{t.label}</button>
-            ))}
-          </div>
-          <div role="tabpanel" className="ip-panel">{cur.body}</div>
-        </>
-      )}
-    </section>
   );
 }

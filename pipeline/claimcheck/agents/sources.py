@@ -235,6 +235,9 @@ async def run_claim_sources(claim_id: str, *, settings: Settings, store: Any) ->
             vctx = await VideoContext(store, {**ep, "id": episode_id}).load()
             found = await lookup_answer(row, vctx, force=True)
             await _save(store, claim_id, found)
+            from .tldr import refresh_tldr
+
+            await refresh_tldr(store, episode_id)  # one answer changed: write the podcast profile's TL;DRs again
             result = {"claim_id": claim_id, "status": "done", "sources": len(found.related), "match": (found.research.match if found.research else ""),
                       "grounding": ((found.tags or {}).get("grounding") or {}).get("label", "")}
         except Exception as e:
@@ -327,6 +330,10 @@ async def run_video_sources(episode_id: str, *, settings: Settings, store: Any, 
             await store.update_episode(episode_id, {"sources_batch_status": "running"})
             await progress()
             await asyncio.gather(*(one(g) for g in searches))
+            if searched:
+                from .tldr import refresh_tldr
+
+                await refresh_tldr(store, episode_id)  # the podcast profile's TL;DRs, now that the answers are checked
         except Exception:
             log.exception("source lookup for episode %s failed", episode_id)
         finally:

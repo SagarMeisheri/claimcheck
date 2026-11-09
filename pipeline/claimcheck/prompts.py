@@ -240,3 +240,56 @@ can't tell.
 
 
 # ClassifierNode question for source lookups (agents/sources.py). Labels are the routes of the lookup workflow.
+
+
+# The contradiction explainer (agents/contradiction.py): made only for an answer the grounding classifier tagged contradicted.
+CONTRADICTION = f"""Web pages were found that contradict part of an answer given in a video. Show a reader exactly what was said and how the
+page differs. You describe the difference; you never judge the speaker's honesty, motive or competence.
+
+Question asked: {{question}}
+Answer given: {{answer}}
+Points that were checked: {{points}}
+
+Pages (numbered; each is only a search excerpt):
+{{pages}}
+
+Pick the ONE page that most clearly contradicts a main point of the answer, and write:
+- page: its number.
+- said: the specific claim of the answer that this page contradicts, in the speaker's terms, keeping figures, units and periods
+  exactly. At most 25 words. Not the whole answer.
+- sources_say: what that page says about the same thing instead. Use only that page's excerpt and its own figures. At most 30 words.
+- difference: one plain, neutral sentence saying how the two differ (a different figure, period, definition, outcome or account),
+  for example "The page puts it at $250 billion, not $1.5 to 2 trillion." At most 25 words.
+- quote: a fragment copied exactly, character for character, from that page's excerpt that shows the difference. At most 200
+  characters. Never reword, translate or join separate parts; leave it empty if no fragment fits.
+
+If no page really contradicts a main point (it is about another subject, another period, or only differs in wording), set page to 0
+and leave the rest empty.
+
+{UNTRUSTED_RULE}
+"""
+
+
+# The podcast-profile TL;DRs (agents/tldr.py): one call per video, written from a digest code has counted.
+TLDR = f"""You write short summaries (TL;DRs) of one interview video for a reader who scans a dashboard: how the interview was run, how the
+answers held up against web pages, and who the people are. Code already counted everything in the digest; use only its numbers and
+facts, and never invent or round a figure. You describe what was found; you never judge anyone's honesty, motive or character
+(say "the page gives a different figure", never "lied" or "misled").
+
+{{digest}}
+
+Write plain, concrete sentences that INTERPRET the counts instead of repeating them: a reader can already see the chips with every
+count, so say what the mix means. Lead with the pattern, then the exception, and use at most two numbers in a sentence. Use the
+topic words of the questions and answers, not the tag names in quotes. No filler, no hedging, no "the video".
+- headline: what the conversation was about and the main thing the checks found.
+- questions: how the host ran it, for example mostly open "what do you think" questions with one real pushback, or soft set-ups.
+- answers: how the guest answered, for example straight answers with a few pivots away from the question.
+- statements: what the guest mostly offered (opinions, forecasts, hard claims, advice) and what that means for what can be checked.
+- evidence: how the answers held up. If any were contradicted, name what about, using the contradicted items given. If none, say the
+  checks found no contradiction and how many answers had nothing to check.
+- flags: conflicts of interest, stakes, and patterns across the interview (unchallenged opinions, set-up questions, pivots toward the
+  speaker's own interests); write "None found." only if the digest has none of these.
+- people: for each person and the show, one sentence on who they are and what they have a stake in. Use each label exactly as given.
+
+{UNTRUSTED_RULE}
+"""

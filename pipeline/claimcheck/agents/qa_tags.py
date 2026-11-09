@@ -15,7 +15,9 @@ since that classifier must never see the answer. Here, one run per answer:
         anything else ─> research_node  plan + searches (agents/research.py); nothing checkable -> no pages
                             └─> grounding_node  ONE call: Choice grounding (grounded / plausible / contradicted / exempt), Choice match,
                                                 + Binary missing_context when the speaker is ideological or financial
-So an answer costs 1 classifier call, or 2 when it is researched.
+                            └─> contradiction (agents/contradiction.py), only when the answer comes out contradicted: ONE more call that
+                                writes what was said, what the page says instead, how they differ and a verified quote
+So an answer costs 1 classifier call, or 2 when it is researched, or 3 when it is contradicted.
 
 Code then applies the rules (decide):
   - a Choice below SURE falls back to the cautious label; "contradicted" needs CONTRADICT_SURE; grounded / contradicted need a page.
@@ -244,6 +246,7 @@ class Job:
     items: list = field(default_factory=list)  # the speaker's profile items compared with the answer (stake_items)
     route: str = ""             # "exempt" (not researched), "no_points" (researched, nothing checkable) or "researched"
     research: Any = None
+    contradiction: Optional[dict[str, Any]] = None  # how the pages contradict the answer (agents/contradiction.py), when it is contradicted
 
     async def ask(self, names: list[str], payload: dict[str, Any], extra: Optional[dict[str, Any]] = None) -> None:
         """One classifier call answering `names` about `payload`. A failure leaves them out; a budget error is raised."""
@@ -319,6 +322,10 @@ def build_workflow(job: Job) -> Workflow:
         if claim in ("objective_fact", "anchored_opinion") and sp_tags & CONTEXT_TAGS and r.all_pages:
             names.append("missing_context")
         await job.ask(names, {**q, "answer": a["answer"], "claim_type": claim, "points": points, "pages": _pages(r)})
+        if _contradicted(job.answers.get("grounding")) and r.all_pages:
+            from .contradiction import explain
+
+            job.contradiction = await explain(ctx.get("question") or "", a["answer"], [p["text"] for p in points], r.all_pages)
         return None
 
     return Workflow(name=f"qa_tags_{uuid.uuid4().hex[:6]}", edges=[
@@ -357,6 +364,12 @@ def _choice(answer: Any, valid: tuple[str, ...], fallback: str) -> Optional[dict
         return {"type": fallback, "p": 0.0}
     p = round(float(answer.probabilities.get(label, 0.0)), 2)
     return {"type": label if p >= SURE else fallback, "p": p}
+
+
+def _contradicted(answer: Any) -> bool:
+    """Whether the grounding call says contradicted with enough confidence for the label to stand (see decide)."""
+    return (answer is not None and getattr(answer, "choice", None) == "contradicted"
+            and float(answer.probabilities.get("contradicted", 0.0)) >= CONTRADICT_SURE)
 
 
 def _p(answer: Any) -> float:
@@ -434,6 +447,8 @@ def decide(job: Job) -> dict[str, Any]:
     if grounding:
         basis = build_correctness("opinion" if grounding["label"] == "exempt" else grounding["label"], pages)
         tags["grounding"] = {**grounding, "evidence": basis["evidence"], "basis": basis["basis"]}
+        if grounding["label"] == "contradicted" and job.contradiction:
+            tags["grounding"]["contradiction"] = job.contradiction
     m = _choice(ans.get("match"), MATCH, "medium")
     if m and grounding:
         label = m["type"]
