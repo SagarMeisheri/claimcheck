@@ -18,7 +18,9 @@ const ORIGIN: Record<string, string> = {
 export function SearchResults({ research, sources }: { research: Research; sources: Source[] }) {
   const searches = research.searches ?? [];
   if (!searches.length) return null;
-  const byUrl = new Map(sources.map((s) => [s.url, s]));
+  // A lookup still running has no sources yet, only the pages its research lists (title and site): those fill in the rows.
+  const listed = (research.pages ?? []).map((p) => [p.url, { url: p.url, title: p.title, excerpt: "", publish_date: null, rank: 0, independence: p.independence } as Source] as const);
+  const byUrl = new Map<string, Source>([...listed, ...sources.map((s) => [s.url, s] as const)]);
   const [open, setOpen] = useState<Source | null>(null);
   return (
     <section className="sr" aria-label="What each search returned">
@@ -50,7 +52,8 @@ export function SearchResults({ research, sources }: { research: Research; sourc
                 ))}
               </ol>
               </>
-            ) : <p className="meta source-none">{q.failed ? "This search failed, so it returned nothing." : "The search returned no pages."}</p>}
+            ) : q.pending ? <p className="meta source-none">Searching…</p>
+              : <p className="meta source-none">{q.failed ? "This search failed, so it returned nothing." : "The search returned no pages."}</p>}
           </div>
         );
       })}

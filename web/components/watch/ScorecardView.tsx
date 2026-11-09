@@ -15,6 +15,8 @@ import { StatementDetail } from "./StatementDetail";
 import { groupBySection } from "@/components/feed/StatementCarousel";
 import { applyTagFilter, severity, type TagFilter } from "@/lib/indicators";
 import { QaCard } from "./QaCard";
+import { useLiveClaims } from "./useLiveClaims";
+import { applyLive } from "@/lib/live";
 import { groupByQuestion, type QaGroup } from "@/lib/qa";
 import { KeyFindings, PodcastProfile, type Sort } from "./PodcastProfile";
 import { Drawer, PaneNav } from "@/components/Drawer";
@@ -60,7 +62,10 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const player = useRef<PlayerHandle>(null);
   // Lookups finished on this page since it loaded: their results, so the tag and the drawer show them at once.
   const [looked, setLooked] = useState<Record<string, Claim>>({});
-  const everything = useMemo(() => ep.claims.map((c) => looked[c.id] ?? c).sort((a, b) => a.start_s - b.start_s), [ep.claims, looked]);
+  // Lookups in flight are heard as they happen: each stage's findings lay over the claim, and the card shows them as they arrive.
+  const liveOn = ep.status === "processing" || ep.status === "queued" || ep.sources_batch === "running" || ep.claims.some((c) => SEARCHING.includes(c.sources_status));
+  const { patches } = useLiveClaims({ episodeId: ep.id, videoId: ep.youtube_video_id, enabled: liveOn, onFinished: (id) => void finishLookup(id) });
+  const everything = useMemo(() => ep.claims.map((c) => looked[c.id] ?? applyLive(c, patches[c.id])).sort((a, b) => a.start_s - b.start_s), [ep.claims, looked, patches]);
   // The statement whose detail is shown: docked beside the list on wide screens, in a drawer otherwise.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -291,6 +296,18 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const lookedUp = (c: Claim, r: SourcesResult) => setLooked((m) => ({ ...m, [c.id]: { ...c, sources_status: "done", sources: r.sources ?? [],
     sources_summary: r.summary ?? null, sources_match: r.match ?? null, counter_sources: r.counter ?? [],
     counter_summary: r.counter_summary ?? null, research: r.research ?? null, qa_tags: r.qa_tags ?? c.qa_tags ?? null, sources_route: r.route ?? c.sources_route } }));
+  // A lookup that was in flight has ended: fetch what it found (the sources themselves are not in the live updates) and show it at once.
+  const finishLookup = async (id: string) => {
+    const c = ep.claims.find((x) => x.id === id);
+    if (!c) return;
+    try {
+      const r = await fetch(`/api/claims/${id}/sources`, { cache: "no-store" });
+      if (!r.ok) return;
+      const j = (await r.json()) as SourcesResult;
+      if (j.status === "done") lookedUp(c, j);
+      else if (j.status === "failed" || j.status === "not_requested") setLooked((m) => ({ ...m, [id]: { ...c, sources_status: j.status, sources_error: j.error } }));
+    } catch { /* the periodic refresh shows it */ }
+  };
   const select = (c: Claim) => { setSelectedId(c.id); if (wide) setDockOpen(true); else setDrawerOpen(true); };
   const selected = visible.find((c) => c.id === selectedId) ?? (docked ? playable[0] ?? null : null);
   const selAt = selected ? playable.findIndex((c) => c.id === selected.id) : -1;
@@ -330,7 +347,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   };
     const worstFirst = (gs: QaGroup[]) => gs.map((g, i) => ({ g, i, s: Math.min(...g.answers.map(severity)) })).sort((a, b) => a.s - b.s || a.i - b.i).map((x) => x.g);
   const card = (grp: QaGroup) => (
-    <QaCard key={grp.answers[0].id} group={grp} auto={auto} running={lookingUp} activeId={activeId} selectedId={selected?.id ?? null}
+    <QaCard key={grp.answers[0].id} group={grp} auto={auto} running={lookingUp} streaming={liveOn} activeId={activeId} selectedId={selected?.id ?? null}
             onPlay={playCard} onSelect={select} onLookedUp={lookedUp} />
   );
   const foldToggle = (key: string) => setCollapsed((c) => { const n = new Set(c); if (!n.delete(key)) n.add(key); return n; });

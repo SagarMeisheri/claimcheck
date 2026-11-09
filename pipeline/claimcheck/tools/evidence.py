@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
+from collections import OrderedDict
 from typing import Any, Optional
 
 from ..policy import blocklist
@@ -137,3 +139,36 @@ async def search_sources(claim_text: str, settings: Any, policy: dict[str, Any],
 
     results = await asyncio.wait_for(asyncio.to_thread(_run), timeout=settings.tool_timeout_s)
     return to_sources(results, policy, settings.sources_per_claim, settings.excerpt_chars, query)
+
+
+# --- Reusing a search ---------------------------------------------------------------------------------
+# A search for the same queries a little while ago is not paid for again: a show comes back to the same subjects, and a video's
+# lookups plan the same query twice now and then. In this process only (a restart empties it); a recheck skips it.
+_CACHE: "OrderedDict[tuple, tuple[float, list[Source]]]" = OrderedDict()
+CACHE_MAX = 256
+
+
+def cache_key(queries: list[str], location: Optional[str], mode: str, results: int) -> tuple:
+    return (tuple(" ".join(q.lower().split()) for q in queries), location or "", mode, results)
+
+
+def cache_get(key: tuple) -> Optional[list[Source]]:
+    hit = _CACHE.get(key)
+    if hit is None:
+        return None
+    if hit[0] < time.monotonic():
+        del _CACHE[key]
+        return None
+    _CACHE.move_to_end(key)
+    return [s.model_copy() for s in hit[1]]
+
+
+def cache_put(key: tuple, sources: list[Source], ttl_s: float) -> None:
+    _CACHE[key] = (time.monotonic() + ttl_s, [s.model_copy() for s in sources])
+    _CACHE.move_to_end(key)
+    while len(_CACHE) > CACHE_MAX:
+        _CACHE.popitem(last=False)
+
+
+def cache_clear() -> None:
+    _CACHE.clear()

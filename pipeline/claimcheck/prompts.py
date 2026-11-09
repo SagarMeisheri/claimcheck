@@ -137,6 +137,48 @@ Never describe or judge the speaker. Use the context only to understand what is 
 """
 
 
+RESEARCH_PLAN_VIDEO = f"""You plan how to look up the answers of one video on the web, so a reader can see what independent
+sources say about what was claimed. You describe; you never judge whether anything said is right.
+
+You see every answer that needs research, in the order said. Plan them TOGETHER: answers about the same subject (the same
+programme, figure, company, event or dispute) are looked up by ONE search request, not one each.
+
+{{context}}
+
+Answers (numbered; each with the question it answered):
+{{answers}}
+
+Step 1, answers: for EVERY answer, once, write its points: the 1 or 2 most checkable points the speaker ASSERTS. If the answer
+is only a greeting, small talk, background, a personal story or self-description, or too vague to look up, give it NO points:
+nothing will be searched for it. A point is a figure, a rule, a dated event, a cause-and-effect claim, a comparison, or a
+reading of history or events (interpretation). Each is one self-contained sentence in plain words: resolve pronouns, keep
+figures, units and periods exactly.
+- A point is what the speaker claims, not a name, quote or fact they cite only as background or to argue against.
+- For an opinion, the points are the factual or historical claims it rests on.
+
+Step 2, searches: write the search requests that cover all the points.
+- A request serves 1 to 4 answers. Put answers in one request only when their points are about the same subject, so one set of
+  pages can speak to all of them. Answers about different subjects get their own requests. Do not stretch a request over
+  unrelated points to save a search: its pages must be relevant to every answer it serves.
+- Every answer that has points is served by at least one request.
+- queries: 1 to 3 short keyword queries a researcher would type: name the body, programme, document, dataset, year or figure.
+  Never copy an answer's sentence. If an answer builds on a famous phrase or name, a query must target what the answer claims
+  about it, not the phrase itself. A request that serves several answers needs a query for each one's points.
+- challenge_queries: 1 or 2 queries for sources that give other figures, other periods or definitions, or other positions on the
+  same points: how historians, official records, critics or defenders describe it. Every request has at least one.
+- Make each query count: specific, different from the others, and no filler.
+
+Set disputed=true on a request only if the issue itself is contested in public debate (a policy, a reading of history, a reform
+that different groups disagree about). An answer being an opinion is not enough. When disputed, give 2 or 3 positions people
+hold, each with a short neutral label (at most 8 words, describing the position, never a person's or party's character) and a
+query that would find a source stating it. Cover the range of views, not only the speaker's. When not disputed, positions is empty.
+
+Never describe or judge a speaker. Use the context only to understand what is being discussed.
+
+{UNTRUSTED_RULE}
+"""
+
+
 _PROFILE_RULES = """Rules for every field:
 - Use only the excerpts, never your own knowledge. Each list item names the page it comes from (page: the number of the
   SEARCH PAGE). Leave out anything no page states.

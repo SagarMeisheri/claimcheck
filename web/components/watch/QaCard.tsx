@@ -5,6 +5,8 @@ import { CheckSources, type SourcesResult } from "@/components/CheckSources";
 import { AnswerSignals, QuestionIndicator, VerdictBadge } from "@/components/Indicators";
 import { MatchBadge } from "@/components/SourceList";
 import { SourcesTag } from "@/components/SourcesTag";
+import { LiveLine } from "@/components/watch/LiveLine";
+import { inFlight } from "@/lib/live";
 import { clock } from "@/lib/format";
 import { proofOf, severity, verdictOf } from "@/lib/indicators";
 import type { QaGroup } from "@/lib/qa";
@@ -23,8 +25,8 @@ const LONG = 260; // characters: an answer longer than this is shortened to a fe
  * progress shows in place. When sources are looked up automatically (`auto`) there is no button: the card shows a spinner
  * from the moment the answer appears, until its sources arrive.
  */
-export function QaCard({ group, auto, running, activeId, selectedId, onPlay, onSelect, onLookedUp }: {
-  group: QaGroup; auto: boolean; running: boolean; activeId: string | null; selectedId: string | null;
+export function QaCard({ group, auto, running, streaming, activeId, selectedId, onPlay, onSelect, onLookedUp }: {
+  group: QaGroup; auto: boolean; running: boolean; streaming: boolean; activeId: string | null; selectedId: string | null;
   onPlay(c: Claim): void; onSelect(c: Claim): void; onLookedUp(c: Claim, r: SourcesResult): void
 }) {
   const first = group.answers[0];
@@ -56,14 +58,14 @@ export function QaCard({ group, auto, running, activeId, selectedId, onPlay, onS
             </div>
           </header>
         )}
-        {group.answers.map((a) => <Answer key={a.id} c={a} solo={solo} auto={auto} running={running} onPlay={onPlay} onSelect={onSelect} onLookedUp={onLookedUp} />)}
+        {group.answers.map((a) => <Answer key={a.id} c={a} solo={solo} auto={auto} running={running} streaming={streaming} onPlay={onPlay} onSelect={onSelect} onLookedUp={onLookedUp} />)}
       </article>
     </li>
   );
 }
 
-function Answer({ c, solo, auto, running, onPlay, onSelect, onLookedUp }: {
-  c: Claim; solo: boolean; auto: boolean; running: boolean; onPlay(c: Claim): void; onSelect(c: Claim): void; onLookedUp(c: Claim, r: SourcesResult): void;
+function Answer({ c, solo, auto, running, streaming, onPlay, onSelect, onLookedUp }: {
+  c: Claim; solo: boolean; auto: boolean; running: boolean; streaming: boolean; onPlay(c: Claim): void; onSelect(c: Claim): void; onLookedUp(c: Claim, r: SourcesResult): void;
 }) {
   const [busy, setBusy] = useState(false);
   const [more, setMore] = useState(false);
@@ -79,6 +81,8 @@ function Answer({ c, solo, auto, running, onPlay, onSelect, onLookedUp }: {
   const con = verdict === "contradicted" ? c.qa_tags?.grounding?.contradiction : undefined; // what was said and how the page differs (written by AI)
   const sideBySide = !con && (verdict === "contradicted" || verdict === "ungrounded") && !!proof;
   const long = c.claim_text.length > LONG;
+  // A lookup the pipeline is running for the whole video: the card shows what it has found so far, as it arrives.
+  const live = streaming && inFlight(c.sources_status) && (auto || running);
   const check = (
     <CheckSources claimId={c.id} status={c.sources_status} error={null} route={c.sources_route} compact onBusy={onBusy} onDone={(r) => onLookedUp(c, r)} />
   );
@@ -93,7 +97,7 @@ function Answer({ c, solo, auto, running, onPlay, onSelect, onLookedUp }: {
   );
   const said = <p className={`vc-text${more ? "" : " is-clamped"}`}>{c.claim_text}</p>;
   return (
-    <div className={`qa-ans${busy ? " is-verifying" : ""}`} style={{ ["--stype" as string]: type.cssVar }}>
+    <div className={`qa-ans${busy || live ? " is-verifying" : ""}`} style={{ ["--stype" as string]: type.cssVar }}>
       <p className="qa-ans-head">
         <span className="qa-who" title="Speaker as identified by AI from the video">{who ?? "Speaker"} <span className="ai-note">(identified by AI)</span></span>
         <span className="qa-type" title={`${type.meaning} Tagged by AI.`}><span className="stype">{type.label}</span></span>
@@ -168,6 +172,8 @@ function Answer({ c, solo, auto, running, onPlay, onSelect, onLookedUp }: {
             <AnswerSignals c={c} onOpen={() => onSelect(c)} />
             {details}
           </div>
+        ) : live ? (
+          <div className="qa-check"><LiveLine c={c} /></div>
         ) : auto ? (
           <div className="qa-check">{autoState}</div>
         ) : ["not_requested", "failed", "queued", "searching"].includes(c.sources_status) ? (

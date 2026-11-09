@@ -7,6 +7,7 @@ import { ReportForm } from "@/components/ReportForm";
 import { ResearchPanel } from "@/components/ResearchPanel";
 import { SearchResults } from "@/components/SearchResults";
 import { SourceList } from "@/components/SourceList";
+import { inFlight } from "@/lib/live";
 import type { Claim } from "@/lib/types";
 import { SEARCHING, canCheckSources, hasSources, typeOf } from "@/lib/statements";
 import { TimeLink, TypeTag, type CardPhase } from "./ClaimCard";
@@ -65,11 +66,13 @@ export function StatementDetail({ claim: c, videoId, phase, countdown, hasNext, 
       </div>
 
       <IndicatorEvidence c={c} />
-      {sourceable && c.sources_status === "done" && c.research && (c.research.points?.length ?? 0) > 0 && <ResearchPanel research={c.research} />}
+      {/* While a lookup runs (research.stage is set) the points, searches and pages found so far show as they arrive. */}
+      {sourceable && (c.sources_status === "done" || (inFlight(c.sources_status) && c.research?.stage)) && c.research && (c.research.points?.length ?? 0) > 0 && <ResearchPanel research={c.research} />}
       {sourceable && c.sources_status === "done" && (c.research?.searches?.length
         ? <SearchResults research={c.research} sources={c.sources} />
         : <SourceList sources={c.sources} summary={c.sources_summary} match={c.sources_match} counter={c.counter_sources}
                       counterSummary={c.counter_summary} route={c.sources_route} />)}
+      {sourceable && inFlight(c.sources_status) && c.research?.stage && c.research.searches?.length ? <SearchResults research={c.research} sources={c.sources} /> : null}
       {lookup && c.sources_status !== "done" && (
         <CheckSources claimId={c.id} status={c.sources_status} error={c.sources_error} route={c.sources_route} onDone={onLookedUp} />
       )}
