@@ -39,3 +39,20 @@ export function resolveQa(entries: QaEntry[] | null | undefined, claims: Claim[]
 export function hasQa(ep: Pick<Episode, "qa"> & { claims: Claim[] }): boolean {
   return (ep.qa?.length ?? 0) > 0 || ep.claims.some((c) => !!c.question);
 }
+
+/** A passage with no question asked starts a few seconds ahead of its answer. */
+export const LEAD_S = 3;
+
+/**
+ * Where the video starts for an answer: at the asker's first word, so the question is heard before the answer. Videos read since
+ * the question's own time was extracted carry it. For older ones (and implied questions) the start is estimated from the length of the
+ * question: about two and a half words a second, plus a few seconds for the lead-in.
+ */
+export function playFromS(c: Pick<Claim, "start_s" | "question" | "question_kind" | "question_start_s">): number {
+  if (c.question_start_s != null && c.question_start_s <= c.start_s) return c.question_start_s;
+  if (c.question && c.question_kind !== "implied") {
+    const words = c.question.trim().split(/\s+/).length;
+    return Math.max(0, c.start_s - Math.min(20, Math.max(5, Math.round(words / 2.5) + 4)));
+  }
+  return Math.max(0, c.start_s - LEAD_S);
+}

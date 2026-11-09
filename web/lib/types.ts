@@ -89,6 +89,7 @@ export interface Claim {
   statement_context: string | null; // AI: what was being discussed when it was said
   question?: string | null; // the question this answer responds to (videos analysed since answers were extracted)
   asked_by?: string | null;
+  question_start_s?: number | null; // where the question starts (start_s is where the answer starts); null for older videos and implied questions
   question_kind?: "asked" | "implied" | null; // implied: the AI wrote the question for a passage nobody prompted
   question_analysis?: QuestionAnalysis | null; // how the question was asked (factual ... challenging), one call per video
   qa_tags?: QaTags | null; // the answer's tags: answer type, claim type, grounding, conflict flags

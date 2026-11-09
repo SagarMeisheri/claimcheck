@@ -15,10 +15,11 @@ import { StatementDetail } from "./StatementDetail";
 import { groupBySection } from "@/components/feed/StatementCarousel";
 import { applyTagFilter, severity, type TagFilter } from "@/lib/indicators";
 import { QaCard } from "./QaCard";
+import { QaIndex } from "./QaIndex";
 import { useLiveClaims } from "./useLiveClaims";
 import { applyLive } from "@/lib/live";
-import { groupByQuestion, type QaGroup } from "@/lib/qa";
-import { KeyFindings, PodcastProfile, type Sort } from "./PodcastProfile";
+import { LEAD_S, groupByQuestion, playFromS, type QaGroup } from "@/lib/qa";
+import { PodcastProfile, type Sort } from "./PodcastProfile";
 import { Drawer, PaneNav } from "@/components/Drawer";
 import { ClaimTrack } from "./ClaimTrack";
 import { ProfileTabs } from "./ProfileTabs";
@@ -28,8 +29,6 @@ import { YouTubePlayer, type PlayerHandle } from "./YouTubePlayer";
 /** Filter chips: every statement, one statement type, or claims that have sources. */
 export type View = "all" | "with_sources" | StatementType;
 const CLIP_S = 20;
-const LEAD_S = 3;
-const CUE_LEAD_S = 5;
 const AUTO_NEXT_S = 4;
 const DOCK_QUERY = "(min-width: 1600px)"; // wide screens (sidebar + three panes): the selected statement's detail is docked beside the list
 
@@ -74,6 +73,14 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const [dockOpen, setDockOpen] = useState(false);
   const docked = wide && dockOpen;
   const visible = useMemo(() => everything.filter((c) => c.not_checked_reason !== "outside_policy"), [everything]);
+  // Where playing each answer starts: its question for the first answer to a question; a panel's later answers start at their own answer,
+  // so they don't replay the answers before them.
+  const startOf = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const g of groupByQuestion(visible)) g.answers.forEach((a, i) => m.set(a.id, i === 0 ? playFromS(a) : Math.max(0, a.start_s - LEAD_S)));
+    return m;
+  }, [visible]);
+  const startAt = useCallback((c: Claim) => startOf.get(c.id) ?? playFromS(c), [startOf]);
   const withSources = useMemo(() => visible.filter((c) => c.sources.length > 0), [visible]);
   const typeCounts = useMemo(() => {
     const t: Partial<Record<StatementType, number>> = {};
@@ -115,9 +122,11 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
   const playable = viewList.filter((c) => c.not_checked_reason !== "outside_policy");
   const current = useMemo(() => {
     let cur: Claim | null = null;
-    for (const c of visible) if (c.start_s <= time + 0.5) cur = c;
+    // A card is current from where playing it starts (its question): until then the card before it would be current, so
+    // "Keep watching" would scroll there first and back a few seconds later.
+    for (const c of visible) if (startAt(c) <= time + 0.5) cur = c;
     return cur;
-  }, [visible, time]);
+  }, [visible, time, startAt]);
   const activeId = clip?.id ?? (following && playing ? current?.id ?? null : null);
 
   const flash = (msg: string) => { setToast(msg); window.setTimeout(() => setToast(null), 2500); };
@@ -133,7 +142,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
       // Wide screens: each column scrolls on its own.
       const box = scrollParent(el);
       if (box) {
-        const bar = box.querySelector<HTMLElement>(".pp"); // the pinned scoreboard covers the top of the feed
+        const bar = box.querySelector<HTMLElement>(".qa-index"); // the pinned list of questions covers the top of the feed
         const pinnedBar = bar && getComputedStyle(bar).position === "sticky" ? bar.offsetHeight : 0;
         const top = box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - 12 - pinnedBar;
         box.scrollTo({ top: Math.max(0, top), behavior });
@@ -173,16 +182,16 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
     setAutoAll(false);
     setFollowing(true);
     setScrollFollow(true);
-    seek(Math.max(0, c.start_s - LEAD_S), true);
-  }, [seek]);
+    seek(startAt(c), true);
+  }, [seek, startAt]);
 
   const playMoment = useCallback((c: Claim) => {
     setSelectedId(c.id); // the detail follows what is playing
     setFollowing(false);
     setCountdown(null);
     setClip({ id: c.id, end: c.start_s + CLIP_S, phase: "playing" });
-    seek(Math.max(0, c.start_s - LEAD_S), true);
-  }, [seek]);
+    seek(startAt(c), true);
+  }, [seek, startAt]);
 
   const nextIn = (c: Claim) => {
     const i = playable.findIndex((x) => x.id === c.id);
@@ -197,8 +206,8 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
       setView("all");
       setSelectedId(target.id);
       setDockOpen(true);
-      setCue(Math.max(0, target.start_s - CUE_LEAD_S));
-      setTime(target.start_s);
+      setCue(startAt(target));
+      setTime(startAt(target));
       window.setTimeout(() => scrollToCard(target.id), 60);
     }
     const m = momentId ? ep.claims.find((c) => c.id === momentId) : null;
@@ -318,7 +327,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
       <StatementDetail claim={c} videoId={ep.youtube_video_id} titleId={titleId} canLookUp={!checking && !(auto && c.sources_status === "not_requested")}
         phase={isActive && clip?.id === c.id ? clip.phase : isActive ? "playing" : "idle"} hasNext={!!nextIn(c)}
         countdown={isActive && autoAll ? countdown : null}
-        onSeek={() => playFrom(c.start_s)} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
+        onSeek={() => playFrom(startAt(c))} onWatch={() => { playMoment(c); scrollToCard(c.id); }}
         onKeepWatching={() => { setClip(null); setCountdown(null); setAutoAll(false); setFollowing(true); setScrollFollow(true); player.current?.play(); }}
         onNext={() => { const n = nextIn(c); if (n) { setCountdown(null); playMoment(n); scrollToCard(n.id); } }}
         onShare={() => shareClaim(c)} onLookedUp={(r) => lookedUp(c, r)} />
@@ -345,9 +354,12 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
     setSelectedId(c.id);
     window.setTimeout(() => scrollToCard(c.id), 60);
   };
-    const worstFirst = (gs: QaGroup[]) => gs.map((g, i) => ({ g, i, s: Math.min(...g.answers.map(severity)) })).sort((a, b) => a.s - b.s || a.i - b.i).map((x) => x.g);
+  const worstFirst = (gs: QaGroup[]) => gs.map((g, i) => ({ g, i, s: Math.min(...g.answers.map(severity)) })).sort((a, b) => a.s - b.s || a.i - b.i).map((x) => x.g);
+  // The questions in the order the feed shows them; each card carries its number, and the buttons at the top jump to it.
+  const ordered = sort === "worst" ? worstFirst(groupByQuestion(playable)) : groups.flatMap((g) => groupByQuestion(g.items));
+  const numberOf = new Map(ordered.map((g, i) => [g.answers[0].id, i + 1]));
   const card = (grp: QaGroup) => (
-    <QaCard key={grp.answers[0].id} group={grp} auto={auto} running={lookingUp} streaming={liveOn} activeId={activeId} selectedId={selected?.id ?? null}
+    <QaCard key={grp.answers[0].id} group={grp} n={numberOf.get(grp.answers[0].id)} auto={auto} running={lookingUp} streaming={liveOn} activeId={activeId} selectedId={selected?.id ?? null}
             onPlay={playCard} onSelect={select} onLookedUp={lookedUp} />
   );
   const foldToggle = (key: string) => setCollapsed((c) => { const n = new Set(c); if (!n.delete(key)) n.add(key); return n; });
@@ -393,7 +405,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
           {ep.claims.length > 0 && (
             <div className={`track-holder${playerOn ? " is-on" : ""}`}>
               <ClaimTrack claims={ep.claims} duration={ep.duration_s} time={time} currentId={activeId}
-                          onSeekClaim={(c) => { if (!viewList.includes(c)) { setView("all"); setTag(null); } window.setTimeout(() => scrollToCard(c.id), 60); playFrom(c.start_s); }} />
+                          onSeekClaim={(c) => { if (!viewList.includes(c)) { setView("all"); setTag(null); } window.setTimeout(() => scrollToCard(c.id), 60); playFrom(startAt(c)); }} />
             </div>
           )}
         </div>
@@ -411,11 +423,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         <ProfileTabs summary={ep.summary} sections={ep.sections ?? []} creator={ep.creator} speakers={ep.speakers} notes={ep.interaction?.description_notes ?? []}
                      steps={(ep.steps ?? ep.progress?.steps ?? []).filter((x) => x.status === "done" || x.status === "skipped")}
                      onSeek={(s) => playFrom(s)} onSection={goToSection} showProfiles={profilesAsk} />
-        </div>
-      </div>
 
-      <div className="score-side">
-        {head("score-head-feed")}
         {ep.claims.length > 0 && (
           <PodcastProfile claims={everything} interaction={ep.interaction} total={ep.claims.length} noun={ep.claims.length === 1 ? nouns.one : nouns.many}
                           withSources={withSources.length} searching={searchingCount} checkedAt={ep.sources_checked_at ?? null}
@@ -427,8 +435,15 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
                           checkAll={checkAll} onJump={jumpTo} speakers={ep.speakers} creator={ep.creator}
                           onOpenProfiles={() => { setProfilesAsk((n) => n + 1); if (!wide) window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }} />
         )}
+        </div>
+      </div>
 
-        {sort === "time" && !tag && view === "all" && <KeyFindings claims={visible} onJump={jumpTo} />}
+      <div className="score-side">
+        {head("score-head-feed")}
+        <QaIndex groups={ordered} sections={ep.sections ?? []} duration={ep.duration_s ?? 0} time={time} noun={qa ? "question" : "statement"} activeId={activeId} selectedId={selected?.id ?? null}
+                 onJump={(c) => { playCard(c); scrollToCard(c.id); }} onSection={goToSection} />
+
+        {/* Key findings are hidden for now. To bring them back, import KeyFindings from ./PodcastProfile and render it here when sort is "time", no tag is picked and view is "all". */}
 
         <div className="score-timeline">
           {playable.length === 0
