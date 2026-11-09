@@ -218,7 +218,7 @@ section + section { margin-top: 2.5rem; }
   .score-main { grid-column: 2; grid-row: 1; }
   .score-head-rail { display: none; }
   .score-head-feed { margin: 0 0 0.6rem; }
-  .pp { position: sticky; top: 0; z-index: 10; }
+  .qa-index { position: sticky; top: 0; z-index: 10; }
   .score-main, .score-side { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
   .score-main { display: block; padding-right: 0.4rem; margin-right: -0.4rem; }
   .score-side { margin: 0; padding-right: 0.4rem; margin-right: -0.4rem; padding-bottom: 2rem; }
@@ -606,6 +606,27 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .qa-item[class*="ipt-g-contradicted"] .qa-card { background: color-mix(in srgb, var(--tone) 5%, var(--paper-raised)); }
 .qa-item.is-active .qa-card { background: var(--highlight); box-shadow: 0 0 0 2px var(--focus); }
 .qa-item.is-selected .qa-card { border-color: var(--ink-soft); border-left-color: var(--rail); }
+.vc-lead { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.qa-num { font-size: 0.78rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink-soft); letter-spacing: 0.03em; }
+/* The strip of questions at the top of the feed: one bar per question at its time, coloured by verdict, chapters underneath. Pinned on wide screens. */
+.qa-index { margin: 0 0 0.7rem; padding: 0.5rem 0.75rem 0.4rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 10px; }
+.qi-strip { position: relative; height: 1.9rem; border-bottom: 2px solid var(--ink); }
+.qi-chap { position: absolute; top: 0; bottom: -0.3rem; width: 1px; background: var(--rule); }
+.qi-bar { position: absolute; bottom: 0; width: 6px; height: 1.2rem; transform: translateX(-50%); border: 0; padding: 0; border-radius: 2px 2px 0 0; cursor: pointer;
+  background: var(--tone, color-mix(in srgb, var(--ink) 35%, transparent)); }
+.qi-bar.is-tall { height: 1.8rem; }
+.qi-bar::after { content: ""; position: absolute; inset: -0.4rem -0.3rem 0; } /* a bigger target than the bar */
+.qi-bar:hover, .qi-bar:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; z-index: 2; }
+.qi-bar.is-picked { outline: 2px solid color-mix(in srgb, var(--ink) 55%, transparent); outline-offset: 1px; }
+.qi-bar.is-playing { outline: 2px solid var(--ink); outline-offset: 1px; width: 8px; z-index: 2; }
+.qi-head { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink); opacity: 0.55; pointer-events: none; }
+.qi-tip { position: absolute; top: calc(100% + 0.5rem); transform: translateX(-50%); width: max-content; max-width: min(18rem, 80vw); background: var(--ink); color: var(--paper);
+  font-size: 0.82rem; line-height: 1.35; padding: 0.35rem 0.6rem; border-radius: 6px; pointer-events: none; z-index: 5; }
+.qi-tip-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; opacity: 0.9; }
+.qi-labels { position: relative; margin-top: 0.3rem; }
+.qi-label { position: absolute; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 0.68rem; line-height: 1.2; color: var(--ink-soft);
+  padding: 0 0 0 0.25rem; border: 0; border-left: 1px solid var(--rule); background: none; font-family: inherit; text-align: left; cursor: pointer; }
+.qi-label:hover, .qi-label:focus-visible { color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule); border-left-color: var(--ink); }
 .vc-top { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; min-height: 1.5rem; }
 .vbadge { font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; padding: 0.12rem 0.65rem 0.12rem 0.5rem;
   background: color-mix(in srgb, var(--tone) 16%, var(--paper-raised)); border-color: var(--tone); }
@@ -625,7 +646,7 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .qa-ts:hover { color: var(--ink); text-decoration: underline; }
 .vc-answer { display: grid; gap: 0.15rem; justify-items: start; }
 .vc-text { margin: 0; font-size: 0.98rem; line-height: 1.5; }
-.vc-text.is-clamped { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.vc-text.is-clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .vc-more { font-size: 0.82rem; }
 .vc-line { margin: 0; font-size: 0.88rem; line-height: 1.45; color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .vc-line b { color: var(--ink); }
@@ -645,6 +666,8 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .vc-diff .vc-lab { display: block; color: var(--tone); }
 .vc-full { margin: 0; font-size: 0.9rem; line-height: 1.5; color: var(--ink-soft); padding-left: 0.7rem; border-left: 2px solid var(--rule); }
 .vc-full .vc-lab { display: block; }
+.qa-fail { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.5rem; font-size: 0.85rem; color: var(--ink-soft); }
+.qa-fail-icon { color: hsl(30 70% 40%); }
 .vc-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.7rem; padding-top: 0.45rem; border-top: 1px solid var(--rule); }
 .vc-details { margin-left: auto; font-size: 0.85rem; }
 .vc-signals { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; }
@@ -654,6 +677,7 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 /* ---------- Video page: the podcast profile (every tag, all open, pinned), key findings, chapter rollups ---------- */
 .pp { display: grid; gap: 0.4rem; padding: 0.55rem 0.8rem 0.6rem; margin-bottom: 0.7rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 10px;
   box-shadow: 0 6px 8px -6px color-mix(in srgb, var(--ink) 25%, transparent); }
+.score-info .pp { margin-top: 1rem; }
 .pp-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.6rem; }
 .pp-title { margin: 0; font-family: var(--font-display); font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem; }
 .pp-meta { margin: 0; font-size: 0.82rem; }

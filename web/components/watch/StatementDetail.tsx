@@ -8,6 +8,7 @@ import { ResearchPanel } from "@/components/ResearchPanel";
 import { SearchResults } from "@/components/SearchResults";
 import { SourceList } from "@/components/SourceList";
 import { inFlight } from "@/lib/live";
+import { playFromS } from "@/lib/qa";
 import type { Claim } from "@/lib/types";
 import { SEARCHING, canCheckSources, hasSources, typeOf } from "@/lib/statements";
 import { TimeLink, TypeTag, type CardPhase } from "./ClaimCard";
@@ -31,7 +32,7 @@ export function StatementDetail({ claim: c, videoId, phase, countdown, hasNext, 
     <div className="sdetail">
       <p className="sdetail-head">
         <TypeTag type={type} />
-        <TimeLink videoId={videoId} seconds={c.start_s} onSeek={onSeek} />
+        <TimeLink videoId={videoId} seconds={playFromS(c)} onSeek={onSeek} />
         {c.speaker && <span className="meta" title="Speaker as identified by AI from the video">{c.speaker} <span className="ai-note">(identified by AI)</span></span>}
         {phase === "playing" && <span className="cc-playing">Playing</span>}
       </p>

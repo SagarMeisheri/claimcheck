@@ -182,3 +182,27 @@ def test_podcast_types_only_questions_have_no_sources():
     rec = lambda t: ClaimRecord(index=0, start_s=0, claim=stmt(stype=t), effective_tier="normal")
     assert sources_status(rec("advice")) == "not_requested"
     assert sources_status(rec("question")) == "not_eligible" and sources_status(rec("story")) == "not_requested"
+
+
+# --- Where the question starts ----------------------------------------------------------------
+def test_question_start_is_kept_when_it_falls_just_before_the_answer():
+    from claimcheck.agents.stages import question_start
+    c = stmt(question="What is capex?", question_kind="asked", question_ts="00:48")
+    assert question_start(c, 60) == 48
+
+
+def test_question_start_is_dropped_when_it_is_not_believable():
+    from claimcheck.agents.stages import question_start
+    base = dict(question="What is capex?", question_kind="asked")
+    assert question_start(stmt(**base, question_ts=""), 60) is None            # not given
+    assert question_start(stmt(**base, question_ts="01:30"), 60) is None       # after the answer starts
+    assert question_start(stmt(**base, question_ts="not a time"), 600) is None  # unparseable reads as 0:00, far before the answer
+    assert question_start(stmt(**base, question_ts="10:00"), 1200) is None     # ten minutes before: a panel's later answer, or a wrong time
+    assert question_start(stmt(question="Why?", question_kind="implied", question_ts="00:48"), 60) is None  # nobody asked it
+    assert question_start(stmt(question_kind="asked", question_ts="00:48"), 60) is None  # no question text
+
+
+def test_extractor_asks_for_the_question_time():
+    from claimcheck.schemas import ExtractionResult
+    item = ExtractionResult.model_json_schema()["$defs"]["ExtractedStatement"]
+    assert "question_ts" in item["properties"]

@@ -42,6 +42,7 @@ class ExtractedClaim(BaseModel):
     statement_context: str = ""  # what was being discussed when it was said, one neutral line
     question: str = ""  # the question this answer responds to (empty for statements saved before answers were extracted)
     question_quote: str = ""  # the question as the asker said it (framing and all); the question above is a plain-words rewrite
+    question_ts: str = ""  # when the asker starts the question (its lead-in included); empty if implied or not given
     asked_by: str = ""
     question_kind: Optional[Literal["asked", "implied"]] = None
     pestle_area: PestleArea
@@ -78,6 +79,7 @@ class ExtractedStatement(BaseModel):
     start_ts: str = Field(description="HH:MM:SS or MM:SS where the answer starts")
     question: str = Field(description="The question this answer responds to: plain words, self-contained, at most 25 words, ends with '?'")
     question_quote: str = Field(default="", description="The asker's own words as you heard them (Hindi or English as spoken), up to ~35 words, including any lead-in or view they voice before asking; empty if implied")
+    question_ts: str = Field(default="", description="HH:MM:SS or MM:SS where the asker starts the question: the first word of question_quote, lead-in included; empty if implied")
     question_kind: Literal["asked", "implied"] = Field(description="'asked' if someone put the question; 'implied' if you wrote it for a passage nobody prompted")
     asked_by: str = Field(description="Who asked it (name only if said or shown on screen, otherwise a role such as Host); empty if implied")
     speaker: str = Field(description="Who gave this answer. Name only if it is said or shown on screen in the video, otherwise a role (Host, Guest 1)")
@@ -345,7 +347,8 @@ class PeopleOut(BaseModel):
 
 class ClaimRecord(BaseModel):
     index: int
-    start_s: int
+    start_s: int  # where the answer starts
+    question_start_s: Optional[int] = None  # where the question starts, when the extractor gave a believable time; the page plays from here
     claim: ExtractedClaim
     effective_tier: PolicyTier
     not_checked_reason: Optional[str] = None

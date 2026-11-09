@@ -21,9 +21,11 @@ export type SourcesResult = { status: SourcesStatus; error: string | null; sourc
 
 export function CheckSources({ claimId, status: initial, error: initialError, sources: initialSources = NONE, summary: initialSummary = null,
   match: initialMatch = null, counter: initialCounter = NONE, counterSummary: initialCounterSummary = null, route: initialRoute = null,
-  compact = false, onBusy, onDone }: {
+  compact = false, quietFail = false, onBusy, onDone }: {
   claimId: string; status: SourcesStatus; error: string | null; sources?: Source[]; summary?: string | null;
   match?: SourcesMatch | null; counter?: Source[]; counterSummary?: string | null; route?: SourcesRoute | null; compact?: boolean;
+  /** A failed lookup shows as a quiet line with a Retry link, not a button. */
+  quietFail?: boolean;
   onBusy?(busy: boolean): void;
   /** Called with the result when a lookup finishes. With it, the button doesn't show the sources itself: the caller
    *  shows them (e.g. in a drawer), so nothing on the page grows. */
@@ -93,6 +95,14 @@ export function CheckSources({ claimId, status: initial, error: initialError, so
       <p className={compact ? "ccard-verifying" : "verify-state"} role="status" aria-live="polite">
         <span className="spinner" aria-hidden="true" /> {status === "queued" || pending ? "Queued…" : "Searching sources…"}
         {!compact && <span className="meta"> usually a few seconds</span>}
+      </p>
+    );
+  }
+  if (quietFail && status === "failed") {
+    return (
+      <p className="qa-fail" role="status" title={message ?? undefined}>
+        <span className="qa-fail-icon" aria-hidden="true">⚠</span> Sources lookup failed ·{" "}
+        <button type="button" className="linkish" onClick={go}>Retry</button>
       </p>
     );
   }

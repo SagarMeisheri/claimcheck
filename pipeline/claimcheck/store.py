@@ -139,7 +139,7 @@ class SupabaseStore:
         # Never-show statements (e.g. generalisations about a community) are not republished, even as text.
         hidden = rec.not_checked_reason == "outside_policy"
         self.db.table("claims").upsert({
-            "episode_id": episode_id, "idx": rec.index, "start_s": rec.start_s, "speaker": None if hidden else c.speaker,
+            "episode_id": episode_id, "idx": rec.index, "start_s": rec.start_s, "question_start_s": None if hidden else rec.question_start_s, "speaker": None if hidden else c.speaker,
             "claim_text": "[Not shown: outside the content policy]" if hidden else c.claim,
             "context_quote": None if hidden else c.context_quote, "pestle_area": c.pestle_area,
             "statement_context": None if hidden else (c.statement_context or None),

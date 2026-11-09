@@ -31,7 +31,7 @@ type EpisodeRow = {
 
 const EP_COLS = "id, youtube_video_id, title, duration_s, published_at, status, skip_reason, statement_counts, summary, sources_batch_status, auto_sources, created_at, channel_id, creator_id, sections, progress, steps, interaction, channels(name)";
 const SOURCE_COLS = "claim_sources(url, title, tier, excerpt, publish_date, rank, kind, independence)";
-const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, question, asked_by, question_kind, question_analysis, qa_tags, section_idx, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, research, sources_checked_at, ${SOURCE_COLS}`;
+const CLAIM_COLS = `id, idx, episode_id, start_s, speaker, claim_text, context_quote, statement_context, question, asked_by, question_start_s, question_kind, question_analysis, qa_tags, section_idx, pestle_area, topic, topics, statement_type, policy_tier, not_checked_reason, sources_status, sources_error, sources_summary, sources_match, sources_route, counter_summary, research, sources_checked_at, ${SOURCE_COLS}`;
 const CREATOR_COLS = "id, podcast, youtube_channel_name, youtube_handles, country, summary, public_profile";
 const SPEAKER_COLS = "episode_id, label, role, statements, incentives, speakers(id, name, summary, sources, public_profile)";
 

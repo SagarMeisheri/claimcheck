@@ -81,6 +81,19 @@ def speaker_label(label: str, ec: Any) -> str:
     return match_listed(label, people) or "Speaker"
 
 
+MAX_QUESTION_LEAD_S = 180  # a question that starts further than this before its answer is not believed (a panel's later answers, a wrong time)
+
+
+def question_start(claim: ExtractedClaim, start_s: int) -> Optional[int]:
+    """Where the question starts, so the page can play it before the answer. None unless the extractor gave a time for an asked
+    question that falls before the answer and not absurdly long before it: the page then falls back to an estimate."""
+    ts = (claim.question_ts or "").strip()
+    if claim.question_kind == "implied" or not claim.question or not ts:
+        return None
+    q = ts_to_seconds(ts)
+    return q if 0 <= start_s - q <= MAX_QUESTION_LEAD_S else None
+
+
 def build_record(i: int, raw: dict[str, Any], ec: Any, log: bool = True) -> Optional[ClaimRecord]:
     """One extracted statement -> ClaimRecord, with the content policy applied in code. None if it is malformed.
 
@@ -99,7 +112,8 @@ def build_record(i: int, raw: dict[str, Any], ec: Any, log: bool = True) -> Opti
     claim.question_quote = "" if claim.question_kind == "implied" or not claim.question else " ".join((claim.question_quote or "").split())[:400]
     claim.asked_by = "" if claim.question_kind == "implied" or not claim.question else speaker_label(" ".join((claim.asked_by or "").split())[:80], ec)
     tier, reason = classify_statement(claim, ec.policy)
-    rec = ClaimRecord(index=i, start_s=ts_to_seconds(claim.start_ts), claim=claim, effective_tier=tier, not_checked_reason=reason)
+    start_s = ts_to_seconds(claim.start_ts)
+    rec = ClaimRecord(index=i, start_s=start_s, question_start_s=question_start(claim, start_s), claim=claim, effective_tier=tier, not_checked_reason=reason)
     if log and reason == "outside_policy":
         ec.log("policy", "never_show_topic", "skipped", claim.topic, i)
     return rec

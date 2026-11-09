@@ -29,6 +29,8 @@ Each item you return is ONE ANSWER to ONE QUESTION:
   Keep what the asker meant; resolve pronouns ("it", "that policy") to the named thing. Add nothing that was not asked.
 - question_quote: the asker's own words as you heard them (Hindi or English as spoken, up to ~35 words), exactly as said:
   keep any lead-in, praise, framing or view they voice before or inside the question. Empty if the question is implied.
+- question_ts: when the asker starts the question, at the first word of question_quote, lead-in included (MM:SS or
+  HH:MM:SS). It is earlier than start_ts. Empty if the question is implied.
 - question_kind: "asked" if someone put the question; "implied" if a speaker moved to a new topic or told a story
   without being asked, in which case you write the question a viewer would ask to hear that passage.
 - asked_by: who asked it, with the same naming rules as speaker; "" if implied.
@@ -38,7 +40,7 @@ Each item you return is ONE ANSWER to ONE QUESTION:
 - claim: the answer in plain words, self-contained, at most 80 words (one to four sentences). Cover its main points,
   not only the first. Resolve pronouns to the named thing. Keep the speaker's numbers, units and time periods
   exactly. Do not add anything that was not said, and do not characterise how it was said.
-- start_ts: when the answer starts (MM:SS or HH:MM:SS).
+- start_ts: when the answer starts (MM:SS or HH:MM:SS), the first word of the answer, after the question has ended.
 - statement_type: what the answer mostly is, one of
   factual_claim (it states facts a source could address: numbers, statistics, named studies, rules, dated events),
   opinion (a view or value judgement), forecast (about the future), advice (a recommendation to the listener),

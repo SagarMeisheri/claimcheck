@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckSources, type SourcesResult } from "@/components/CheckSources";
 import { AnswerSignals, QuestionIndicator, VerdictBadge } from "@/components/Indicators";
 import { MatchBadge } from "@/components/SourceList";
@@ -9,11 +9,9 @@ import { LiveLine } from "@/components/watch/LiveLine";
 import { inFlight } from "@/lib/live";
 import { clock } from "@/lib/format";
 import { proofOf, severity, verdictOf } from "@/lib/indicators";
-import type { QaGroup } from "@/lib/qa";
+import { playFromS, type QaGroup } from "@/lib/qa";
 import { STATEMENT_TYPES, hasSources, speakerName, typeOf } from "@/lib/statements";
 import type { Claim } from "@/lib/types";
-
-const LONG = 260; // characters: an answer longer than this is shortened to a few lines until "Show more"
 
 /**
  * One question in the feed, as a verdict-first card. A rail down its left side and a badge at the top carry the evidence
@@ -25,8 +23,8 @@ const LONG = 260; // characters: an answer longer than this is shortened to a fe
  * progress shows in place. When sources are looked up automatically (`auto`) there is no button: the card shows a spinner
  * from the moment the answer appears, until its sources arrive.
  */
-export function QaCard({ group, auto, running, streaming, activeId, selectedId, onPlay, onSelect, onLookedUp }: {
-  group: QaGroup; auto: boolean; running: boolean; streaming: boolean; activeId: string | null; selectedId: string | null;
+export function QaCard({ n, group, auto, running, streaming, activeId, selectedId, onPlay, onSelect, onLookedUp }: {
+  n?: number; group: QaGroup; auto: boolean; running: boolean; streaming: boolean; activeId: string | null; selectedId: string | null;
   onPlay(c: Claim): void; onSelect(c: Claim): void; onLookedUp(c: Claim, r: SourcesResult): void
 }) {
   const first = group.answers[0];
@@ -44,8 +42,11 @@ export function QaCard({ group, auto, running, streaming, activeId, selectedId, 
         style={{ ["--stype" as string]: type.cssVar }}>
       <article className="qa-card">
         <div className="vc-top">
-          {solo && verdict ? <VerdictBadge c={first} onOpen={() => onSelect(first)} /> : <span />}
-          <button type="button" className="vc-time" onClick={() => onPlay(first)} aria-label={`Play from ${clock(first.start_s)}`}>{clock(first.start_s)} ▶</button>
+          <span className="vc-lead">
+            {n !== undefined && <span className="qa-num" title="Question number: the buttons at the top jump to it">Q{n}</span>}
+            {solo && verdict && <VerdictBadge c={first} onOpen={() => onSelect(first)} />}
+          </span>
+          <button type="button" className="vc-time" onClick={() => onPlay(first)} aria-label={`Play from ${clock(playFromS(first))}`}>{clock(playFromS(first))} ▶</button>
         </div>
         {group.q && (
           <header className="qa-head">
@@ -80,11 +81,23 @@ function Answer({ c, solo, auto, running, streaming, onPlay, onSelect, onLookedU
   const proof = done ? proofOf(c) : null;
   const con = verdict === "contradicted" ? c.qa_tags?.grounding?.contradiction : undefined; // what was said and how the page differs (written by AI)
   const sideBySide = !con && (verdict === "contradicted" || verdict === "ungrounded") && !!proof;
-  const long = c.claim_text.length > LONG;
+  // An answer is shown in three lines; "Show more" appears only when the text really is cut off.
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const [cut, setCut] = useState(false);
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el || more) return;
+    const measure = () => setCut(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [more, c.claim_text, sideBySide]);
+  const long = cut || more;
   // A lookup the pipeline is running for the whole video: the card shows what it has found so far, as it arrives.
   const live = streaming && inFlight(c.sources_status) && (auto || running);
   const check = (
-    <CheckSources claimId={c.id} status={c.sources_status} error={null} route={c.sources_route} compact onBusy={onBusy} onDone={(r) => onLookedUp(c, r)} />
+    <CheckSources claimId={c.id} status={c.sources_status} error={null} route={c.sources_route} compact quietFail onBusy={onBusy} onDone={(r) => onLookedUp(c, r)} />
   );
   // Automatic videos: no button. Searching shows progress; an answer the lookup is about to reach shows it already.
   const autoState = ["searching", "queued", "failed"].includes(c.sources_status) ? check
@@ -95,7 +108,7 @@ function Answer({ c, solo, auto, running, streaming, onPlay, onSelect, onLookedU
   const toggle = long && (
     <button type="button" className="linkish vc-more" onClick={() => setMore((m) => !m)} aria-expanded={more}>{more ? "Show less" : "Show more"}</button>
   );
-  const said = <p className={`vc-text${more ? "" : " is-clamped"}`}>{c.claim_text}</p>;
+  const said = <p ref={textRef} className={`vc-text${more ? "" : " is-clamped"}`}>{c.claim_text}</p>;
   return (
     <div className={`qa-ans${busy || live ? " is-verifying" : ""}`} style={{ ["--stype" as string]: type.cssVar }}>
       <p className="qa-ans-head">
