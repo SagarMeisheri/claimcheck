@@ -13,8 +13,8 @@ up "steel frame"), repeats of the episode itself, and the speaker's own organisa
   keep    every page returned is kept, in the order it came back, all treated alike. Pages that are the episode's own or the speaker's
           own organisation's carry a label (independence.py) for the reader, which changes nothing else.
 
-The grounding classifier (agents/qa_tags.py) then reads every page's excerpt together with the Q&A and the profiles. Nothing here says
-the speaker is right or wrong. If the search fails it raises ResearchUnavailable and the answer is marked failed (it can be retried).
+The assessment (agents/assess.py) then reads every page's excerpt together with the answer and compares them claim by claim. Nothing here
+says the speaker is right or wrong. If the search fails it raises ResearchUnavailable and the answer is marked failed (it can be retried).
 """
 
 from __future__ import annotations
@@ -245,13 +245,13 @@ def _assemble(ctx: dict[str, Any], policy: dict[str, Any], points: list[dict[str
 # --- The whole video at once ------------------------------------------------------------------------
 # One planner call reads every answer that needs research and plans the search requests together: answers about the same subject
 # share ONE request, so a video with 25 researched answers needs far fewer than 25 searches. Each answer then gets the pages of
-# the requests that serve it, and the grounding classifier reads them exactly as before.
+# the requests that serve it, and the assessment reads them exactly as before.
 
 MAX_SHARED = 4             # answers one request may serve
 MAX_REQUEST_QUERIES = 5    # queries in one request
 RESULTS_PER_EXTRA_ANSWER = 4
 MAX_SHARED_RESULTS = 20    # pages in one request; a request over MAX_RESULTS is charged once per MAX_RESULTS
-MAX_PAGES_PER_ANSWER = 30  # what the grounding classifier is shown (qa_tags.MAX_PAGES_SHOWN)
+MAX_PAGES_PER_ANSWER = 30  # what the assessment is shown (qa_tags.MAX_PAGES_SHOWN)
 
 Ready = Callable[[Any, "Research | None | BaseException"], Awaitable[None]]
 

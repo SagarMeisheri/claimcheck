@@ -31,7 +31,7 @@ MAX_ITEMS = 6      # contradicted answers listed in the digest
 MAX_PEOPLE = 8
 SENTENCE_CHARS = 320
 HEADLINE_CHARS = 380
-VERDICTS = ("contradicted", "ungrounded", "plausible", "grounded", "exempt")
+VERDICTS = ("contradicted", "ungrounded", "partly", "plausible", "grounded", "exempt")
 
 
 def _clean(text: Any, n: int) -> str:
@@ -81,7 +81,7 @@ def unchallenged(rows: list[dict[str, Any]]) -> list[str]:
         nxt = next((((x[0].get("question_analysis") or {}).get("type")) for x in groups[i + 1:] if x[0].get("question_kind") != "implied"), None)
         for c in g:
             t = c.get("qa_tags") or {}
-            if (t.get("claim") or {}).get("type") == "anchored_opinion" and (t.get("grounding") or {}).get("label") in ("plausible", "ungrounded") and nxt and nxt != "challenging":
+            if (t.get("claim") or {}).get("type") == "anchored_opinion" and (t.get("grounding") or {}).get("label") in ("plausible", "partly", "ungrounded") and nxt and nxt != "challenging":
                 out.append(_clock(c.get("start_s")))
     return out
 

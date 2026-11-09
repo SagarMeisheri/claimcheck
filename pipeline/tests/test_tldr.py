@@ -57,7 +57,7 @@ def test_the_people_come_hosts_first_with_their_stakes_and_the_show_last():
 
 
 def test_counts_record_what_the_sentences_were_written_from():
-    assert tldr.counts_of(CLAIMS) == {"answers": 4, "contradicted": 1, "ungrounded": 0, "plausible": 1, "grounded": 1, "exempt": 0}
+    assert tldr.counts_of(CLAIMS) == {"answers": 4, "contradicted": 1, "ungrounded": 0, "partly": 0, "plausible": 1, "grounded": 1, "exempt": 0}
 
 
 GOOD = TldrOut(headline="A talk on AI valuations.", questions="Mostly what-if questions.", answers="Mostly direct.", statements="One forecast.",

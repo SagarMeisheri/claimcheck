@@ -821,6 +821,17 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .vb-why { margin: 0; font-size: .92rem; line-height: 1.45; }
 .vb-vs { margin: 0; display: grid; gap: .2rem; font-size: .85rem; color: var(--ink-soft); }
 .vb-vs b { color: var(--ink); }
+.vb-claims { margin: .15rem 0 0; padding: 0; list-style: none; display: grid; gap: .45rem; }
+.vb-claim { display: grid; grid-template-columns: 1.1rem 1fr; gap: .1rem .4rem; font-size: .88rem; line-height: 1.4; }
+.vb-mark { font-weight: 700; text-align: center; }
+.vb-claim.is-supported .vb-mark { color: var(--m-high, #2f7d4f); }
+.vb-claim.is-partly .vb-mark { color: #8a6d12; }
+.vb-claim.is-contradicted .vb-mark { color: #b3262d; }
+.vb-claim.is-not_found .vb-mark { color: var(--m-low, #777); }
+.vb-claim-text { font-weight: 600; }
+.vb-claim-why { grid-column: 2; color: var(--ink-soft); }
+.vb-claim-site { grid-column: 2; font-size: .8rem; }
+.dr-tldr { margin: .1rem 0 0; font-size: .86rem; line-height: 1.4; }
 .vb .ind-row { margin: 0; }
 
 /* Sources as rows: site and title on one line, the line that matters under it. */
@@ -1063,6 +1074,7 @@ button.ip-tag:focus-visible { outline: 2px solid var(--focus); outline-offset: 2
 [class][class*="ipt-a-pivot"] { --tone: hsl(24 82% var(--ip-l)); }
 [class][class*="ipt-a-evasive"] { --tone: hsl(0 66% var(--ip-l)); }
 [class][class*="ipt-g-grounded"] { --tone: hsl(140 52% var(--ip-l)); }
+[class][class*="ipt-g-partly"] { --tone: hsl(95 45% var(--ip-l)); }
 [class][class*="ipt-g-plausible"] { --tone: hsl(48 80% var(--ip-l)); }
 [class][class*="ipt-g-ungrounded"] { --tone: hsl(30 70% var(--ip-l)); }
 [class][class*="ipt-g-contradicted"] { --tone: hsl(355 70% var(--ip-l)); }

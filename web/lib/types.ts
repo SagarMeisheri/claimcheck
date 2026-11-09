@@ -24,22 +24,30 @@ export type PointStatus = "sources_found" | "no_source" | "pending"; // pending:
 export interface ResearchPoint { text: string; kind: string; status: PointStatus }
 /** A page the grounding rests on: its title and search excerpt. */
 export interface GroundingBasis { site: string; url: string; relation: "page"; finding: string; quote: string }
-/** For a contradicted answer (agents/contradiction.py): the claim the pages contradict, what the page says instead, how they differ, and a verbatim excerpt from that page. */
+/** One claim of the answer compared with the pages (agents/assess.py): a verdict, the page that decides it and the reason. */
+export interface ClaimFinding {
+  claim: string; verdict: "supported" | "partly" | "contradicted" | "not_found"; reason: string;
+  page_says?: string; quote?: string; site?: string; url?: string; title?: string; independence?: string;
+}
+/** For a contradicted answer (agents/assess.py): the claim the pages contradict, what the page says instead, how they differ, and a verbatim excerpt from that page. */
 export interface GroundingContradiction { said: string; sources_say: string; difference: string; quote?: string; site: string; url: string; title?: string }
 /** How each question was asked (agents/interview.py, one batched classifier call per video, never shown the answer). */
 export type QuestionType = "factual" | "explanatory" | "experiential" | "evaluative" | "speculative" | "challenging" | "unclear";
 export interface QuestionAnalysis { type: QuestionType; p?: number; spoken?: boolean } // spoken false: tagged from the AI's plain-words question
 export type AnswerType = "direct" | "narrative" | "structured" | "pivot" | "evasive" | "unclear";
 export type ClaimKind = "objective_fact" | "anchored_opinion" | "pure_opinion" | "prediction";
-/** Is it backed by evidence? ungrounded: a self-serving claim that rests on the speaker's own word (the self-report rule). */
-export type Grounding = "grounded" | "plausible" | "contradicted" | "exempt" | "ungrounded";
+/** Is it backed by evidence? partly: some claims are backed, none is contradicted. ungrounded: a self-serving answer no independent page supports (the self-report rule). */
+export type Grounding = "grounded" | "partly" | "plausible" | "contradicted" | "exempt" | "ungrounded";
 export type QaFlag = "missing_context" | "staged_pushback" | "self_serving_pivot";
 /** The answer's tags (agents/qa_tags.py): ADK classifiers, then the skepticism rules in code. Any part can be missing. */
 export interface QaTags {
   version: number;
   answer?: { type: AnswerType; p: number };
   claim?: { type: ClaimKind; p: number };
-  grounding?: { label: Grounding; p: number; was?: Grounding; evidence: "strong" | "limited" | "none"; basis: GroundingBasis[]; contradiction?: GroundingContradiction };
+  grounding?: {
+    label: Grounding; was?: Grounding; evidence: "strong" | "limited" | "none"; basis: GroundingBasis[]; contradiction?: GroundingContradiction;
+    overview?: string; claims?: ClaimFinding[]; missing_context?: string; // what the pages say together, then each claim of the answer with its reason (older answers have none)
+  };
   match?: { label: "high" | "medium" | "low"; p: number };
   flags?: QaFlag[];
   conflict?: { kind: "self_report" | "self_serving_pivot"; disclosure?: "disclosed" | "undisclosed" };
@@ -54,7 +62,7 @@ export interface Research {
   /** Only while the lookup runs: what it is doing now. Gone when it finishes. */
   stage?: "planning" | "searching" | "reading" | "grounding";
   searches?: { query: string; queries?: string[]; urls: string[]; failed?: boolean; pending?: boolean }[]; // what each search returned, in its own order (pending: still out)
-  pages?: { url: string; site: string; title: string; independence: string }[]; // every page the searches returned
+  pages?: { url: string; site: string; title: string; independence: string; tldr?: string; relevant?: boolean }[]; // tldr: what the page says that bears on the answer // every page the searches returned
 }
 /** One incentive tag of a person for a video, with the fact it rests on and where that fact was found. */
 export type IncentiveTag = "commercial" | "financial" | "ideological" | "reputational" | "academic" | "sponsor_aligned" | "invested_peer" | "adversarial";

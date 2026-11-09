@@ -286,29 +286,42 @@ can't tell.
 # ClassifierNode question for source lookups (agents/sources.py). Labels are the routes of the lookup workflow.
 
 
-# The contradiction explainer (agents/contradiction.py): made only for an answer the grounding classifier tagged contradicted.
-CONTRADICTION = f"""Web pages were found that contradict part of an answer given in a video. Show a reader exactly what was said and how the
-page differs. You describe the difference; you never judge the speaker's honesty, motive or competence.
+# The assessment (agents/assess.py): the answer set against its pages, one call per researched answer.
+ASSESS = f"""You check an answer given in a video against web pages found for it. The pages are search excerpts only: a fact an
+excerpt does not show is "not_found", never assumed false. You describe how the answer and the pages compare; you never judge the
+speaker's honesty, motive or competence.
 
 Question asked: {{question}}
 Answer given: {{answer}}
-Points that were checked: {{points}}
+Kind of answer: {{claim_type}}
+What the search was planned around: {{points}}
 
-Pages (numbered; each is only a search excerpt):
+Pages (numbered; each shows where it comes from and its search excerpt):
 {{pages}}
 
-Pick the ONE page that most clearly contradicts a main point of the answer, and write:
-- page: its number.
-- said: the specific claim of the answer that this page contradicts, in the speaker's terms, keeping figures, units and periods
-  exactly. At most 25 words. Not the whole answer.
-- sources_say: what that page says about the same thing instead. Use only that page's excerpt and its own figures. At most 30 words.
-- difference: one plain, neutral sentence saying how the two differ (a different figure, period, definition, outcome or account),
-  for example "The page puts it at $250 billion, not $1.5 to 2 trillion." At most 25 words.
-- quote: a fragment copied exactly, character for character, from that page's excerpt that shows the difference. At most 200
-  characters. Never reword, translate or join separate parts; leave it empty if no fragment fits.
+Work in this order; the order is the method.
 
-If no page really contradicts a main point (it is about another subject, another period, or only differs in wording), set page to 0
-and leave the rest empty.
+1. pages: for EVERY page write a TLDR of what it says that bears on the answer's subject, keeping its own figures, units and periods
+   (at most 35 words). If it is about something else, say so in a few words and set relevant to false.
+2. overview: at most 60 words on what the pages together establish about the subject, and where the pages differ from each other
+   (sources often differ in period, scope or method). Do not mention the answer here.
+3. claims: split the answer into its 1 to 4 most important checkable claims (a figure, a comparison, a named study or organisation, a
+   cause, an outcome). For an opinion, take the facts it rests on. Skip asides. Compare each claim with the TLDRs and the excerpts:
+   - supported: a page states the same fact; figures match (rounding or a stated range is fine).
+   - partly: a page backs the direction or part of the claim but not its exact figure, scope or period, or the study or organisation
+     it names is not confirmed by any page.
+   - contradicted: a page says something incompatible about the SAME quantity, scope and period. Different things are not
+     contradictions: a target and a number reached, an older figure and a newer update, a plan and a pilot, one study and "the
+     evidence", one country and another. Those are partly or not_found, and the reason says what differs.
+   - not_found: no page addresses it.
+   For each claim give: page (the one that decides it, 0 if none), page_says (what that page says, with its own figures, at most 30
+   words), quote (a fragment copied exactly, character for character, from that page's excerpt; never reword or join parts; empty if
+   none fits) and reason: one or two plain sentences, for example "The answer says roti gave 56% of the zinc RDA, now 25%; the page
+   reports a 33% fall in rice zinc but gives no roti or RDA figure." Name what matches and what is missing or different. A page marked
+   as the speaker's own organisation or this episode shows what is claimed, not that anyone else says it: say so when that is all
+   there is.
+4. missing_context: only when the claims check out, a counter-figure, other period, base rate or caveat in the pages that the answer
+   leaves out and that changes what a listener would take from it. Empty otherwise.
 
 {UNTRUSTED_RULE}
 """

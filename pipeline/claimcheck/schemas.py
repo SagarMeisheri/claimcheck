@@ -186,14 +186,33 @@ class VideoPlan(BaseModel):
     searches: list[SearchPlan] = Field(default_factory=list, description="The search requests; every answer that has points is served by at least one")
 
 
-class ContradictionOut(BaseModel):
-    """How one page contradicts an answer (agents/contradiction.py). Code checks the page number and that the quote is on the page."""
+class PageNote(BaseModel):
+    """What one page says, in a line (agents/assess.py): written for every page before any claim is judged."""
 
-    page: int = Field(default=0, description="The number of the ONE page that most clearly contradicts a main point of the answer; 0 if no page really does")
-    said: str = Field(default="", description="The specific claim of the answer that this page contradicts, as the speaker put it, with figures, units and periods exactly (at most 25 words); not the whole answer")
-    sources_say: str = Field(default="", description="What that page says about the same thing instead, using the page's own figures (at most 30 words)")
-    difference: str = Field(default="", description="One plain sentence saying how they differ: a different figure, period, definition, outcome or account (at most 25 words)")
-    quote: str = Field(default="", description="A fragment copied exactly from that page's excerpt that shows the difference (at most 200 characters); empty if none fits")
+    page: int = Field(description="The page's number, as given")
+    tldr: str = Field(description="What the page says that bears on the answer's subject, with its own figures, units and periods (at most 35 words). If it is about something else, say so in a few words")
+    relevant: bool = Field(description="True if the page speaks to a specific claim of the answer; false if it is only about the wider topic or something else")
+
+
+class ClaimFinding(BaseModel):
+    """One checkable claim of the answer, compared with the pages (agents/assess.py)."""
+
+    claim: str = Field(description="One specific, checkable claim of the answer (a figure, comparison, named study or organisation, cause or outcome), keeping its figures, units and periods (at most 30 words)")
+    verdict: Literal["supported", "partly", "contradicted", "not_found"] = Field(
+        description="supported: a page states the same fact. partly: a page backs the direction or part of it, but not the exact figure, scope or period, or a named source is unconfirmed. contradicted: a page says something incompatible about the SAME quantity, scope and period. not_found: no page addresses it")
+    page: int = Field(default=0, description="The number of the ONE page that decides this verdict; 0 when no page addresses the claim")
+    page_says: str = Field(default="", description="What that page says about the same thing, with its own figures (at most 30 words); empty when page is 0")
+    quote: str = Field(default="", description="A fragment copied exactly, character for character, from that page's excerpt that shows it (at most 200 characters); empty if none fits")
+    reason: str = Field(description="One or two plain sentences comparing the two: what the answer says, what the page says, what matches and what differs or is missing. Never a judgement of the speaker")
+
+
+class AssessOut(BaseModel):
+    """The answer checked against its pages (agents/assess.py): each page in a line, what the pages say together, then each claim."""
+
+    pages: list[PageNote] = Field(default_factory=list, description="One entry for EVERY page given, in order")
+    overview: str = Field(default="", description="What the pages together establish about the subject, and where they differ from each other (at most 60 words). Written without reference to the answer")
+    claims: list[ClaimFinding] = Field(default_factory=list, description="The answer's 1 to 4 most important checkable claims, each compared with the pages")
+    missing_context: str = Field(default="", description="Only if the claims check out: a counter-figure, different period, base rate or caveat in the pages that the answer leaves out and that changes what a listener would take from it (at most 40 words); empty otherwise")
 
 
 class PersonTldr(BaseModel):

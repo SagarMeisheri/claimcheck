@@ -39,22 +39,27 @@ export function QaIndex({ groups, sections, duration, time, noun, activeId, sele
   };
   const h = hover !== null ? info(groups[hover], hover) : null;
   const chapters = [...sections].sort((a, b) => a.start_s - b.start_s);
-  // Chapter names are written under their chapter on up to two lines. One too long for its stretch of the strip goes on the
-  // second row, so it can run on under the next chapter, which takes the first row.
+  // Chapter names are written under their chapter on up to two rows. A name is drawn only where it has clear space: in the first row
+  // if that is free at its start, else the second, else it is left out (its tick stays, and the chapter's own header in the feed
+  // carries the title). Names never overprint each other.
+  const GAP = 4, MAX_W = 130, MIN_ROOM = 48;
   const labelRows = (() => {
-    const end = [-1, -1]; // where the last label in each row stops, in px
-    return chapters.map((s, i) => {
+    const end = [-Infinity, -Infinity]; // where the last label in each row stops, in px
+    const out: { s: Section; x: number; w: number; row: number }[] = [];
+    for (const s of chapters) {
       const x = (s.start_s / total) * width;
-      const own = (((chapters[i + 1]?.start_s ?? total) - s.start_s) / total) * width - 4;
-      const need = Math.ceil(s.title.length / 2) * 5.4 + 8; // two lines of small text
-      const w = Math.min(Math.max(own, need), width - x);
-      const row = end[0] <= x ? 0 : end[1] <= x ? 1 : end[0] <= end[1] ? 0 : 1;
-      const fits = end[row] <= x;
-      end[row] = x + (fits ? w : own);
-      return { s, x, w: fits ? w : own, row };
-    });
+      const room = width - x;
+      if (room < MIN_ROOM) continue;
+      const w = Math.min(Math.ceil(s.title.length / 2) * 5.4 + 8, MAX_W, room); // two lines of small text
+      const row = end[0] + GAP <= x ? 0 : end[1] + GAP <= x ? 1 : -1;
+      if (row < 0) continue;
+      end[row] = x + w;
+      out.push({ s, x, w, row });
+    }
+    return out;
   })();
-  const rows = labelRows.some((l) => l.row === 1) ? 2 : 1;  return (
+  const rows = labelRows.some((l) => l.row === 1) ? 2 : 1;
+  return (
     <nav className="qa-index" aria-label={`Jump to a ${noun}`}>
       <div ref={strip} className="qi-strip" onMouseLeave={() => setHover(null)}>
         {chapters.map((s) => <span key={s.idx} className="qi-chap" style={{ left: pct(s.start_s) }} aria-hidden="true" />)}

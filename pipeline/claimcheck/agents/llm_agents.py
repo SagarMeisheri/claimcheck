@@ -16,7 +16,7 @@ from .. import prompts
 from ..config import Settings
 from ..context import get_context
 from ..guardrails.injection import screen_text, wrap_untrusted
-from ..schemas import ContradictionOut, CreatorProfileOut, ExtractionResult, PeopleOut, QaOut, ResearchPlan, SpeakerProfileOut, TldrOut, VideoPlan
+from ..schemas import AssessOut, CreatorProfileOut, ExtractionResult, PeopleOut, QaOut, ResearchPlan, SpeakerProfileOut, TldrOut, VideoPlan
 
 
 def _model(name: str, settings: Settings) -> Any:
@@ -113,10 +113,10 @@ def video_planner_agent(s: Settings, name: str = "video_planner") -> LlmAgent:
                     output_schema=VideoPlan, output_key="plan", generate_content_config=_research_cfg(s))
 
 
-def contradiction_agent(s: Settings, name: str = "contradiction") -> LlmAgent:
-    """Says what was said and how the page differs, for an answer tagged contradicted (agents/contradiction.py)."""
-    return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.CONTRADICTION, include_contents="none",
-                    output_schema=ContradictionOut, output_key="contradiction", generate_content_config=_research_cfg(s))
+def assess_agent(s: Settings, name: str = "assess") -> LlmAgent:
+    """Checks one answer against its pages: a line per page, what they say together, then each claim with a verdict and a reason (agents/assess.py)."""
+    return LlmAgent(name=name, model=_model(s.summary_model, s), instruction=prompts.ASSESS, include_contents="none",
+                    output_schema=AssessOut, output_key="assess", generate_content_config=_research_cfg(s))
 
 
 def tldr_agent(s: Settings, name: str = "tldr") -> LlmAgent:
