@@ -797,7 +797,8 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
 .score-timeline { margin-top: 0.9rem; }
 .score-timeline .tl-group { margin-bottom: 1.1rem; }
 .tl-item.is-selected { background: var(--src-bg); box-shadow: inset 3px 0 0 var(--stype); }
-.sdetail { display: grid; gap: 0.55rem; align-content: start; }
+.sdetail { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.55rem; align-content: start; min-width: 0; overflow-x: hidden; overflow-wrap: anywhere; }
+.sdetail > * { min-width: 0; }
 .sdetail-asked { margin: -0.3rem 0 0; font-size: 0.85rem; color: var(--ink-soft); }
 .sdetail-answer { margin: 0; font-size: 1rem; line-height: 1.5; }
 .sdetail-head { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; margin: 0; font-size: 0.88rem; }
@@ -810,6 +811,53 @@ a.cc-ts:hover { text-decoration-color: currentColor; }
     scrollbar-width: thin; padding: 0.9rem 1rem 1.1rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 10px; }
 }
 .sdetail .said-toggle { justify-self: start; text-align: left; }
+.sdetail-answer.is-clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.sdetail-answer .linkish { font-size: 0.85rem; }
+
+/* Verdict brief: the verdict, why, and the other tags as chips (hover for what each means). The left edge takes the verdict's colour. */
+.vb { --tone: var(--m-low); display: grid; gap: .45rem; padding: .6rem .75rem; background: var(--paper-raised); border: 1px solid var(--rule); border-left: 4px solid var(--tone); border-radius: 8px; }
+.vb-verdict { margin: 0; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.vbadge { font-size: .9rem; padding: .2rem .65rem .2rem .55rem; }
+.vb-why { margin: 0; font-size: .92rem; line-height: 1.45; }
+.vb-vs { margin: 0; display: grid; gap: .2rem; font-size: .85rem; color: var(--ink-soft); }
+.vb-vs b { color: var(--ink); }
+.vb .ind-row { margin: 0; }
+
+/* Sources as rows: site and title on one line, the line that matters under it. */
+.dr { display: grid; gap: .4rem; }
+.dr-count { margin-left: .4rem; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.dr-sum { margin: 0; font-size: .9rem; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.dr-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+.dr-list li { min-width: 0; padding-left: .6rem; border-left: 2px solid var(--rule); }
+.dr-list li.is-differs { border-left-color: var(--ind-red); }
+.dr-link { display: grid; gap: .1rem; min-width: 0; font-size: .88rem; color: var(--ink); text-decoration: none; }
+.dr-link:hover .dr-site { text-decoration: underline; }
+.dr-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .1rem .4rem; min-width: 0; }
+.dr-site { font-weight: 700; overflow-wrap: anywhere; }
+.dr-title { color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.dr-tag { font-size: .68rem; padding: .02rem .4rem; border: 1px solid var(--rule); border-radius: 999px; color: var(--ink-soft); }
+.dr-tag.is-differs { border-color: var(--ind-red); color: var(--ind-red); font-weight: 600; }
+.dr-quote { margin: .1rem 0 0; font-size: .82rem; font-style: italic; line-height: 1.4; color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.dr-more { justify-self: start; }
+
+/* Folded rows: label and a one-line summary; the whole line opens it. */
+.df-list { display: grid; border-top: 1px solid var(--rule); }
+.df { border-bottom: 1px solid var(--rule); }
+.df > summary { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: .5rem; row-gap: .05rem; padding: .45rem 0; cursor: pointer; list-style: none; font-size: .88rem; }
+.df > summary::-webkit-details-marker { display: none; }
+.df > summary::before { content: "▸"; grid-row: 1 / span 2; color: var(--ink-soft); font-size: .75rem; line-height: 1.5; }
+.df[open] > summary::before { content: "▾"; }
+.df-label { font-size: .7rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+.df-sum { grid-column: 2; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.df-sum.is-amber { color: var(--m-medium); font-weight: 600; }
+.df-note { font-weight: 400; color: var(--ink-soft); }
+.df-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: .4rem; padding: 0 0 .7rem 1rem; }
+.df-body > * { margin: 0; }
+.df-body .sr, .df-body .rs { margin-top: 0; }
+.df-k { font-size: .8rem; color: var(--ink-soft); }
+.df-dl { display: grid; grid-template-columns: minmax(0, 1fr); gap: .05rem; font-size: .88rem; margin: 0; }
+.df-dl dt { margin-top: .3rem; font-size: .7rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+.df-dl dd { margin: 0; }
 .score-detail-bar .sdrawer-nav { margin-right: auto; }
 .section-go { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 4px; }
 .section-go:hover strong { text-decoration: underline; }

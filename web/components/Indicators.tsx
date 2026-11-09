@@ -14,9 +14,9 @@ import type { AnswerType, Claim, QaTags, Grounding, Incentive, IncentiveTag, Int
  * Colour, a glyph and one word each; the pages and profile facts behind them are a tap away in the detail panel.
  */
 
-const NOTE = "Tagged by AI classifiers from the question, the answer, the speakers' profiles and web pages. It describes what was found and can be wrong.";
+export const NOTE = "Tagged by AI classifiers from the question, the answer, the speakers' profiles and web pages. It describes what was found and can be wrong.";
 
-function Chip({ ui, category, onOpen, extra, approx, tag, bare }: { ui: IndicatorUi; category: string; onOpen?(): void; extra?: string; approx?: boolean; tag?: string; bare?: boolean }) {
+export function Chip({ ui, category, onOpen, extra, approx, tag, bare }: { ui: IndicatorUi; category: string; onOpen?(): void; extra?: string; approx?: boolean; tag?: string; bare?: boolean }) {
   const body = (
     <>
       {!bare && <span className="ind-cat">{category}</span>}
@@ -43,7 +43,7 @@ export function QuestionIndicator({ analysis, onOpen }: { analysis: QuestionAnal
 }
 
 /** The Stake chip: the kind of profile item the answer ties to (amber when undisclosed), or None. */
-function stakeUi(stake: QaTags["stake"]): IndicatorUi {
+export function stakeUi(stake: QaTags["stake"]): IndicatorUi {
   if (!stake) return NO_STAKE_UI;
   const word = STAKE_KIND_WORD[stake.item.kind] ?? "Profile";
   const base = stake.link === "touches" ? TOUCHES_UI : SELF_REPORT_UI;
@@ -80,75 +80,6 @@ export function AnswerSignals({ c, onOpen }: { c: Claim; onOpen(): void }) {
   if (t.answer && (t.answer.type === "pivot" || t.answer.type === "evasive")) chips.push(<Chip key="answer" ui={ANSWER_UI[t.answer.type]} tag={`a-${t.answer.type}`} category="Answer" onOpen={onOpen} />);
   for (const f of flagsOf(c).filter((x) => x !== "self_serving_pivot")) chips.push(<Chip key={f} ui={FLAG_UI[f]} category="Flag" onOpen={onOpen} />);
   return chips.length ? <span className="vc-signals" aria-label="Also found">{chips}</span> : null;
-}
-
-/** In the detail panel: the tagging string and what each tag rests on. */
-export function IndicatorEvidence({ c }: { c: Claim }) {
-  const qa = c.question_analysis;
-  const t = c.qa_tags;
-  if (!qa && !t) return null;
-  const g = t?.grounding;
-  return (
-    <section className="ind-detail" aria-label="What the tags rest on">
-      <h4 className="rs-title">Tags <span className="op-ai" title={NOTE}>AI-tagged</span></h4>
-      <p className="qa-chain">{chainOf(c)}</p>
-      {qa && qa.type in QUESTION_UI && (
-        <div className="op-block">
-          <p className="op-label">How the question was asked</p>
-          <p className="op-value"><Chip ui={QUESTION_UI[qa.type]} tag={`q-${qa.type}`} category="Question" approx={qa.spoken === false} /></p>
-          <p className="meta">{QUESTION_UI[qa.type].hint}</p>
-        </div>
-      )}
-      {t?.answer && (
-        <div className="op-block">
-          <p className="op-label">How it was answered</p>
-          <p className="op-value"><Chip ui={ANSWER_UI[t.answer.type]} tag={`a-${t.answer.type}`} category="Answer" />{t.claim && <> <Chip ui={CLAIM_UI[t.claim.type]} category="Claim" /></>}</p>
-          <p className="meta">{ANSWER_UI[t.answer.type].hint}{t.claim ? ` ${CLAIM_UI[t.claim.type].hint}` : ""}</p>
-        </div>
-      )}
-      {t && (t.stake || t.profile_checked !== undefined) && (
-        <div className="op-block">
-          <p className="op-label">Compared with {c.speaker ?? "the speaker"}&apos;s profile</p>
-          {t.stake ? (
-            <>
-              <p className="op-value"><Chip ui={t.stake.link === "touches" ? TOUCHES_UI : SELF_REPORT_UI} category={t.stake.link === "touches" ? "Stake" : "Conflict"} /></p>
-              <blockquote className="rs-quote">{t.stake.item.text}{t.stake.item.url ? <> <a className="meta" href={t.stake.item.url} target="_blank" rel="noopener noreferrer nofollow">{t.stake.item.site || "source"}</a></> : null}</blockquote>
-              <p className="meta">{t.stake.link === "touches" ? TOUCHES_UI.hint : SELF_REPORT_UI.hint}{t.stake.disclosure ? ` ${DISCLOSURE_UI[t.stake.disclosure].hint}` : ""}</p>
-            </>
-          ) : <p className="meta">{t.profile_checked} profile {t.profile_checked === 1 ? "item" : "items"} checked; the answer ties to none of them.</p>}
-        </div>
-      )}
-      {(t?.conflict || flagsOf(c).length > 0) && (
-        <div className="op-block">
-          <p className="op-label">Conflicts and flags</p>
-          <ul className="nclist">
-            {t?.conflict?.kind === "self_report" && <li>{SELF_REPORT_UI.hint}</li>}
-            {t?.conflict?.kind === "self_serving_pivot" && <li>{FLAG_UI.self_serving_pivot.hint}</li>}
-            {t?.conflict?.disclosure && <li>{DISCLOSURE_UI[t.conflict.disclosure].hint}</li>}
-            {flagsOf(c).filter((f) => f !== "self_serving_pivot").map((f) => <li key={f}>{FLAG_UI[f].hint}</li>)}
-          </ul>
-        </div>
-      )}
-      {g && (
-        <div className="op-block">
-          <p className="op-label">Is it backed by evidence?</p>
-          <p className="op-value"><Chip ui={GROUNDING_UI[g.label]} tag={`g-${g.label}`} category="Evidence" /></p>
-          <p className="meta">{GROUNDING_UI[g.label].hint}{g.was ? ` The pages alone would make it ${GROUNDING_UI[g.was].word.toLowerCase()}.` : ""}</p>
-          {g.basis.length > 0 && (
-            <ul className="rs-findings">
-              {g.basis.map((b, i) => (
-                <li key={i} className="rs-finding">
-                  <p className="rs-f-head"><a href={b.url} target="_blank" rel="noopener noreferrer nofollow">{b.site}</a></p>
-                  {b.finding && <p className="rs-f-text">{b.finding}</p>}
-                  {b.quote && <blockquote className="rs-quote">“{b.quote}”</blockquote>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </section>
-  );
 }
 
 /** A person's incentive tags for this video, each with the fact behind it and where it was found. */
