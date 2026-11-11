@@ -42,7 +42,7 @@ def _prices() -> dict[str, tuple[float, float]]:
 @dataclass(frozen=True)
 class Settings:
     # Models
-    fast_model: str = field(default_factory=lambda: _env("CLAIMCHECK_FAST_MODEL", "gemini-3.8-flash"))
+    fast_model: str = field(default_factory=lambda: _env("CLAIMCHECK_FAST_MODEL", "gemini-3.5-flash-lite"))
     # "agentic" (default): model reads the transcript first and loads frames on demand. "static": fixed low-fps fallback.
     video_processing: str = field(default_factory=lambda: _env("CLAIMCHECK_VIDEO_PROCESSING", "agentic"))
     # How long the extractor thinks before it starts writing statements: minimal, low, medium, high, or "default".
@@ -70,7 +70,7 @@ class Settings:
     excerpt_chars: int = int(_env("CLAIMCHECK_EXCERPT_CHARS", "320"))
     # One short neutral line per source, written by a cheap model from the page text (agents/sources.py). If it
     # fails or the budget runs out, the sources are still saved and the excerpt is shown instead.
-    summary_model: str = field(default_factory=lambda: _env("CLAIMCHECK_SUMMARY_MODEL", "gemini-3.8-flash"))
+    summary_model: str = field(default_factory=lambda: _env("CLAIMCHECK_SUMMARY_MODEL", "gemini-3.5-flash-lite"))
     # Thinking for the sources summary + match: minimal, low, medium, high or "default". Low keeps it ~$0.003 a claim.
     summary_thinking: str = field(default_factory=lambda: _env("CLAIMCHECK_SUMMARY_THINKING", "low"))
     # "Check sources for all statements" (agents/sources.py): the same search for every statement, a few at a time.
@@ -108,7 +108,7 @@ class Settings:
     plan_chunk: int = int(_env("CLAIMCHECK_PLAN_CHUNK", "40"))  # answers per planner call (a longer video is planned in chunks)
     search_cache_ttl_s: int = int(_env("CLAIMCHECK_SEARCH_CACHE_TTL_S", "3600"))  # 0 = never reuse a search (in this process only)
     tag_answers: bool = _env("CLAIMCHECK_TAG_ANSWERS", "1") == "1"
-    tag_model: str = field(default_factory=lambda: _env("CLAIMCHECK_TAG_MODEL", "gemini-3.8-flash"))
+    tag_model: str = field(default_factory=lambda: _env("CLAIMCHECK_TAG_MODEL", "gemini-3.5-flash-lite"))
     tag_cost_estimate_usd: float = float(_env("CLAIMCHECK_TAG_COST_ESTIMATE_USD", "0.03"))  # one answer's two calls, the grounding one with ~30 pages
     # The podcast profile's TL;DRs (agents/tldr.py): one model call per video, again whenever its answers are checked.
     tldr: bool = _env("CLAIMCHECK_TLDR", "1") == "1"
@@ -118,7 +118,7 @@ class Settings:
     profile_creators: bool = _env("CLAIMCHECK_PROFILE_CREATORS", "1") == "1"
     profile_speakers: bool = _env("CLAIMCHECK_PROFILE_SPEAKERS", "1") == "1"
     max_speaker_profiles: int = int(_env("CLAIMCHECK_MAX_SPEAKER_PROFILES", "6"))  # new profiles per video
-    profile_model: str = field(default_factory=lambda: _env("CLAIMCHECK_PROFILE_MODEL", "gemini-3.8-flash"))
+    profile_model: str = field(default_factory=lambda: _env("CLAIMCHECK_PROFILE_MODEL", "gemini-3.5-flash-lite"))
     profile_thinking: str = field(default_factory=lambda: _env("CLAIMCHECK_PROFILE_THINKING", "medium"))
     default_search_location: str = field(default_factory=lambda: _env("CLAIMCHECK_SEARCH_LOCATION", "in"))
     # YouTube API data older than this is refreshed (YouTube allows at most 30 days).
