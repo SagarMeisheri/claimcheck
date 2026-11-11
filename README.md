@@ -36,8 +36,9 @@ The tags and labels are **AI-assessed**: a model reads the video and the pages, 
 number and label rule afterwards. The model never writes the evidence label itself; code derives it from the claim-by-claim findings.
 
 > ClaimCheck is an AI tool, not a newsroom. Labels describe how an answer relates to the pages that were found, not
-> whether anyone is right. Earlier versions published verdicts and were reworked (see `REPORT-adoption-and-legal.md`);
-> old verdict data stays in the database but is hidden from the public (migration 0012).
+> whether anyone is right. Earlier versions published verdicts and were reworked into this;
+> old verdict data stays in the database but is hidden from the public (migration 0012). The design of that earlier
+> version is in [`docs/archive/`](docs/archive/REPORT-verdict-version.md).
 
 ```
 pipeline/   Python service: Google ADK agents + guardrails (Cloud Run)
@@ -192,7 +193,7 @@ live deploy, in particular that agentic video processing doesn't silently fall b
 show up in the cost.
 
 Before launch: have a lawyer review the content policy, the evidence labels, the reporting process and the IT Rules 2021
-obligations for digital publishers (see `REPORT-adoption-and-legal.md`).
+obligations for digital publishers.
 
 ## License
 
