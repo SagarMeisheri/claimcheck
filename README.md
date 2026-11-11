@@ -46,7 +46,9 @@ docs/       preview.png (the screenshot above) and archive/ (the superseded verd
 
 ## Run it locally
 
-Needs Docker, the Supabase CLI, Python 3.11+, Node 20+. There is no demo data: the app shows only videos you submit.
+Needs Docker, the Supabase CLI, Python 3.11+, Node 20+, and three API keys (Google AI Studio, Parallel, YouTube Data).
+There is no demo data: the app shows only videos you submit. **Step-by-step guide with the env files, costs and
+troubleshooting: [`docs/SETUP.md`](docs/SETUP.md).** The short version:
 
 ```bash
 supabase start && supabase db reset        # local Postgres with migrations 0001-0029 (ports 55321-55329)
