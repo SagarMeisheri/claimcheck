@@ -35,7 +35,7 @@ were answered, what the evidence found).*
 The tags and labels are **AI-assessed**: a model reads the video and the pages, and code checks every quote, page
 number and label rule afterwards. The model never writes the evidence label itself; code derives it from the claim-by-claim findings.
 
-> ClaimCheck is an AI tool, not a newsroom. Labels describe how an answer relates to the pages that were found, not
+> **For educational and portfolio use only** (see [Legal risks](#legal-risks-and-intended-use)). ClaimCheck is an AI tool, not a newsroom. Labels describe how an answer relates to the pages that were found, not
 > whether anyone is right. Earlier versions published verdicts and were reworked into this;
 > old verdict data stays in the database but is hidden from the public (migration 0012). The design of that earlier
 > version is in [`docs/archive/`](docs/archive/REPORT-verdict-version.md).
@@ -183,6 +183,42 @@ Model names, limits and prices are environment variables (`CLAIMCHECK_FAST_MODEL
 `CLAIMCHECK_BATCH_LOOKUPS`, `CLAIMCHECK_AUTO_SOURCES`, `CLAIMCHECK_RESEARCH_MAX_SEARCHES`,
 `CLAIMCHECK_VIDEO_PROCESSING=static` for the fallback, ...); see `pipeline/claimcheck/config.py` and `pipeline/.env.example`.
 
+## Legal risks and intended use
+
+**This project is for educational and portfolio use only.** It shows how to build an AI pipeline with guardrails. It is
+not a fact-checking service, a news product or professional advice, and nothing it shows should be relied on or
+republished as a statement of fact. It has never been deployed publicly; it runs on a developer's machine. The MIT
+license gives no warranty. This section is a plain-language list of the risks, not legal advice.
+
+**Why a public deployment would carry real risk**
+
+| Risk | What it means here |
+| --- | --- |
+| **AI is wrong sometimes** | Models can mishear, misattribute a statement to the wrong speaker, misread a page, or mislabel an answer (for example "Contradicted" when the pages use a different definition). Every tag and label is AI-assessed and can be wrong |
+| **Defamation and false light** | The app attaches labels, flags (such as "Self-serving") and profiles to named, real people. An inaccurate or unfair one about an identifiable person can be a legal claim in many countries. "Describes, never judges" is a design rule, not a legal shield |
+| **Personal data** | Speaker and show profiles are built from public web pages and name real people. Data-protection laws (for example GDPR in the EU, the DPDP Act in India) can apply to that, including rights to correct or erase |
+| **YouTube terms** | Use of video data is bound by the YouTube API Services Terms: official embedded player only, no downloading, data refreshed or deleted on schedule, and limits on monetising pages that show YouTube data. Videos and thumbnails belong to their creators |
+| **Copyright** | Pages are shown as short excerpts and links, and answers as short extracts with timestamps. Republishing or storing more than that could infringe |
+| **Platform rules** | If run publicly, India's IT Rules 2021 (digital publishers) and similar rules elsewhere may apply, and so would the terms of the Gemini, Parallel and YouTube APIs |
+| **Sensitive topics** | Politics, health and finance carry extra harm if an answer is mislabelled |
+
+**What the code does to reduce these**
+- Labels come from code over quote-backed findings, a quote has to appear on the page it is attributed to, and wording stays
+  descriptive. Every label is marked AI-assessed.
+- The content policy (`pipeline/claimcheck/policy.yaml`) redacts religious beliefs, claims about whole
+  communities, castes or religions, private individuals and minors, live court cases, disasters in the first 48 hours,
+  and satire. These are stored redacted and never shown.
+- Profiles cite the page each fact came from. Their private side (known positions, criticisms) is never sent to the browser.
+- YouTube data is refreshed every 25 days, videos that are no longer public are hidden, and playback uses YouTube's own
+  embedded player. Transcripts and video files are not stored.
+- Only salted IP hashes are kept (for rate limits) and deleted after 30 days. There are per-person rate limits and a
+  per-video cost cap.
+- "Report a problem" on every answer goes to a reviewer page, where an answer can be hidden for everyone.
+
+**If you want to run it for the public**, get advice from a lawyer in the countries you would serve first, and add a
+takedown and correction process, a privacy policy and terms of use. The `/method` and `/privacy` pages in the web app are
+starting points, not finished legal text.
+
 ## What has and hasn't been verified
 
 Verified: all pipeline tests; the migrations on a local Supabase; web typecheck and production build; the pages in a
@@ -192,8 +228,6 @@ Not run in production: there is no deployed instance yet; ClaimCheck runs locall
 live deploy, in particular that agentic video processing doesn't silently fall back to static, and that tool-use tokens
 show up in the cost.
 
-Before launch: have a lawyer review the content policy, the evidence labels, the reporting process and the IT Rules 2021
-obligations for digital publishers.
 
 ## License
 
