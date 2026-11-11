@@ -6,6 +6,7 @@ ADK session state must stay JSON-serialisable, so live objects (store, budget, g
 from __future__ import annotations
 
 import contextvars
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -26,6 +27,23 @@ def is_budget_error(e: BaseException) -> bool:
         e = e.__cause__ or e.__context__
         seen += 1
     return False
+
+
+def failure_reason(e: BaseException) -> str:
+    """What to tell the viewer when a run dies. The raw exception (with provider URLs and billing text) stays in the log."""
+    text, seen, cur = "", 0, e
+    while cur is not None and seen < 10:  # ADK wraps provider errors; the status code is somewhere down the chain
+        text += f" {type(cur).__name__} {cur}"
+        cur = cur.__cause__ or cur.__context__
+        seen += 1
+    low = text.lower()
+    if re.search(r"\b402\b", low) or ("resource_exhausted" in low and ("credit" in low or "billing" in low)):
+        return "The AI service is out of credits right now, so this video couldn't be read. Try again later."
+    if "resource_exhausted" in low or re.search(r"\b429\b", low) or "rate limit" in low or "quota" in low:
+        return "The AI service is busy or over its limit right now. Try again in a few minutes."
+    if "timeout" in low or "timed out" in low or "unavailable" in low or re.search(r"\b503\b", low):
+        return "The AI service didn't answer in time. Try again in a few minutes."
+    return f"Something went wrong while reading this video ({type(e).__name__}). Try again."
 
 
 @dataclass

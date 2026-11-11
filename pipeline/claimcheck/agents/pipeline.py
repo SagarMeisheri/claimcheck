@@ -32,7 +32,7 @@ from google.adk.runners import InMemoryRunner
 from google.genai import types
 
 from ..config import Settings, get_settings
-from ..context import Budget, EpisodeContext, is_budget_error, report_progress, set_context, set_step
+from ..context import Budget, EpisodeContext, failure_reason, is_budget_error, report_progress, set_context, set_step
 from ..guardrails.budget import BudgetPlugin
 from ..guardrails.input_checks import parse_video_id
 from ..policy import load_policy
@@ -203,9 +203,9 @@ async def run_episode(url: str, *, settings: Optional[Settings] = None, store: A
             await store.save_guardrail_events(episode_id, ec.events)
             return {"episode_id": episode_id, "status": "failed", "reason": reason}
         log.exception("episode %s failed", episode_id)
-        await store.update_episode(episode_id, {"status": "failed", "skip_reason": f"{type(e).__name__}: {e}"[:500]})
+        await store.update_episode(episode_id, {"status": "failed", "skip_reason": failure_reason(e)})
         await store.save_guardrail_events(episode_id, ec.events)
-        return {"episode_id": episode_id, "status": "failed", "reason": f"{type(e).__name__}: {e}"}
+        return {"episode_id": episode_id, "status": "failed", "reason": failure_reason(e)}
     finally:
         if auto is not None:
             await auto.cancel()  # only does anything if the run failed: nothing is left "searching"

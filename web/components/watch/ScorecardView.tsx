@@ -8,6 +8,7 @@ import type { Claim, EpisodeDetail, Section, SourcesMatch, StatementType } from 
 import { STATEMENT_TYPES, SEARCHING, TYPE_ORDER, breakdownParts, canCheckSources, hasSources, typeOf } from "@/lib/statements";
 import { clock } from "@/lib/format";
 import { CheckProgress } from "@/components/CheckProgress";
+import { FailedNotice } from "./FailedNotice";
 import { CheckAllSources } from "@/components/CheckAllSources";
 import { CheckedAt } from "@/components/CheckedAt";
 import { type CardPhase } from "./ClaimCard";
@@ -419,6 +420,7 @@ export function ScorecardView({ ep, initialT, autoplay, momentId, initialView, i
         {head("score-head-rail")}
 
         {checking && <CheckProgress videoId={ep.youtube_video_id} initialSteps={ep.progress?.steps ?? []} />}
+        {ep.status === "failed" && <FailedNotice videoId={ep.youtube_video_id} reason={ep.skip_reason ?? null} />}
 
         <ProfileTabs summary={ep.summary} sections={ep.sections ?? []} creator={ep.creator} speakers={ep.speakers} notes={ep.interaction?.description_notes ?? []}
                      steps={(ep.steps ?? ep.progress?.steps ?? []).filter((x) => x.status === "done" || x.status === "skipped")}
