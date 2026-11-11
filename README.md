@@ -4,6 +4,8 @@ Paste a YouTube link (any public, finished video) and ClaimCheck turns a podcast
 in minutes**: every question the host asked, the answer the guest gave, what the web says about that answer, and how
 each was put, so you can see at a glance who dodged, who is selling something, and which answers the sources contradict.
 
+**[Setup guide: run it locally](docs/SETUP.md)** · [How a video is analysed](#how-a-video-is-analysed) · [License: MIT](LICENSE)
+
 ![ClaimCheck video page: Q&A feed on the left, pinned player and podcast profile on the right](docs/preview.png)
 
 *A finished video. Left: the answers in the order they were given, each under its question, with the sources found and
