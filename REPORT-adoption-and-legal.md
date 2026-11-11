@@ -2,7 +2,7 @@
 
 # ClaimCheck: why it may struggle to get users, and the legal risks
 
-*Written 3 Nov 2026. Companion to `REPORT.md`. Based on web research (sources at the end) and the ClaimCheck code. This is research, not legal advice; the README already says a lawyer should review before launch, and this report gives that lawyer a list to work from.*
+*Written 3 Nov 2026. Companion to `docs/archive/REPORT-verdict-version.md`. Based on web research (sources at the end) and the ClaimCheck code. This is research, not legal advice; the README already says a lawyer should review before launch, and this report gives that lawyer a list to work from.*
 
 ---
 
@@ -49,7 +49,7 @@ These come from the code and product design, checked against the research above.
 6. **English only.** The site is `lang="en"` with no Hindi interface, and the extractor writes claims in English. Much of the seeded channel list (Aaj Tak, Lallantop, Ravish Kumar, Dhruv Rathee, Ajeet Bharti…) is Hindi-language.
 7. **No reason to come back.** There are no accounts or notifications. "Following" is saved only in one browser, so there's no habit loop.
 8. **Political channels and their fans will push back.** The seed list deliberately includes both government-supportive and critical commentators. Each side's supporters are likely to call the site biased whenever their side is flagged, which is the pattern Indian fact-checkers already face.
-9. **Hard to make money.** YouTube's API policy bans selling ads or sponsorships on any page showing YouTube API data, unless the page also has other independently valuable content (III.G.1.d). The site's pages are built around YouTube data. Each video also has real AI and search costs (see `REPORT.md`).
+9. **Hard to make money.** YouTube's API policy bans selling ads or sponsorships on any page showing YouTube API data, unless the page also has other independently valuable content (III.G.1.d). The site's pages are built around YouTube data. Each video also has real AI and search costs (see `docs/archive/REPORT-verdict-version.md`).
 
 **What tends to work instead** (from the research): putting fact-checks where people already are (inside the platform, broadcast partnerships, WhatsApp tiplines), shorter conversational formats, local languages, and crowd-based notes. A 2026 Nature Communications study found Community Notes on X reduced resharing of misleading posts.
 
@@ -68,7 +68,7 @@ Ranked by likelihood × impact.
 - **Specific weak points in the code:**
   - **Every statement shows a "verbatim" quote and a named speaker that are never checked.** `context_quote` and `speaker` come straight from Gemini (`prompts.py:62-64`), and nothing compares them with the real transcript. A made-up quote shown under a politician's name is a defamation risk even with no verdict.
   - **Tags describe people's speech.** "Loaded language" and "Hearsay" appear next to a named speaker's words. The prompt tells the model to stay neutral, but the tag itself is a characterisation.
-  - **Cache reuse** (see `REPORT.md`, finding 6) can attach another claim's verdict to a slightly different statement.
+  - **Cache reuse** (see `docs/archive/REPORT-verdict-version.md`, finding 6) can attach another claim's verdict to a slightly different statement.
   - **Memory-only True verdicts** from Verify all are published with no source.
   - **The share image** (`/api/og/[id]`) puts the verdict word in large type next to a channel name. It's built to spread beyond the site, and context gets lost.
 
@@ -118,7 +118,7 @@ Short verbatim quotes and summaries used for criticism and reporting current eve
 2. **Use prominent "AI-generated, may be wrong" labels** on every verdict and on the share image, plus a visible corrections log. Disclaimers mattered in *Walters v. OpenAI*.
 3. **Have a working complaints process**: a named grievance officer, an email address, and a 24 h / 15-day response, as the IT Rules require.
 4. **Pause political verdicts, or require review for them, during election periods**, and get specific advice on the silence period.
-5. **Drop memory-only True verdicts and fix cache reuse** (`REPORT.md` findings 4 and 6).
+5. **Drop memory-only True verdicts and fix cache reuse** (`docs/archive/REPORT-verdict-version.md` findings 4 and 6).
 6. **Comply with YouTube's terms**: a nightly job to refresh or delete YouTube metadata older than 30 days, and use YouTube's default playback speed.
 7. **Set up legal structure and insurance**: incorporate (don't run it personally), get media-liability insurance, and have a lawyer review the content policy, as the README already plans.
 
